@@ -66,7 +66,7 @@ Capture the installed CLI version and release artifact verification:
 devsecops --version | tee "${EVIDENCE_DIR}/release-install.txt"
 
 VERSION="${RELEASE_TAG#v}"
-BASE_URL="https://github.com/tidyOpposite/devsecops-serverless-aws-lambda/releases/download/${RELEASE_TAG}"
+BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${RELEASE_TAG}"
 WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
 
 curl -fsSLo "${EVIDENCE_DIR}/SHA256SUMS" "${BASE_URL}/SHA256SUMS"
