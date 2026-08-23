@@ -124,7 +124,7 @@ After the workflow finishes:
 ```bash
 VERSION="0.12.0"
 TAG="v${VERSION}"
-BASE_URL="https://github.com/tidyOpposite/devsecops-serverless-aws-lambda/releases/download/${TAG}"
+BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
 WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
 
 curl -fsSLO "${BASE_URL}/SHA256SUMS"
