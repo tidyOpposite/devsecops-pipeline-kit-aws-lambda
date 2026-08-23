@@ -28,7 +28,7 @@ The canonical `v0.8.0` package path is the GitHub Release wheel:
 
 ```bash
 python3.11 -m pipx install --python python3.11 \
-  "devsecops-pipeline-cli @ https://github.com/tidyOpposite/devsecops-serverless-aws-lambda/releases/download/v0.8.0/devsecops_pipeline_cli-0.8.0-py3-none-any.whl"
+  "devsecops-pipeline-cli @ https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/v0.8.0/devsecops_pipeline_cli-0.8.0-py3-none-any.whl"
 devsecops --version
 ```
 
@@ -40,7 +40,7 @@ For the latest-release install command, see
 ```bash
 VERSION="0.8.0"
 TAG="v${VERSION}"
-BASE_URL="https://github.com/tidyOpposite/devsecops-serverless-aws-lambda/releases/download/${TAG}"
+BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
 WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
 
 curl -fsSLO "${BASE_URL}/SHA256SUMS"
