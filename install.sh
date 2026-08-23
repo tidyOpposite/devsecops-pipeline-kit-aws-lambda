@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="${DEVSECOPS_INSTALL_REPO:-tidyOpposite/devsecops-serverless-aws-lambda}"
+REPO="${DEVSECOPS_INSTALL_REPO:-tidyOpposite/devsecops-pipeline-kit-aws-lambda}"
 COMMAND_NAME="devsecops"
 VERSION="${DEVSECOPS_VERSION:-latest}"
 PYTHON_OVERRIDE="${PYTHON:-}"
