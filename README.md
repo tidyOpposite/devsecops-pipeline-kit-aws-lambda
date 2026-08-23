@@ -138,7 +138,7 @@ Python 3.11, 3.12, or 3.13, verifies the release wheel against `SHA256SUMS`,
 installs into a private virtual environment, and writes a `devsecops` launcher:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-serverless-aws-lambda/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/main/install.sh | sh
 devsecops
 ```
 
@@ -271,7 +271,7 @@ auto-refreshes every `--interval` seconds.
 The core CLI remains dependency-free. To try the optional Rich/Textual UI:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-serverless-aws-lambda/main/install.sh | sh -s -- --with-tui
+curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/main/install.sh | sh -s -- --with-tui
 devsecops tui
 ```
 
