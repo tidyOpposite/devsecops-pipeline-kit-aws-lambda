@@ -1,6 +1,6 @@
 # Stability Contract
 
-Target release: `v0.12.0`.
+Target release: `v0.13.0`.
 
 This contract explains which `devsecops` surfaces are stable enough to script
 against before `v1.0.0`, which surfaces are compatibility aliases or

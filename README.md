@@ -63,6 +63,9 @@ devsecops inventory --format json
 
 ## Architecture
 
+The internal CLI module boundaries and dependency rules are documented in
+[CLI architecture](docs/cli-architecture.md).
+
 ```mermaid
 flowchart LR
   operator["Operator"] --> cli["DevSecOps CLI"]
@@ -117,7 +120,7 @@ flowchart LR
 
 ```text
 pyproject.toml                      Root Python package metadata for `pipx install .`
-cli/devsecops_cli/                  Installable CLI package and module entry point
+cli/devsecops_cli/                  Modular CLI application, domains, and provider adapters
 cli/tests/                          Focused CLI unit tests
 dist/devsecops/                     Ignored CLI-rendered helper artifacts
 .github/workflows/deploy.yml        CI, PR plan, production deploy, rollback, optional DAST
@@ -582,6 +585,7 @@ devsecops health --aws-sigv4
 * [Troubleshooting guide](docs/troubleshooting.md)
 * [Product roadmap](ROADMAP.md)
 * [Command inventory](docs/command-inventory.md)
+* [CLI architecture](docs/cli-architecture.md)
 * [Stability contract](docs/stability-contract.md)
 * [Generated artifacts](docs/generated-artifacts.md)
 * [First successful pipeline](docs/first-successful-pipeline.md)
@@ -596,6 +600,7 @@ devsecops health --aws-sigv4
 * [Upgrade guide](docs/upgrade-guide.md)
 * [Known limitations](docs/known-limitations.md)
 * [Changelog](CHANGELOG.md)
+* [v0.13.0 release notes](docs/release-v0.13.0.md)
 * [v0.12.0 release notes](docs/release-v0.12.0.md)
 * [v0.11.0 release notes](docs/release-v0.11.0.md)
 * [v0.8.0 release notes](docs/release-v0.8.0.md)

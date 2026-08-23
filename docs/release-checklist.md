@@ -1,6 +1,6 @@
 # Release Checklist
 
-Use this checklist for every `vX.Y.Z` release. Replace `0.12.0` and `v0.12.0`
+Use this checklist for every `vX.Y.Z` release. Replace `0.13.0` and `v0.13.0`
 with the target version.
 
 ## 1. Prepare The Version
@@ -11,7 +11,6 @@ git status --short --branch
 
 Update all version references together:
 
-* `cli/devsecops_cli/main.py`
 * `cli/devsecops_cli/__init__.py`
 * `pyproject.toml`
 * `cli/pyproject.toml`
@@ -20,7 +19,7 @@ Update all version references together:
 Update release documentation:
 
 * `CHANGELOG.md`
-* `docs/release-v0.12.0.md`
+* `docs/release-v0.13.0.md`
 * `README.md` release links when a new release note is added
 * `ROADMAP.md` milestone status when a milestone ships
 
@@ -79,10 +78,28 @@ The tag workflow repeats this build on GitHub Actions and publishes:
 
 ```bash
 git status --short
-git add \
+git add -- \
   install.sh \
   cli/devsecops_cli/main.py \
   cli/devsecops_cli/__init__.py \
+  cli/devsecops_cli/aws.py \
+  cli/devsecops_cli/completion.py \
+  cli/devsecops_cli/config.py \
+  cli/devsecops_cli/context.py \
+  cli/devsecops_cli/contracts.py \
+  cli/devsecops_cli/doctor.py \
+  cli/devsecops_cli/formatting.py \
+  cli/devsecops_cli/github.py \
+  cli/devsecops_cli/images.py \
+  cli/devsecops_cli/models.py \
+  cli/devsecops_cli/parser.py \
+  cli/devsecops_cli/paths.py \
+  cli/devsecops_cli/readiness.py \
+  cli/devsecops_cli/render.py \
+  cli/devsecops_cli/reports.py \
+  cli/devsecops_cli/snapshots.py \
+  cli/devsecops_cli/views.py \
+  cli/tests/test_architecture.py \
   pyproject.toml \
   cli/pyproject.toml \
   cli/tests/test_devsecops_cli.py \
@@ -92,6 +109,7 @@ git add \
   README.md \
   ROADMAP.md \
   docs/distribution.md \
+  docs/cli-architecture.md \
   docs/first-successful-pipeline.md \
   docs/generated-artifacts.md \
   docs/known-limitations.md \
@@ -100,9 +118,9 @@ git add \
   docs/stability-contract.md \
   docs/v1.0.0-release-candidate-checklist.md \
   docs/upgrade-guide.md \
-  docs/release-v0.12.0.md \
+  docs/release-v0.13.0.md \
   docs/command-inventory.md
-git commit -m "Release v0.12.0 release candidate hardening"
+git commit -m "Release v0.13.0 CLI architecture"
 ```
 
 ## 5. Tag And Push
@@ -110,9 +128,9 @@ git commit -m "Release v0.12.0 release candidate hardening"
 Create an annotated tag from the release commit:
 
 ```bash
-git tag -a v0.12.0 -m "Release v0.12.0"
+git tag -a v0.13.0 -m "Release v0.13.0"
 git push origin main
-git push origin v0.12.0
+git push origin v0.13.0
 ```
 
 The `Publish GitHub Release` workflow runs on `v*.*.*` tags.
@@ -122,7 +140,7 @@ The `Publish GitHub Release` workflow runs on `v*.*.*` tags.
 After the workflow finishes:
 
 ```bash
-VERSION="0.12.0"
+VERSION="0.13.0"
 TAG="v${VERSION}"
 BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
 WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
@@ -139,7 +157,7 @@ devsecops --version
 ```
 
 Confirm the release page includes the expected notes from
-`docs/release-v0.12.0.md`.
+`docs/release-v0.13.0.md`.
 
 ## 7. Production Evidence Gate
 
@@ -191,7 +209,7 @@ Confirm:
 
 ## 9. v1.0 Release Candidate Hardening Gate
 
-For `v0.12.0` release-candidate hardening and the final pre-`v1.0.0` release
+For `v0.13.0` release-candidate hardening and the final pre-`v1.0.0` release
 record, complete [v1.0.0 release candidate checklist](v1.0.0-release-candidate-checklist.md).
 
 At minimum, attach evidence for:

@@ -45,6 +45,9 @@ mind:
 4. Prefer small pull requests with clear rationale and validation notes.
 5. Preserve dependency-free core CLI flows unless a dependency is clearly worth
    the packaging and installation cost.
+6. Preserve the module boundaries in [CLI architecture](docs/cli-architecture.md):
+   domain and provider modules must not import `devsecops_cli.main`, and new
+   side effects should remain replaceable in tests.
 
 ## Local Checks
 

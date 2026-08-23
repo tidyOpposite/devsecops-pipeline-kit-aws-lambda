@@ -14,7 +14,7 @@ Lambda image, and protected `main` branch.
 Store live evidence outside Git because `dist/` is ignored:
 
 ```bash
-export RELEASE_TAG="${RELEASE_TAG:-v0.12.0}"
+export RELEASE_TAG="${RELEASE_TAG:-v0.13.0}"
 export EVIDENCE_ROOT="${EVIDENCE_ROOT:-dist/devsecops/production-evidence}"
 export EVIDENCE_DIR="${EVIDENCE_DIR:-${EVIDENCE_ROOT}/${RELEASE_TAG}}"
 
@@ -40,7 +40,7 @@ The final bundle should contain:
 
 Complete these before dispatching production:
 
-* Install a verified release package. For `v0.12.0`, use the release wheel and
+* Install a verified release package. For `v0.13.0`, use the release wheel and
   `SHA256SUMS` once published.
 * Use a real GitHub repository with `main` protected by pull requests and the
   required `Security and Terraform Validate` and `Terraform Plan` checks.

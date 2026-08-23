@@ -66,7 +66,7 @@ def project_requires_python(path: Path) -> str:
 
 class DevSecOpsCliTests(unittest.TestCase):
     def test_version_metadata_is_consistent(self) -> None:
-        self.assertEqual(cli.VERSION, "0.12.0")
+        self.assertEqual(cli.VERSION, "0.13.0")
         self.assertEqual(package.VERSION, cli.VERSION)
         self.assertEqual(package.__version__, cli.VERSION)
         self.assertEqual(project_version(ROOT_DIR / "pyproject.toml"), cli.VERSION)

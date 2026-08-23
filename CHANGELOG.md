@@ -7,6 +7,32 @@ semantic versioning.
 
 No changes yet.
 
+## v0.13.0 - 2026-08-23
+
+### Added
+
+* Documented CLI module boundaries, dependency direction, extension rules, and
+  side-effect boundaries in the new CLI architecture guide.
+* Architecture regression tests that reject internal dependency cycles and
+  reverse imports from domain or provider modules into `main.py`.
+
+### Changed
+
+* Split the monolithic CLI implementation into focused config, rendering,
+  snapshot, readiness, reporting, parser, workflow, and provider-adapter
+  modules while retaining the existing command and Python compatibility
+  surface.
+* Reduced `main.py` to the command orchestration and terminal UI layer.
+* Made AWS, GitHub, diagnostics, project-context, and snapshot workflows
+  replace external side effects through explicit adapter boundaries.
+* Centralized the runtime version in `devsecops_cli.__init__` so package and
+  feature modules cannot drift between releases.
+
+### Fixed
+
+* Removed the circular facade pattern where reusable modules imported symbols
+  back from `main.py` during package initialization.
+
 ## v0.12.0 - 2026-06-19
 
 ### Added
