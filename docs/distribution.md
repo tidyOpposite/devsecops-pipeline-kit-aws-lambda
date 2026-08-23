@@ -7,7 +7,7 @@ contract for released DevSecOps Pipeline Kit CLI versions.
 
 The canonical package path is GitHub Releases:
 
-* Repository: `tidyOpposite/devsecops-serverless-aws-lambda`
+* Repository: `tidyOpposite/devsecops-pipeline-kit-aws-lambda`
 * Release tag format: `vX.Y.Z`
 * Python package name: `devsecops-pipeline-cli`
 * Release assets produced by the current workflow:
@@ -28,7 +28,7 @@ installs into a private virtual environment, and writes a launcher to
 `~/.local/bin/devsecops`.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-serverless-aws-lambda/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/main/install.sh | sh
 devsecops --version
 devsecops
 ```
@@ -41,7 +41,7 @@ Pinned install with the release asset for tags that include `install.sh`:
 ```bash
 VERSION="0.12.0"
 TAG="v${VERSION}"
-BASE_URL="https://github.com/tidyOpposite/devsecops-serverless-aws-lambda/releases/download/${TAG}"
+BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
 
 curl -fsSL "${BASE_URL}/install.sh" | sh -s -- --version "${TAG}"
 devsecops --version
@@ -51,7 +51,7 @@ For tags published before `install.sh` was added as a release asset, use the
 main-branch bootstrapper with the same pinned version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-serverless-aws-lambda/main/install.sh | sh -s -- --version "${TAG}"
+curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/main/install.sh | sh -s -- --version "${TAG}"
 devsecops --version
 ```
 
@@ -72,7 +72,7 @@ Run the installer again, then validate local config before rendering or applying
 anything:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-serverless-aws-lambda/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/main/install.sh | sh
 devsecops --version
 devsecops config validate
 devsecops config diff
@@ -91,7 +91,7 @@ already standardize on `pipx`, install a pinned wheel URL directly:
 python3.11 -m pip install --user pipx
 python3.11 -m pipx ensurepath
 python3.11 -m pipx install --python python3.11 \
-  "devsecops-pipeline-cli @ https://github.com/tidyOpposite/devsecops-serverless-aws-lambda/releases/download/v0.12.0/devsecops_pipeline_cli-0.12.0-py3-none-any.whl"
+  "devsecops-pipeline-cli @ https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/v0.12.0/devsecops_pipeline_cli-0.12.0-py3-none-any.whl"
 devsecops --version
 ```
 
@@ -103,7 +103,7 @@ the installer, wheel, and source distribution.
 ```bash
 VERSION="0.12.0"
 TAG="v${VERSION}"
-BASE_URL="https://github.com/tidyOpposite/devsecops-serverless-aws-lambda/releases/download/${TAG}"
+BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
 WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
 
 curl -fsSLO "${BASE_URL}/SHA256SUMS"
