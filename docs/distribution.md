@@ -39,7 +39,7 @@ prints the absolute command path to run immediately.
 Pinned install with the release asset for tags that include `install.sh`:
 
 ```bash
-VERSION="0.13.0"
+VERSION="0.13.1"
 TAG="v${VERSION}"
 BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
 
@@ -91,7 +91,7 @@ already standardize on `pipx`, install a pinned wheel URL directly:
 python3.11 -m pip install --user pipx
 python3.11 -m pipx ensurepath
 python3.11 -m pipx install --python python3.11 \
-  "devsecops-pipeline-cli @ https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/v0.13.0/devsecops_pipeline_cli-0.13.0-py3-none-any.whl"
+  "devsecops-pipeline-cli @ https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/v0.13.1/devsecops_pipeline_cli-0.13.1-py3-none-any.whl"
 devsecops --version
 ```
 
@@ -101,7 +101,7 @@ Every GitHub Release produced by the current workflow includes `SHA256SUMS` for
 the installer, wheel, and source distribution.
 
 ```bash
-VERSION="0.13.0"
+VERSION="0.13.1"
 TAG="v${VERSION}"
 BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
 WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
@@ -158,7 +158,7 @@ devsecops completion bash --program devsecops-dev
 | --- | --- | --- |
 | Ubuntu Linux | Ubuntu 22.04 LTS and 24.04 LTS on x86_64 or arm64 | GitHub Actions runs package, unit, golden, install, Terraform fmt, init, and validate checks on Ubuntu. |
 | macOS | macOS 13 or newer on Intel or Apple Silicon | Supported for local CLI usage with Python, Terraform, AWS CLI, GitHub CLI, and shell completion installed by the operator. |
-| Windows | WSL2 Ubuntu is supported. Native Windows is not a `v0.13.0` release target. | Native PowerShell/CMD completion and path behavior are not release-gated. |
+| Windows | WSL2 Ubuntu is supported. Native Windows is not a `v0.13.1` release target. | Native PowerShell/CMD completion and path behavior are not release-gated. |
 | Python | 3.11, 3.12, 3.13, and 3.14 | CLI tests, packaging, and install smoke run in CI for all supported Python versions. Package metadata uses `requires-python = ">=3.11,<3.15"` so unsupported Python releases are not advertised as supported. |
 | Terraform CLI | 1.5.0 or newer | Terraform `required_version` is `>= 1.5.0`; CI validates with the pinned workflow version. |
 | GitHub CLI | 2.45.0 or newer | Required for `gh variable`, `gh secret`, `gh api`, and `gh run` workflows. Missing-tool behavior is tested; run `devsecops doctor github` in real repositories. |

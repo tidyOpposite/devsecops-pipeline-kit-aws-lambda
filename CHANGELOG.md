@@ -7,6 +7,20 @@ semantic versioning.
 
 No changes yet.
 
+## v0.13.1 - 2026-08-24
+
+### Added
+
+* Python 3.14 support across package metadata, the installer, CI, local release
+  validation, and the documented compatibility matrix.
+
+### Changed
+
+* The bootstrap installer now accepts and auto-detects Python 3.14 while
+  retaining support for Python 3.11, 3.12, and 3.13.
+* Package metadata now advertises Python 3.11 through 3.14 and excludes Python
+  3.15 and newer until they are covered by compatibility gates.
+
 ## v0.13.0 - 2026-08-23
 
 ### Added
