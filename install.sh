@@ -113,7 +113,7 @@ valid_python() {
   "$1" - <<'PY' >/dev/null 2>&1
 import sys
 major_minor = sys.version_info[:2]
-raise SystemExit(0 if (3, 11) <= major_minor < (3, 14) else 1)
+raise SystemExit(0 if (3, 11) <= major_minor < (3, 15) else 1)
 PY
 }
 
@@ -121,12 +121,12 @@ select_python() {
   if [ -n "$PYTHON_OVERRIDE" ]; then
     candidate_path="$(command_path "$PYTHON_OVERRIDE" || true)"
     [ -n "$candidate_path" ] || fail "Python interpreter not found: $PYTHON_OVERRIDE"
-    valid_python "$candidate_path" || fail "Python must be 3.11, 3.12, or 3.13: $candidate_path"
+    valid_python "$candidate_path" || fail "Python must be 3.11, 3.12, 3.13, or 3.14: $candidate_path"
     printf '%s\n' "$candidate_path"
     return 0
   fi
 
-  for candidate in python3.13 python3.12 python3.11 python3; do
+  for candidate in python3.14 python3.13 python3.12 python3.11 python3; do
     candidate_path="$(command_path "$candidate" || true)"
     if [ -n "$candidate_path" ] && valid_python "$candidate_path"; then
       printf '%s\n' "$candidate_path"
@@ -134,7 +134,7 @@ select_python() {
     fi
   done
 
-  fail "Python 3.11, 3.12, or 3.13 is required. Install one, then rerun this installer."
+  fail "Python 3.11, 3.12, 3.13, or 3.14 is required. Install one, then rerun this installer."
 }
 
 platform="$(uname -s 2>/dev/null || printf unknown)"

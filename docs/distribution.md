@@ -23,7 +23,7 @@ source tree.
 ## Install The Latest Release
 
 Use the installer for the shortest supported path. It finds Python 3.11, 3.12,
-or 3.13, downloads the latest release wheel, verifies it against `SHA256SUMS`,
+3.13, or 3.14, downloads the latest release wheel, verifies it against `SHA256SUMS`,
 installs into a private virtual environment, and writes a launcher to
 `~/.local/bin/devsecops`.
 
@@ -159,12 +159,12 @@ devsecops completion bash --program devsecops-dev
 | Ubuntu Linux | Ubuntu 22.04 LTS and 24.04 LTS on x86_64 or arm64 | GitHub Actions runs package, unit, golden, install, Terraform fmt, init, and validate checks on Ubuntu. |
 | macOS | macOS 13 or newer on Intel or Apple Silicon | Supported for local CLI usage with Python, Terraform, AWS CLI, GitHub CLI, and shell completion installed by the operator. |
 | Windows | WSL2 Ubuntu is supported. Native Windows is not a `v0.13.0` release target. | Native PowerShell/CMD completion and path behavior are not release-gated. |
-| Python | 3.11, 3.12, and 3.13 | CLI tests, packaging, and install smoke run in CI for all supported Python versions. Package metadata uses `requires-python = ">=3.11,<3.14"` so unsupported Python releases are not advertised as supported. |
+| Python | 3.11, 3.12, 3.13, and 3.14 | CLI tests, packaging, and install smoke run in CI for all supported Python versions. Package metadata uses `requires-python = ">=3.11,<3.15"` so unsupported Python releases are not advertised as supported. |
 | Terraform CLI | 1.5.0 or newer | Terraform `required_version` is `>= 1.5.0`; CI validates with the pinned workflow version. |
 | GitHub CLI | 2.45.0 or newer | Required for `gh variable`, `gh secret`, `gh api`, and `gh run` workflows. Missing-tool behavior is tested; run `devsecops doctor github` in real repositories. |
 | AWS CLI | 2.15.0 or newer | Required for AWS diagnostics, backend checks, ECR inspection, Lambda outputs, and health-adjacent workflows. AWS CLI v1 is not supported. |
 
 Newer Terraform, GitHub CLI, and AWS CLI versions may work, but they are not
 considered supported until this matrix or the CI release gate is updated.
-Python 3.14 and newer are intentionally outside the support matrix until CI and
+Python 3.15 and newer are intentionally outside the support matrix until CI and
 release smoke tests cover them.

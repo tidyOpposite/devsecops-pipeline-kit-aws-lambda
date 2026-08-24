@@ -137,7 +137,7 @@ docs/                               CLI-first security, scanner, cost, and troub
 ## Quick Start
 
 Install the latest published release with the installer. It finds
-Python 3.11, 3.12, or 3.13, verifies the release wheel against `SHA256SUMS`,
+Python 3.11, 3.12, 3.13, or 3.14, verifies the release wheel against `SHA256SUMS`,
 installs into a private virtual environment, and writes a `devsecops` launcher:
 
 ```bash

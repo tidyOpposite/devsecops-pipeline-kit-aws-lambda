@@ -76,11 +76,11 @@ class DevSecOpsCliTests(unittest.TestCase):
         distribution_doc = (ROOT_DIR / "docs/distribution.md").read_text(encoding="utf-8")
         readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
 
-        self.assertEqual(project_requires_python(ROOT_DIR / "pyproject.toml"), ">=3.11,<3.14")
-        self.assertEqual(project_requires_python(ROOT_DIR / "cli/pyproject.toml"), ">=3.11,<3.14")
-        self.assertIn("| Python | 3.11, 3.12, and 3.13 |", distribution_doc)
-        self.assertIn('requires-python = ">=3.11,<3.14"', distribution_doc)
-        self.assertIn("Python 3.11, 3.12, or 3.13", readme)
+        self.assertEqual(project_requires_python(ROOT_DIR / "pyproject.toml"), ">=3.11,<3.15")
+        self.assertEqual(project_requires_python(ROOT_DIR / "cli/pyproject.toml"), ">=3.11,<3.15")
+        self.assertIn("| Python | 3.11, 3.12, 3.13, and 3.14 |", distribution_doc)
+        self.assertIn('requires-python = ">=3.11,<3.15"', distribution_doc)
+        self.assertIn("Python 3.11, 3.12, 3.13, or 3.14", readme)
 
     def test_module_execution_does_not_emit_runtime_warning(self) -> None:
         env = os.environ.copy()

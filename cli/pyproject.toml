@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "devsecops-pipeline-cli"
 version = "0.13.0"
 description = "CLI for creating, validating, and rendering a secure AWS Lambda delivery pipeline."
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 license = "MIT"
 dependencies = []
 
