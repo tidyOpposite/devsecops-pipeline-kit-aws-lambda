@@ -51,6 +51,32 @@ def project_context(root: Path, cfg: dict[str, Any] | None = None) -> dict[str, 
     }
 
 
+def _next_action(
+    *,
+    action_id: str,
+    title: str,
+    why: str,
+    changes: str,
+    command: str,
+    docs: str,
+    context: dict[str, Any],
+    blocked: bool = True,
+) -> dict[str, Any]:
+    """Build the shared next-action contract used by every CLI surface."""
+
+    return {
+        "id": action_id,
+        "title": title,
+        "detail": why,
+        "why": why,
+        "changes": changes,
+        "command": command,
+        "docs": docs,
+        "blocked": blocked,
+        "context": context,
+    }
+
+
 def next_action(
     root: Path,
     cfg: dict[str, Any] | None = None,
@@ -78,119 +104,132 @@ def next_action(
     ]
 
     if context["missing_project_files"]:
-        return {
-            "id": "missing_project_files",
-            "title": "Missing project files",
-            "detail": "Run this command inside the DevSecOps pipeline repo/template or copy the required Terraform and GitHub workflow files.",
-            "command": "Use the DevSecOps pipeline repository/template, then rerun `devsecops next`.",
-            "docs": "docs/troubleshooting.md#project-files-are-missing",
-            "context": context,
-        }
+        return _next_action(
+            action_id="missing_project_files",
+            title="Required project files are missing",
+            why="The CLI needs the Terraform modules and GitHub workflows from the DevSecOps pipeline repository.",
+            changes="No files will be changed; switch to a complete project checkout before continuing.",
+            command="cd <devsecops-pipeline-repository>",
+            docs="docs/troubleshooting.md#project-files-are-missing",
+            context=context,
+        )
     if not context["config_exists"]:
-        return {
-            "id": "missing_config",
-            "title": "Create local source config",
-            "detail": f"{CONFIG_FILE} is missing.",
-            "command": "devsecops config new --preset balanced",
-            "docs": "docs/first-successful-pipeline.md",
-            "context": context,
-        }
+        return _next_action(
+            action_id="missing_config",
+            title="Local source configuration is missing",
+            why=f"{CONFIG_FILE} is the source of truth for rendering and readiness checks.",
+            changes=f"Creates {CONFIG_FILE} from the balanced preset; GitHub and AWS are not changed.",
+            command="devsecops config new --preset balanced",
+            docs="docs/first-successful-pipeline.md",
+            context=context,
+        )
     if validation_failures:
-        return {
-            "id": "missing_config",
-            "title": "Fix invalid config",
-            "detail": f"{len(validation_failures)} invalid config setting(s) block the pipeline.",
-            "command": "devsecops config validate",
-            "docs": "docs/troubleshooting.md#config-validation-fails",
-            "context": context,
-        }
+        return _next_action(
+            action_id="missing_config",
+            title="Local source configuration is invalid",
+            why=f"{len(validation_failures)} invalid config setting(s) block rendering and deployment.",
+            changes="Nothing is changed automatically; validation identifies the settings that must be corrected.",
+            command="devsecops config validate",
+            docs="docs/troubleshooting.md#config-validation-fails",
+            context=context,
+        )
     image_uri = str(cfg.get("lambda_image_uri", ""))
     if not image_uri or not is_immutable_image(image_uri):
-        return {
-            "id": "missing_image",
-            "title": "Set immutable Lambda image",
-            "detail": "Production deploy requires an immutable Lambda container image URI.",
-            "command": "devsecops preflight --image-uri <immutable-ecr-image-uri> && devsecops config set lambda_image_uri <immutable-ecr-image-uri> --render",
-            "docs": "docs/bring-your-own-image.md",
-            "context": context,
-        }
+        return _next_action(
+            action_id="missing_image",
+            title="An immutable Lambda image is not configured",
+            why="Production deployment requires a prebuilt Lambda container image identified by an immutable tag or digest.",
+            changes="Stores the image URI in local config and regenerates CLI-owned Terraform and GitHub helper artifacts.",
+            command="devsecops config set lambda_image_uri <immutable-ecr-image-uri> --render",
+            docs="docs/bring-your-own-image.md",
+            context=context,
+        )
     backend_bucket = str(cfg["backend"]["bucket"])
     if not backend_bucket or backend_bucket.startswith("replace-with"):
-        return {
-            "id": "missing_backend",
-            "title": "Configure Terraform backend",
-            "detail": "Set a real S3 backend bucket before GitHub/AWS production setup.",
-            "command": "devsecops config set backend.bucket <state-bucket> --render",
-            "docs": "docs/first-successful-pipeline.md#4-configure-terraform-backend",
-            "context": context,
-        }
+        return _next_action(
+            action_id="missing_backend",
+            title="The Terraform backend bucket is not configured",
+            why="A real S3 bucket is required for shared, locked Terraform state before production setup.",
+            changes="Updates the local backend bucket setting and regenerates CLI-owned helper artifacts.",
+            command="devsecops config set backend.bucket <state-bucket> --render",
+            docs="docs/first-successful-pipeline.md#4-configure-terraform-backend",
+            context=context,
+        )
     if validation_policy_gaps:
-        return {
-            "id": "missing_config",
-            "title": "Close production policy gaps",
-            "detail": f"{len(validation_policy_gaps)} production policy gap(s) remain.",
-            "command": "devsecops config validate --strict",
-            "docs": "docs/troubleshooting.md#config-validation-fails",
-            "context": context,
-        }
+        return _next_action(
+            action_id="missing_config",
+            title="Production security policy gaps remain",
+            why=f"{len(validation_policy_gaps)} policy gap(s) prevent the configuration from meeting the production posture.",
+            changes="Nothing is changed automatically; strict validation lists every policy setting that needs attention.",
+            command="devsecops config validate --strict",
+            docs="docs/troubleshooting.md#config-validation-fails",
+            context=context,
+        )
     if not context["generated_tfvars"] or not context["generated_github_setup"]:
-        return {
-            "id": "missing_github_setup",
-            "title": "Prepare GitHub setup",
-            "detail": "Render helper artifacts before configuring repository variables/secrets with GitHub CLI.",
-            "command": "devsecops render && devsecops github setup --write",
-            "docs": "docs/first-successful-pipeline.md#5-configure-github-repository-settings",
-            "context": context,
-        }
+        return _next_action(
+            action_id="missing_github_setup",
+            title="Generated deployment helpers are missing",
+            why="Terraform inputs and the GitHub setup script must be rendered from the validated local configuration.",
+            changes="Creates or updates only CLI-owned files under terraform/ and dist/devsecops/.",
+            command="devsecops render",
+            docs="docs/first-successful-pipeline.md#5-configure-github-repository-settings",
+            context=context,
+        )
     github_checks = github_checks_fn(root, cfg)
     github_gaps = [check for check in github_checks if check.scored and check.status != "OK"]
     if github_gaps:
-        return {
-            "id": "missing_github_setup",
-            "title": "Complete GitHub setup",
-            "detail": f"{len(github_gaps)} GitHub setup check(s) still need attention.",
-            "command": "devsecops doctor github --strict && devsecops github setup --apply --deploy-role-arn <arn> --plan-role-arn <arn>",
-            "docs": "docs/first-successful-pipeline.md#5-configure-github-repository-settings",
-            "context": context,
-        }
+        return _next_action(
+            action_id="missing_github_setup",
+            title="GitHub repository setup is incomplete",
+            why=f"{len(github_gaps)} required GitHub authentication, variable, secret, or repository check(s) are not ready.",
+            changes="Applies the safe repository variables and role secrets supplied on the command line.",
+            command="devsecops github setup --apply --deploy-role-arn <arn> --plan-role-arn <arn>",
+            docs="docs/first-successful-pipeline.md#5-configure-github-repository-settings",
+            context=context,
+        )
     if not command_exists_fn("aws"):
-        return {
-            "id": "missing_aws_evidence",
-            "title": "Install or configure AWS CLI",
-            "detail": "AWS evidence cannot be collected until AWS CLI is installed and authenticated.",
-            "command": "aws sts get-caller-identity && devsecops doctor aws --environment prod --strict",
-            "docs": "docs/troubleshooting.md#aws-doctor-cannot-inspect-resources",
-            "context": context,
-        }
+        return _next_action(
+            action_id="missing_aws_evidence",
+            title="AWS CLI is not available",
+            why="The CLI cannot verify AWS identity or deployed resources without the AWS CLI.",
+            changes="No project or cloud resources are changed; the command only verifies the active AWS identity after installation.",
+            command="aws sts get-caller-identity",
+            docs="docs/troubleshooting.md#aws-doctor-cannot-inspect-resources",
+            context=context,
+        )
     aws_checks = aws_checks_fn(root, cfg, env_name="prod")
     aws_identity = next((check for check in aws_checks if check.name == "AWS identity"), None)
     if aws_identity is not None and aws_identity.status != "OK":
-        return {
-            "id": "missing_aws_evidence",
-            "title": "Collect AWS identity evidence",
-            "detail": "AWS CLI is installed, but account evidence is not available yet.",
-            "command": "aws sts get-caller-identity && devsecops doctor aws --environment prod --strict",
-            "docs": "docs/troubleshooting.md#aws-doctor-cannot-inspect-resources",
-            "context": context,
-        }
+        return _next_action(
+            action_id="missing_aws_evidence",
+            title="AWS identity is not available",
+            why="The active account and role must be verified before inspecting or changing production resources.",
+            changes="No resources are changed; the command prints the identity associated with the current AWS credentials.",
+            command="aws sts get-caller-identity",
+            docs="docs/troubleshooting.md#aws-doctor-cannot-inspect-resources",
+            context=context,
+        )
     deployed_gaps = [check for check in aws_checks if check.scored and check.status != "OK"]
     if deployed_gaps:
-        return {
-            "id": "ready_for_deploy",
-            "title": "Ready for deploy dispatch",
-            "detail": "Local setup is ready enough to start or inspect the production workflow; deployed AWS evidence is not complete yet.",
-            "command": "gh workflow run \"Secure Serverless DevSecOps Pipeline\" --ref main -f mode=deploy -f environment=prod",
-            "docs": "docs/first-successful-pipeline.md#7-run-the-production-workflow-dispatch",
-            "context": context,
-        }
-    return {
-        "id": "ready_for_release_evidence",
-        "title": "Ready for release evidence",
-        "detail": "Local config, project files, generated artifacts, GitHub tooling, and AWS deployed evidence are ready for RC collection.",
-        "command": "devsecops evidence collect --rc",
-        "docs": "docs/v1.0.0-release-candidate-checklist.md",
-        "context": context,
-    }
+        return _next_action(
+            action_id="ready_for_deploy",
+            title="Production deployment evidence is missing",
+            why="Local and GitHub setup is ready, but deployed AWS resources still need to be created or verified.",
+            changes="Triggers the protected production GitHub Actions workflow, which may apply Terraform changes in AWS.",
+            command='gh workflow run "Secure Serverless DevSecOps Pipeline" --ref main -f mode=deploy -f environment=prod',
+            docs="docs/first-successful-pipeline.md#7-run-the-production-workflow-dispatch",
+            context=context,
+        )
+    return _next_action(
+        action_id="ready_for_release_evidence",
+        title="Production readiness is complete",
+        why="Local config, generated artifacts, GitHub setup, and deployed AWS evidence are ready for release-candidate collection.",
+        changes="Writes a local release-candidate evidence bundle under dist/devsecops/; GitHub and AWS are not changed.",
+        command="devsecops evidence collect --rc",
+        docs="docs/v1.0.0-release-candidate-checklist.md",
+        context=context,
+        blocked=False,
+    )
 
 
 __all__ = ["missing_project_files", "next_action", "project_context"]

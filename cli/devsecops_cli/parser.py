@@ -26,16 +26,13 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
               Terraform, GitHub Actions, AWS, and scanners are transparent execution layers.
 
             Recommended first run:
-              devsecops config new --preset balanced
-              devsecops config validate
-              devsecops config diff
-              devsecops next
-              devsecops dry-run --image-uri <immutable-ecr-image-uri>
-              devsecops render
+              devsecops
+              devsecops start --preset balanced --yes
               devsecops readiness
-              devsecops readiness --strict --format compact
-              devsecops report
-              devsecops report --format json
+              devsecops dry-run --image-uri <immutable-ecr-image-uri>
+
+            `devsecops` without arguments shows compact status and one next action.
+            Human-readable commands finish with the same recommended next step.
 
             Docs:
               README.md
@@ -67,7 +64,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
         dest="command",
         metavar="{menu,config,next,start,criteria,dry-run,preflight,health,doctor,aws,render,github,terraform,snapshot,readiness,report,dashboard,explain,inventory,evidence,completion}",
     )
-    parser.set_defaults(func=handlers.cmd_menu)
+    parser.set_defaults(func=handlers.cmd_overview)
 
     menu_parser = subparsers.add_parser("menu", help="Open the interactive main menu.")
     menu_parser.set_defaults(func=handlers.cmd_menu)

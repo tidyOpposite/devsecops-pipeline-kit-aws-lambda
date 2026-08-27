@@ -26,7 +26,7 @@ devsecops inventory --status stable --format markdown
 
 | Workflow | Stable commands and flags |
 | --- | --- |
-| First success | `devsecops next --format`, `devsecops start --preset --render --yes`, `devsecops config new --preset --force --render`, `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops dry-run --preset --image-uri --environment`, `devsecops preflight --image-uri --environment --format` |
+| First success | `devsecops`, `devsecops next --format`, `devsecops start --preset --render --yes`, `devsecops config new --preset --force --render`, `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops dry-run --preset --image-uri --environment`, `devsecops preflight --image-uri --environment --format` |
 | Diagnostics | `devsecops readiness --deep --strict --format`, `devsecops doctor local --deep --strict --format`, `devsecops doctor github --strict --format`, `devsecops doctor aws --environment --strict --format`, `devsecops doctor branch --branch --strict --format`, `devsecops doctor actions --limit --strict --format`, `devsecops doctor all --deep --branch --environment --strict --format` |
 | Rendering and reports | `devsecops render --dry-run`, `devsecops report --deep --format --output --print`, `devsecops evidence collect --rc --output`, `devsecops criteria --format --evidence-dir --strict` |
 | GitHub setup | `devsecops github setup --write --apply --deploy-role-arn --plan-role-arn --snyk-token`, `devsecops github status --limit --strict --format`, `devsecops github branch --branch --strict --format`, `devsecops github doctor --strict --format` |
@@ -55,7 +55,7 @@ without a deprecation window.
 | `snapshots` | `devsecops snapshot list --format json` | `kind`, `schema_version`, `snapshots` |
 | `snapshot` | `devsecops snapshot show --format json` | `kind`, `schema_version`, `snapshot` |
 | `audit-evidence` | `devsecops report --format json` | `kind`, `schema_version`, `cli_version`, `project`, `readiness`, `config_validation`, `controls` |
-| `next-action` | `devsecops next --format json` | `kind`, `schema_version`, `context`, `action`, `command`, `detail`, `docs` |
+| `next-action` | `devsecops next --format json` | `kind`, `schema_version`, `context`, `action`, `command`, `detail`, `why`, `changes`, `blocked`, `docs` |
 | `release-candidate-evidence` | `devsecops evidence collect --rc` | `kind`, `schema_version`, `generated_at`, `output_dir`, `files`, `terraform_validate` |
 | `v1-criteria` | `devsecops criteria --format json` | `kind`, `schema_version`, `cli_version`, `stable_ready`, `criteria`, `stable_release_gates`, `next_actions` |
 | `control-catalog` | `devsecops controls --format json` | `kind`, `schema_version`, `controls` |

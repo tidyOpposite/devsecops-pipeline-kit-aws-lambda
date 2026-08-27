@@ -27,23 +27,24 @@ devsecops inventory --format json
 The README quick start and `devsecops --help` use the same first-run path:
 
 ```bash
-devsecops next
-devsecops config new --preset balanced
-devsecops config validate
-devsecops config diff
-devsecops dry-run --image-uri <immutable-ecr-image-uri>
-devsecops render
+devsecops
+devsecops start --preset balanced --yes
 devsecops readiness
-devsecops report
+devsecops dry-run --image-uri <immutable-ecr-image-uri>
 ```
 
-Use `devsecops menu` when you prefer the interactive path.
+`devsecops` without arguments prints compact readiness status and the single
+next action selected by the same algorithm used by `next`, dashboard, and the
+interactive menu. Human-readable commands repeat that recommendation after
+their primary output; machine-readable output remains clean. Use
+`devsecops menu` when you prefer the interactive path.
 
 ## Commands
 
 | Command | Status | Scope | Notes |
 | --- | --- | --- | --- |
-| `devsecops menu` | Stable | Interactive CLI | Opens the main terminal menu. Default command when no subcommand is passed. |
+| `devsecops` | Stable | First success | Prints compact readiness status and the shared next action without prompting. |
+| `devsecops menu` | Stable | Interactive CLI | Opens the interactive terminal menu explicitly. |
 | `devsecops next` | Stable | First success | Shows the single next action for the current project context. Supports `--format human\|json`. |
 | `devsecops start` | Stable | First success | Guided safe onboarding flow. Creates config only after confirmation or `--yes`; never mutates GitHub or AWS. |
 | `devsecops init` | Alias | Configuration | Legacy interactive entry point for creating or updating `.devsecops-pipeline.toml`. Prefer `devsecops config new` for clean non-interactive config generation. |

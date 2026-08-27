@@ -12,12 +12,20 @@ from .paths import AUDIT_REPORT, DIST_DIR, GENERATED_TFVARS, RC_EVIDENCE_DIR
 CONTRACT_SCHEMA_VERSION = 1
 COMMAND_CONTRACTS: list[dict[str, Any]] = [
     {
+        "command": "devsecops",
+        "status": "stable",
+        "scope": "first-success",
+        "stable_flags": [],
+        "formats": ["human"],
+        "notes": "Shows compact readiness status and the shared next action without prompting.",
+    },
+    {
         "command": "devsecops menu",
         "status": "stable",
         "scope": "interactive",
         "stable_flags": [],
         "formats": ["human"],
-        "notes": "Default command when no subcommand is passed.",
+        "notes": "Opens the interactive terminal menu explicitly.",
     },
     {
         "command": "devsecops next",
@@ -608,7 +616,7 @@ JSON_OUTPUT_CONTRACTS = [
     {
         "kind": "next-action",
         "commands": ["devsecops next --format json"],
-        "stable_keys": ["kind", "schema_version", "context", "action", "command", "detail", "docs"],
+        "stable_keys": ["kind", "schema_version", "context", "action", "command", "detail", "why", "changes", "blocked", "docs"],
     },
     {
         "kind": "release-candidate-evidence",

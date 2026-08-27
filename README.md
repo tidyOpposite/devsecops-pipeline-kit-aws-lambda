@@ -81,6 +81,12 @@ Expected result:
 - `dry-run` validates the immutable image URI and previews the files that would
   be generated. It does not write files and does not require AWS credentials.
 
+Run `devsecops` without arguments at any time to see compact readiness status
+and the single recommended next command. Human-readable commands finish with
+the same recommendation, so the setup path can be resumed without memorizing
+the workflow. Machine-readable JSON, TOML, Markdown, generated shell, and
+completion output remains unchanged for scripts.
+
 Continue with the step-by-step
 [First successful pipeline](docs/first-successful-pipeline.md) guide when you
 are ready to connect GitHub and AWS.
@@ -207,6 +213,11 @@ a private virtual environment, and writes a `devsecops` launcher. See
 [Distribution and compatibility](docs/distribution.md) for pinned installs,
 manual wheel installation, upgrades, shell completion, checksum verification,
 and supported tool versions.
+
+`devsecops next` is the shared decision mechanism behind the default status
+screen, dashboard, interactive menu, and command postludes. Every blocker is
+shown with what is missing, why it matters, what the recommended command will
+change, the exact next command, and a documentation link.
 
 The main menu uses section-style navigation: selecting an item clears the
 terminal, opens that section, and returns to the main menu when you press

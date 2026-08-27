@@ -667,6 +667,24 @@ def next_action(root: Path, cfg: dict[str, Any] | None = None) -> dict[str, Any]
     )
 
 
+def next_action_lines(action: dict[str, Any]) -> list[str]:
+    state_label = "What is not ready" if action.get("blocked", True) else "Current state"
+    return [
+        f"{state_label}: {action['title']}",
+        f"Why it matters: {action['why']}",
+        f"What will change: {action['changes']}",
+        f"Next command: {action['command']}",
+        f"Docs: {action['docs']}",
+    ]
+
+
+def print_next_action(action: dict[str, Any], title: str = "Next Action") -> None:
+    lines = next_action_lines(action)
+    draw_box(title, lines[:3])
+    print(lines[3])
+    print(lines[4])
+
+
 
 def compact_error(result: subprocess.CompletedProcess[str]) -> str:
     output = (result.stderr or result.stdout or "").strip().splitlines()
@@ -932,6 +950,7 @@ def render_dashboard(root: Path, mode: str = "full", clear: bool = False) -> Non
     full = mode == "full"
     cfg = load_config(root)
     checks = collect_dashboard_checks(root, cfg, mode=mode)
+    action = next_action(root, cfg)
     header(cfg)
     print()
     for line in menu_status(root, cfg, checks=checks):
@@ -939,7 +958,7 @@ def render_dashboard(root: Path, mode: str = "full", clear: bool = False) -> Non
     print()
     print_readiness_breakdown(checks, compact=not full)
     print()
-    print_gap_summary(checks, limit=3 if full else 2)
+    print_next_action(action)
     if not full:
         print()
         print(info("Run `devsecops dashboard --mode full` for GitHub/AWS/deep Terraform diagnostics."))
@@ -968,6 +987,13 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
         time.sleep(interval)
 
 
+def cmd_overview(args: argparse.Namespace) -> int:
+    """Show compact status and the single recommended next action."""
+
+    render_dashboard(repo_root(), mode="compact", clear=False)
+    return EXIT_OK
+
+
 def render_rich_tui(root: Path) -> bool:
     try:
         from rich.console import Console
@@ -978,6 +1004,7 @@ def render_rich_tui(root: Path) -> bool:
 
     cfg = load_config(root)
     checks = collect_dashboard_checks(root, cfg, mode="compact")
+    action = next_action(root, cfg)
     console = Console()
     console.print(
         Panel(
@@ -1004,6 +1031,7 @@ def render_rich_tui(root: Path) -> bool:
         console.print(gap_table)
     else:
         console.print(Panel("All scored readiness checks are OK.", title="Readiness Details"))
+    console.print(Panel("\n".join(next_action_lines(action)), title="Next Action"))
     console.print("[dim]Full Textual mode is intentionally deferred until doctor workflows stabilize.[/dim]")
     return True
 
@@ -1032,21 +1060,15 @@ def cmd_next(args: argparse.Namespace) -> int:
                 "action": action["id"],
                 "title": action["title"],
                 "detail": action["detail"],
+                "why": action["why"],
+                "changes": action["changes"],
                 "command": action["command"],
                 "docs": action["docs"],
+                "blocked": action["blocked"],
             }
         )
         return EXIT_OK
-    draw_box(
-        "Next Action",
-        [
-            f"Context: {action['context']['stage']}",
-            f"Action: {action['id']}",
-            str(action["detail"]),
-            f"Command: {action['command']}",
-            f"Docs: {action['docs']}",
-        ],
-    )
+    print_next_action(action)
     return EXIT_OK
 
 
@@ -2425,7 +2447,6 @@ def cmd_config(args: argparse.Namespace) -> int:
 
 def menu_status(root: Path, cfg: dict[str, Any], checks: list[Check] | None = None) -> list[str]:
     checks = checks or collect_checks(root, cfg, deep=False)
-    score = readiness_score(checks)
     breakdown_score = overall_breakdown_score(checks)
     image_state = "configured" if cfg["lambda_image_uri"] else "missing"
     backend_state = "configured" if not cfg["backend"]["bucket"].startswith("replace-with") else "missing"
@@ -2436,7 +2457,7 @@ def menu_status(root: Path, cfg: dict[str, Any], checks: list[Check] | None = No
         f"Backend: {backend_state}",
         f"Health check: {'enabled' if cfg['enable_http_validation'] else 'disabled'}",
         f"DAST: {'enabled' if cfg['enable_dast'] else 'disabled'}",
-        "Readiness: " + progress_bar(breakdown_score) + f"  scored: {score}%  [i] details",
+        "Readiness: " + progress_bar(breakdown_score) + "  [i] details",
     ]
 
 
@@ -2462,26 +2483,18 @@ def print_menu_section(title: str, items: list[tuple[str, str]], columns: int = 
 def print_main_menu(root: Path) -> None:
     cfg = load_config(root)
     checks = collect_checks(root, cfg, deep=False)
-    score = readiness_score(checks)
     breakdown_score = overall_breakdown_score(checks)
+    action = next_action(root, cfg)
     image_state = "set" if cfg["lambda_image_uri"] else "missing"
     backend_state = "set" if not cfg["backend"]["bucket"].startswith("replace-with") else "missing"
     health_state = "on" if cfg["enable_http_validation"] else "off"
     dast_state = "on" if cfg["enable_dast"] else "off"
-    gaps = readiness_gap_rows(checks)[:2]
 
     print(color("DevSecOps Pipeline Kit", Style.BOLD))
-    print(f"{cfg['project_name']} | {cfg['aws_region']} | readiness {breakdown_score}% | scored {score}%")
+    print(f"{cfg['project_name']} | {cfg['aws_region']} | readiness {breakdown_score}%")
     print(f"image: {image_state} | backend: {backend_state} | health: {health_state} | DAST: {dast_state}")
-    if gaps:
-        print()
-        print(info("Top gaps:"))
-        for name, status, _detail, action in gaps:
-            label = fail(status) if status == "FAIL" else warn(status)
-            print(f"  {label} {name}: {action}")
-    else:
-        print()
-        print(ok("Top gaps: none."))
+    print()
+    print_next_action(action)
     print()
     print_menu_section(
         "Core",
@@ -2914,12 +2927,39 @@ def build_parser() -> argparse.ArgumentParser:
     return _parser_builder.build_parser(sys.modules[__name__])
 
 
+def should_print_next_postlude(args: argparse.Namespace) -> bool:
+    """Keep machine-readable output clean while guiding every human flow."""
+
+    command = getattr(args, "command", None)
+    if command is None or command in {"menu", "next", "start", "dashboard", "tui", "completion"}:
+        return False
+    if getattr(args, "format", None) in {"json", "markdown", "toml"}:
+        return False
+    if command == "config" and getattr(args, "config_command", "show") in {"show", "schema"}:
+        return False
+    github_setup_output = command in {"github-setup", "gh-setup"} or (
+        command == "github" and getattr(args, "github_command", None) == "setup"
+    )
+    if github_setup_output and not getattr(args, "write", False) and not getattr(args, "apply", False):
+        return False
+    return True
+
+
+def print_next_postlude() -> None:
+    root = repo_root()
+    print()
+    print_next_action(next_action(root, load_config(root)), title="Recommended Next Step")
+
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        return int(args.func(args))
+        result = int(args.func(args))
+        if should_print_next_postlude(args):
+            print_next_postlude()
+        return result
     except KeyboardInterrupt:
         print()
         print(warn("Interrupted."))

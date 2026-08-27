@@ -520,14 +520,11 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         help_text = cli.build_parser().format_help()
         self.assertIn("CLI product", help_text)
         self.assertIn("Product boundary:", help_text)
-        self.assertIn("devsecops config new --preset balanced", help_text)
+        self.assertIn("devsecops start --preset balanced --yes", help_text)
         self.assertIn("devsecops dry-run --image-uri <immutable-ecr-image-uri>", help_text)
-        self.assertIn("devsecops config validate", help_text)
-        self.assertIn("devsecops config diff", help_text)
-        self.assertIn("devsecops next", help_text)
-        self.assertIn("devsecops render", help_text)
         self.assertIn("devsecops readiness", help_text)
-        self.assertIn("devsecops report", help_text)
+        self.assertIn("without arguments shows compact status and one next action", help_text)
+        self.assertIn("Human-readable commands finish with the same recommended next step", help_text)
         self.assertIn("devsecops inventory --format json", help_text)
         self.assertIn("Stability contract:", help_text)
         self.assertIn("docs/command-inventory.md", help_text)
@@ -708,6 +705,72 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertEqual(payload["kind"], "next-action")
         self.assertEqual(payload["action"], "missing_project_files")
         self.assertIn("context", payload)
+        self.assertIn("why", payload)
+        self.assertIn("changes", payload)
+        self.assertTrue(payload["blocked"])
+
+    def test_no_arguments_show_status_and_shared_next_action_without_prompting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with patch.object(cli, "repo_root", return_value=root), patch("builtins.input") as prompt:
+                buffer = io.StringIO()
+                with redirect_stdout(buffer):
+                    result = cli.main([])
+
+        output = buffer.getvalue()
+        self.assertEqual(result, cli.EXIT_OK)
+        prompt.assert_not_called()
+        self.assertIn("Readiness", output)
+        self.assertIn("Next Action", output)
+        self.assertIn("What is not ready:", output)
+        self.assertIn("Why it matters:", output)
+        self.assertIn("What will change:", output)
+        self.assertIn("Next command:", output)
+        self.assertIn("Docs:", output)
+
+    def test_human_commands_get_one_next_postlude_but_json_stays_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with patch.object(cli, "repo_root", return_value=root):
+                human_buffer = io.StringIO()
+                with redirect_stdout(human_buffer):
+                    self.assertEqual(cli.main(["explain", "oidc"]), cli.EXIT_OK)
+
+                json_buffer = io.StringIO()
+                with redirect_stdout(json_buffer):
+                    self.assertEqual(cli.main(["next", "--format", "json"]), cli.EXIT_OK)
+
+                shell_buffer = io.StringIO()
+                with redirect_stdout(shell_buffer):
+                    self.assertEqual(cli.main(["github", "setup"]), cli.EXIT_OK)
+
+        self.assertEqual(human_buffer.getvalue().count("Recommended Next Step"), 1)
+        payload = json.loads(json_buffer.getvalue())
+        self.assertEqual(payload["kind"], "next-action")
+        self.assertIn("#!/usr/bin/env bash", shell_buffer.getvalue())
+        self.assertNotIn("Recommended Next Step", shell_buffer.getvalue())
+
+    def test_menu_dashboard_and_next_use_the_same_action_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_required_project_files(root)
+            cfg = cli.default_config()
+            cli.write_config(root, cfg)
+            expected_command = cli.next_action(root, cfg)["command"]
+
+            next_buffer = io.StringIO()
+            menu_buffer = io.StringIO()
+            dashboard_buffer = io.StringIO()
+            with patch.object(cli, "repo_root", return_value=root):
+                with redirect_stdout(next_buffer):
+                    self.assertEqual(cli.main(["next"]), cli.EXIT_OK)
+                with redirect_stdout(menu_buffer):
+                    cli.print_main_menu(root)
+                with redirect_stdout(dashboard_buffer):
+                    cli.render_dashboard(root, mode="compact")
+
+        for output in [next_buffer.getvalue(), menu_buffer.getvalue(), dashboard_buffer.getvalue()]:
+            self.assertIn(f"Next command: {expected_command}", output)
 
     def test_start_creates_config_with_yes_after_project_files_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
