@@ -66,7 +66,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     )
     parser.set_defaults(func=handlers.cmd_overview)
 
-    menu_parser = subparsers.add_parser("menu", help="Open the interactive main menu.")
+    menu_parser = subparsers.add_parser("menu", help="Open the simplified interactive product menu.")
     menu_parser.set_defaults(func=handlers.cmd_menu)
 
     dashboard_parser = subparsers.add_parser("dashboard", help="Print a one-screen pipeline dashboard.")

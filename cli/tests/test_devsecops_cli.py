@@ -1974,7 +1974,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             self.assertEqual(cli.list_snapshots(root), [])
             self.assertIn("Configuration cancelled", buffer.getvalue())
 
-    def test_menu_status_and_main_menu_include_grouped_navigation_sections(self) -> None:
+    def test_main_menu_has_only_six_product_sections_and_exit(self) -> None:
         cfg = cli.default_config()
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1986,34 +1986,127 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             with redirect_stdout(buffer):
                 cli.print_main_menu(root)
             output = buffer.getvalue()
+            readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
         self.assertTrue(any("[i] details" in line for line in status))
-        for section in ["Core", "Config", "Diagnostics", "Terraform", "GitHub", "Reference", "Recovery"]:
-            self.assertIn(section, output)
-        self.assertIn("[1] Dashboard", output)
-        self.assertIn("[2] Render artifacts", output)
-        self.assertIn("[3] Readiness report", output)
-        self.assertIn("[4] Interactive setup", output)
-        self.assertIn("[5] Apply preset", output)
-        self.assertIn("[6] Show config", output)
-        self.assertIn("[7] Composer", output)
-        self.assertIn("[8] Doctor local/deep", output)
-        self.assertIn("[9] AWS doctor", output)
-        self.assertIn("[10] Readiness details", output)
-        self.assertIn("[11] Bootstrap plan", output)
-        self.assertIn("[12] Terraform plan", output)
-        self.assertIn("[13] Setup commands", output)
-        self.assertIn("[14] GitHub doctor", output)
-        self.assertIn("[15] Actions status", output)
-        self.assertIn("[16] Security controls", output)
-        self.assertIn("[17] Environment table", output)
-        self.assertIn("[18] Snapshots / rollback", output)
-        self.assertIn("[0] Exit", output)
-        self.assertNotIn("[i] Readiness details", output)
+        expected_items = [
+            "[1] Continue setup",
+            "[2] Status",
+            "[3] Deploy",
+            "[4] Diagnose problems",
+            "[5] Configuration",
+            "[6] Advanced",
+            "[0] Exit",
+        ]
+        self.assertEqual(
+            cli.MAIN_MENU_ITEMS,
+            [
+                ("1", "Continue setup"),
+                ("2", "Status"),
+                ("3", "Deploy"),
+                ("4", "Diagnose problems"),
+                ("5", "Configuration"),
+                ("6", "Advanced"),
+                ("0", "Exit"),
+            ],
+        )
+        self.assertEqual([line for line in output.splitlines() if line.startswith("[")], expected_items)
+        for item in expected_items:
+            self.assertIn(item, readme)
+        for old_item in ["[7] Composer", "[12] Terraform plan", "[18] Snapshots / rollback"]:
+            self.assertNotIn(old_item, output)
 
-        item_lines = [line for line in output.splitlines() if line.startswith("  [")]
-        self.assertTrue(item_lines)
-        for line in item_lines:
-            self.assertLessEqual(line.count("["), 3)
+    def test_advanced_menu_keeps_technical_capabilities_nested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            buffer = io.StringIO()
+            with patch("builtins.input", return_value="0"), redirect_stdout(buffer):
+                cli.menu_advanced_hub(root)
+
+        output = buffer.getvalue()
+        for item in [
+            "[1] Deployment files",
+            "[2] Terraform",
+            "[3] GitHub connection",
+            "[4] Reports and release evidence",
+            "[5] Security and reference",
+            "[6] Snapshots / local rollback",
+        ]:
+            self.assertIn(item, output)
+
+    def test_advanced_menu_routes_every_nested_capability(self) -> None:
+        route_patches = {
+            "1": "menu_generated_files_hub",
+            "2": "menu_terraform_hub",
+            "3": "menu_github_hub",
+            "4": "menu_reports_hub",
+            "5": "menu_reference_hub",
+            "6": "menu_rollback_section",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            for choice, handler_name in route_patches.items():
+                with self.subTest(choice=choice), patch.object(cli, handler_name) as handler, patch(
+                    "builtins.input", return_value=choice
+                ), redirect_stdout(io.StringIO()):
+                    cli.menu_advanced_hub(root)
+                    handler.assert_called_once()
+
+    def test_deploy_menu_explains_side_effects_without_starting_workflow(self) -> None:
+        buffer = io.StringIO()
+        with patch("builtins.input", side_effect=["2", ""]), redirect_stdout(buffer):
+            cli.menu_deploy_hub()
+
+        output = buffer.getvalue()
+        self.assertIn("Opening this section does not change GitHub or AWS", output)
+        self.assertIn("does not execute it automatically", output)
+        self.assertIn(cli.PRODUCTION_DEPLOY_COMMAND, output)
+
+    def test_main_menu_routes_each_primary_choice(self) -> None:
+        route_patches = {
+            "1": "menu_continue_setup",
+            "3": "menu_deploy_hub",
+            "4": "menu_doctor_hub",
+            "5": "menu_config_hub",
+            "6": "menu_advanced_hub",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            for choice, handler_name in route_patches.items():
+                with self.subTest(choice=choice), patch.object(cli, "repo_root", return_value=root), patch.object(
+                    cli, "print_main_menu"
+                ), patch.object(cli, "clear_screen"), patch.object(cli, handler_name) as handler, patch(
+                    "builtins.input", side_effect=[choice, "0"]
+                ):
+                    self.assertEqual(cli.cmd_menu(argparse.Namespace()), cli.EXIT_OK)
+                    handler.assert_called_once()
+
+            with patch.object(cli, "repo_root", return_value=root), patch.object(
+                cli, "print_main_menu"
+            ), patch.object(cli, "clear_screen"), patch.object(cli, "open_menu_section") as section, patch(
+                "builtins.input", side_effect=["2", "0"]
+            ):
+                self.assertEqual(cli.cmd_menu(argparse.Namespace()), cli.EXIT_OK)
+                self.assertEqual(section.call_args.args[0], "Status")
+
+    def test_continue_setup_routes_from_the_shared_next_action(self) -> None:
+        cases = [
+            ("missing_project_files", "cd /project", "blocked"),
+            ("missing_config", "devsecops config new --preset balanced", "start"),
+            ("missing_config", "devsecops config validate", "configuration"),
+            ("missing_image", "devsecops config set lambda_image_uri value", "configuration"),
+            ("missing_backend", "devsecops config set backend.bucket value", "configuration"),
+            ("missing_github_setup", "devsecops render", "deployment_files"),
+            ("missing_github_setup", "devsecops github setup --apply", "github"),
+            ("missing_aws_evidence", "aws sts get-caller-identity", "diagnostics"),
+            ("ready_for_deploy", cli.PRODUCTION_DEPLOY_COMMAND, "deploy"),
+            ("ready_for_release_evidence", "devsecops evidence collect --rc", "reports"),
+        ]
+        for action_id, command, expected in cases:
+            with self.subTest(action_id=action_id, command=command):
+                self.assertEqual(
+                    cli.continue_setup_destination({"id": action_id, "command": command}),
+                    expected,
+                )
 
     def test_pause_for_menu_clears_screen_before_returning_to_main_menu(self) -> None:
         with patch("builtins.input", return_value=""), patch.object(cli, "clear_screen") as clear_screen:

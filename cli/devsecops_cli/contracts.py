@@ -25,7 +25,7 @@ COMMAND_CONTRACTS: list[dict[str, Any]] = [
         "scope": "interactive",
         "stable_flags": [],
         "formats": ["human"],
-        "notes": "Opens the interactive terminal menu explicitly.",
+        "notes": "Opens six product sections while keeping technical tools in nested hubs.",
     },
     {
         "command": "devsecops next",

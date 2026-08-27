@@ -226,6 +226,26 @@ Enter. Input sections can be cancelled by typing `b`, `back`, `0`, or
 readiness indicator includes an `[i] details` shortcut that shows the checks
 blocking 100% readiness and the concrete fix for each one.
 
+```text
+[1] Continue setup
+[2] Status
+[3] Deploy
+[4] Diagnose problems
+[5] Configuration
+[6] Advanced
+[0] Exit
+```
+
+The main path stays focused on setup, validation, and deployment. Generated
+deployment files, Terraform, GitHub setup, reports and release evidence,
+security reference, and local snapshots remain available under `Advanced`.
+`Continue setup` uses the shared `next` decision and opens the relevant
+Configuration, Deployment files, GitHub, Diagnostics, Deploy, or Reports
+section instead of forcing the user to find it manually.
+The `Deploy` section keeps readiness, the protected workflow command, recent
+runs, AWS outputs, health validation, and rollback guidance together. Merely
+opening it never starts a deployment.
+
 For development, install the local package in editable mode:
 
 ```bash

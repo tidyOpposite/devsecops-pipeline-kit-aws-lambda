@@ -13,6 +13,11 @@ from .images import is_immutable_image
 from .models import Check
 from .paths import CONFIG_FILE, DIST_DIR, GENERATED_TFVARS, REQUIRED_PROJECT_FILES
 
+PRODUCTION_DEPLOY_COMMAND = (
+    'gh workflow run "Secure Serverless DevSecOps Pipeline" '
+    "--ref main -f mode=deploy -f environment=prod"
+)
+
 
 def _command_exists(name: str) -> bool:
     return shutil.which(name) is not None
@@ -216,7 +221,7 @@ def next_action(
             title="Production deployment evidence is missing",
             why="Local and GitHub setup is ready, but deployed AWS resources still need to be created or verified.",
             changes="Triggers the protected production GitHub Actions workflow, which may apply Terraform changes in AWS.",
-            command='gh workflow run "Secure Serverless DevSecOps Pipeline" --ref main -f mode=deploy -f environment=prod',
+            command=PRODUCTION_DEPLOY_COMMAND,
             docs="docs/first-successful-pipeline.md#7-run-the-production-workflow-dispatch",
             context=context,
         )
@@ -232,4 +237,4 @@ def next_action(
     )
 
 
-__all__ = ["missing_project_files", "next_action", "project_context"]
+__all__ = ["PRODUCTION_DEPLOY_COMMAND", "missing_project_files", "next_action", "project_context"]

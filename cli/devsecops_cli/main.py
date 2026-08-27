@@ -27,7 +27,7 @@ from . import github as _github_adapter
 from . import parser as _parser_builder
 from . import context as _project_context_service
 from . import snapshots as _snapshot_store
-from .context import missing_project_files, project_context
+from .context import PRODUCTION_DEPLOY_COMMAND, missing_project_files, project_context
 from .aws import (
     aws_sigv4_headers,
     aws_sigv4_signing_key,
@@ -2473,11 +2473,15 @@ def pause_for_menu() -> None:
     clear_screen()
 
 
-def print_menu_section(title: str, items: list[tuple[str, str]], columns: int = 3) -> None:
-    print(info(title))
-    for index in range(0, len(items), columns):
-        cells = [f"[{key}] {label}" for key, label in items[index : index + columns]]
-        print("  " + "  ".join(cell.ljust(28) for cell in cells))
+MAIN_MENU_ITEMS = [
+    ("1", "Continue setup"),
+    ("2", "Status"),
+    ("3", "Deploy"),
+    ("4", "Diagnose problems"),
+    ("5", "Configuration"),
+    ("6", "Advanced"),
+    ("0", "Exit"),
+]
 
 
 def print_main_menu(root: Path) -> None:
@@ -2496,60 +2500,8 @@ def print_main_menu(root: Path) -> None:
     print()
     print_next_action(action)
     print()
-    print_menu_section(
-        "Core",
-        [
-            ("1", "Dashboard"),
-            ("2", "Render artifacts"),
-            ("3", "Readiness report"),
-        ],
-    )
-    print_menu_section(
-        "Config",
-        [
-            ("4", "Interactive setup"),
-            ("5", "Apply preset"),
-            ("6", "Show config"),
-            ("7", "Composer"),
-        ],
-    )
-    print_menu_section(
-        "Diagnostics",
-        [
-            ("8", "Doctor local/deep"),
-            ("9", "AWS doctor"),
-            ("10", "Readiness details"),
-        ],
-    )
-    print_menu_section(
-        "Terraform",
-        [
-            ("11", "Bootstrap plan"),
-            ("12", "Terraform plan"),
-        ],
-    )
-    print_menu_section(
-        "GitHub",
-        [
-            ("13", "Setup commands"),
-            ("14", "GitHub doctor"),
-            ("15", "Actions status"),
-        ],
-    )
-    print_menu_section(
-        "Reference",
-        [
-            ("16", "Security controls"),
-            ("17", "Environment table"),
-        ],
-    )
-    print_menu_section(
-        "Recovery",
-        [
-            ("18", "Snapshots / rollback"),
-            ("0", "Exit"),
-        ],
-    )
+    for key, label in MAIN_MENU_ITEMS:
+        print(f"[{key}] {label}")
 
 
 def open_menu_section(title: str, handler: Any, *args: Any) -> None:
@@ -2560,68 +2512,140 @@ def open_menu_section(title: str, handler: Any, *args: Any) -> None:
     pause_for_menu()
 
 
-def menu_plan_section(root: Path) -> None:
-    clear_screen()
-    draw_box("Run Terraform Plan", ["Enter an environment or type `b`, `back`, `0`, or `cancel` to return."])
-    env_name = prompt_text("Environment", "dev")
-    if is_cancel_input(env_name):
-        return
-    run_plan(root, env_name)
-    pause_for_menu()
+def continue_setup_destination(action: dict[str, Any]) -> str:
+    action_id = str(action["id"])
+    command = str(action["command"])
+    if action_id == "missing_project_files":
+        return "blocked"
+    if action_id == "missing_config" and command.startswith("devsecops config new"):
+        return "start"
+    if action_id in {"missing_config", "missing_image", "missing_backend"}:
+        return "configuration"
+    if action_id == "missing_github_setup" and command == "devsecops render":
+        return "deployment_files"
+    if action_id == "missing_github_setup":
+        return "github"
+    if action_id == "missing_aws_evidence":
+        return "diagnostics"
+    if action_id == "ready_for_deploy":
+        return "deploy"
+    if action_id == "ready_for_release_evidence":
+        return "reports"
+    return "blocked"
 
 
-def menu_preset_section() -> None:
-    clear_screen()
-    draw_box("Apply Preset", [f"Choose one of: {', '.join(PRESET_ORDER)}. Type `b`, `back`, `0`, or `cancel` to return."])
-    preset_name = prompt_text("Preset", "balanced")
-    if is_cancel_input(preset_name):
-        return
-    cmd_preset(argparse.Namespace(command="apply", name=preset_name, render=False))
-    pause_for_menu()
+def menu_continue_setup(root: Path) -> None:
+    action = next_action(root, load_config(root))
+    destination = continue_setup_destination(action)
+    if destination == "start":
+        clear_screen()
+        cmd_start(argparse.Namespace(preset="balanced", render=False, yes=False))
+        pause_for_menu()
+    elif destination == "configuration":
+        menu_config_hub(root)
+    elif destination == "deployment_files":
+        menu_generated_files_hub(root)
+    elif destination == "github":
+        menu_github_hub()
+    elif destination == "diagnostics":
+        menu_doctor_hub(root)
+    elif destination == "deploy":
+        menu_deploy_hub()
+    elif destination == "reports":
+        menu_reports_hub()
+    else:
+        clear_screen()
+        print_next_action(action)
+        pause_for_menu()
 
 
-def menu_config_section(root: Path) -> None:
+def show_production_deploy_command() -> None:
+    draw_box(
+        "Start Production Deployment",
+        [
+            "Production deployment is delegated to the protected GitHub Actions workflow.",
+            "Running the command below may apply Terraform changes to the prod AWS environment.",
+            "This menu displays the command but does not execute it automatically.",
+        ],
+    )
+    print("Deploy command:")
+    print(f"  {PRODUCTION_DEPLOY_COMMAND}")
+    print("Docs: docs/first-successful-pipeline.md#7-run-the-production-workflow-dispatch")
+
+
+def menu_deploy_hub() -> None:
     clear_screen()
     draw_box(
-        "Configure Pipeline",
+        "Deploy",
         [
-            "Press Enter to keep the current value.",
-            "Type `b`, `back`, `0`, or `cancel` at any prompt to return without saving.",
+            "Validate readiness, start the protected workflow, or inspect the deployed service.",
+            "Opening this section does not change GitHub or AWS.",
         ],
     )
     print()
-    run_init(root, force=True, defaults=False, allow_cancel=True)
+    print("[1] Check deployment readiness")
+    print("[2] Show production deploy command")
+    print("[3] Recent deployment runs")
+    print("[4] Deployed AWS resources")
+    print("[5] Validate production health endpoint")
+    print("[6] Deployment rollback guidance")
+    print("[0] Back")
+    choice = input("\nChoose: ").strip().lower()
+    if choice in MENU_CANCEL_INPUTS:
+        clear_screen()
+        return
+    print()
+    if choice == "1":
+        cmd_readiness(argparse.Namespace(deep=True, strict=False, format="human"))
+    elif choice == "2":
+        show_production_deploy_command()
+    elif choice == "3":
+        cmd_gh_status(argparse.Namespace(strict=False, limit=8, format="human"))
+    elif choice == "4":
+        cmd_aws_outputs(argparse.Namespace(environment="prod", strict=False, format="human"))
+    elif choice == "5":
+        cmd_health(
+            argparse.Namespace(
+                url=None,
+                timeout=20,
+                aws_sigv4=True,
+                aws_region=None,
+                format="human",
+            )
+        )
+    elif choice == "6":
+        cmd_explain(argparse.Namespace(topic="rollback"))
+    else:
+        print(warn("Unknown option."))
     pause_for_menu()
 
 
 def menu_config_hub(root: Path) -> None:
     clear_screen()
-    draw_box("Config", ["Create, inspect, validate, and edit local source config."])
+    draw_box("Configuration", ["Create, inspect, validate, and edit local source configuration."])
     print()
-    print("[1] New clean config (balanced)")
-    print("[2] Interactive setup")
+    print("[1] Guided configuration")
+    print("[2] Create clean balanced config")
     print("[3] Show config")
     print("[4] Validate config")
-    print("[5] Diff config")
-    print("[6] Set config value")
-    print("[7] Apply preset")
-    print("[8] Pipeline composer")
+    print("[5] Edit one setting")
+    print("[6] Apply policy preset")
+    print("[7] Compare config with canonical form")
+    print("[8] Advanced control composer")
     print("[0] Back")
     choice = input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
     if choice == "1":
-        cmd_config(argparse.Namespace(config_command="new", preset="balanced", force=False, render=False))
-    elif choice == "2":
         run_init(root, force=True, defaults=False, allow_cancel=True)
+    elif choice == "2":
+        cmd_config(argparse.Namespace(config_command="new", preset="balanced", force=False, render=False))
     elif choice == "3":
         cmd_config(argparse.Namespace(config_command="show", format="toml"))
     elif choice == "4":
         cmd_config(argparse.Namespace(config_command="validate", format="human"))
     elif choice == "5":
-        cmd_config(argparse.Namespace(config_command="diff", preset=None, exit_code=False))
-    elif choice == "6":
         key = prompt_text("Config key", "backend.bucket")
         if is_cancel_input(key):
             clear_screen()
@@ -2632,12 +2656,14 @@ def menu_config_hub(root: Path) -> None:
             return
         render_after = prompt_bool("Render artifacts after update", False)
         cmd_config(argparse.Namespace(config_command="set", key=key, value=value, render=render_after))
-    elif choice == "7":
+    elif choice == "6":
         preset_name = prompt_text("Preset", "balanced")
         if is_cancel_input(preset_name):
             clear_screen()
             return
         cmd_preset(argparse.Namespace(command="apply", name=preset_name, render=False))
+    elif choice == "7":
+        cmd_config(argparse.Namespace(config_command="diff", preset=None, exit_code=False))
     elif choice == "8":
         cmd_compose(argparse.Namespace())
     else:
@@ -2653,15 +2679,15 @@ def menu_readiness_section(root: Path) -> None:
 
 def menu_doctor_hub(root: Path) -> None:
     clear_screen()
-    draw_box("Doctor", ["Run local, GitHub, AWS, branch, Actions, or full diagnostics."])
+    draw_box("Diagnose Problems", ["Check local setup, integrations, deployments, or all areas together."])
     print()
-    print("[1] Local")
-    print("[2] Local deep")
-    print("[3] GitHub")
-    print("[4] AWS prod")
-    print("[5] Actions status")
-    print("[6] Branch protection")
-    print("[7] All compact")
+    print("[1] Local setup")
+    print("[2] Local setup with Terraform/AWS checks")
+    print("[3] GitHub connection")
+    print("[4] AWS connection and prod resources")
+    print("[5] Recent deployment runs")
+    print("[6] Main branch protection")
+    print("[7] All checks (compact)")
     print("[0] Back")
     choice = input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
@@ -2727,12 +2753,12 @@ def menu_terraform_hub(root: Path) -> None:
 
 def menu_github_hub() -> None:
     clear_screen()
-    draw_box("GitHub", ["Prepare repository settings and inspect GitHub readiness."])
+    draw_box("GitHub Connection", ["Prepare repository settings and inspect GitHub readiness."])
     print()
-    print("[1] Setup commands")
-    print("[2] GitHub doctor")
-    print("[3] Actions status")
-    print("[4] Branch protection")
+    print("[1] Repository setup commands")
+    print("[2] Diagnose GitHub connection")
+    print("[3] Recent workflow runs")
+    print("[4] Main branch protection")
     print("[0] Back")
     choice = input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
@@ -2787,6 +2813,95 @@ def menu_reference_hub() -> None:
     else:
         print(warn("Unknown option."))
     pause_for_menu()
+
+
+def menu_generated_files_hub(root: Path) -> None:
+    clear_screen()
+    draw_box(
+        "Deployment Files",
+        [
+            "Generate CLI-owned Terraform inputs and GitHub setup helpers from local config.",
+            "Preview is read-only; generate creates a local snapshot before replacing managed files.",
+        ],
+    )
+    print()
+    print("[1] Preview generated file changes")
+    print("[2] Generate deployment files")
+    print("[0] Back")
+    choice = input("\nChoose: ").strip().lower()
+    if choice in MENU_CANCEL_INPUTS:
+        clear_screen()
+        return
+    if choice == "1":
+        run_render(root, dry_run=True)
+    elif choice == "2":
+        run_render(root)
+    else:
+        print(warn("Unknown option."))
+    pause_for_menu()
+
+
+def menu_reports_hub() -> None:
+    clear_screen()
+    draw_box(
+        "Reports and Release Evidence",
+        ["Export readiness evidence or collect maintainer-focused release artifacts."],
+    )
+    print()
+    print("[1] Export readiness report (Markdown)")
+    print("[2] Export audit report (JSON)")
+    print("[3] Collect release-candidate evidence")
+    print("[4] Check stable-release criteria")
+    print("[0] Back")
+    choice = input("\nChoose: ").strip().lower()
+    if choice in MENU_CANCEL_INPUTS:
+        clear_screen()
+        return
+    if choice == "1":
+        cmd_report(argparse.Namespace(deep=False, format="markdown", output=None, print=False))
+    elif choice == "2":
+        cmd_report(argparse.Namespace(deep=False, format="json", output=None, print=False))
+    elif choice == "3":
+        cmd_evidence(argparse.Namespace(evidence_command="collect", rc=True, output=None))
+    elif choice == "4":
+        cmd_criteria(argparse.Namespace(evidence_dir=None, format="human", strict=False))
+    else:
+        print(warn("Unknown option."))
+    pause_for_menu()
+
+
+def menu_advanced_hub(root: Path) -> None:
+    clear_screen()
+    draw_box(
+        "Advanced",
+        ["Direct access to generated files, providers, evidence, controls, and recovery."],
+    )
+    print()
+    print("[1] Deployment files")
+    print("[2] Terraform")
+    print("[3] GitHub connection")
+    print("[4] Reports and release evidence")
+    print("[5] Security and reference")
+    print("[6] Snapshots / local rollback")
+    print("[0] Back")
+    choice = input("\nChoose: ").strip().lower()
+    if choice in MENU_CANCEL_INPUTS:
+        clear_screen()
+        return
+    if choice == "1":
+        menu_generated_files_hub(root)
+    elif choice == "2":
+        menu_terraform_hub(root)
+    elif choice == "3":
+        menu_github_hub()
+    elif choice == "4":
+        menu_reports_hub()
+    elif choice == "5":
+        menu_reference_hub()
+    elif choice == "6":
+        menu_rollback_section(root)
+    else:
+        print(warn("Unknown option."))
 
 
 def menu_rollback_section(root: Path) -> None:
@@ -2846,73 +2961,34 @@ def cmd_menu(args: argparse.Namespace) -> int:
     while True:
         clear_screen()
         print_main_menu(root)
-        choice = input("\nChoose: ").strip()
-        normalized_choice = choice.lower()
-        if normalized_choice in {"10", "i", "info", "readiness", "?"}:
+        choice = input("\nChoose: ").strip().lower()
+        if choice in {"1", "continue", "setup", "next"}:
+            menu_continue_setup(root)
+        elif choice in {"2", "status", "dashboard", "d"}:
+            open_menu_section("Status", cmd_dashboard, argparse.Namespace(mode="compact", watch=False, interval=5))
+        elif choice in {"i", "info", "readiness", "?"}:
             menu_readiness_section(root)
-        elif normalized_choice in {"d", "1", "dashboard"}:
-            open_menu_section("Dashboard", cmd_dashboard, argparse.Namespace(mode="full", watch=False, interval=5))
-        elif normalized_choice in {"c", "config"}:
-            menu_config_hub(root)
-        elif choice == "2":
-            open_menu_section("Render Config", run_render, root)
-        elif normalized_choice in {"o", "doctor"}:
+        elif choice in {"3", "deploy"}:
+            menu_deploy_hub()
+        elif choice in {"4", "diagnose", "doctor", "o"}:
             menu_doctor_hub(root)
-        elif choice == "3":
-            open_menu_section("Export Readiness Report", cmd_report, argparse.Namespace(deep=False, output=None, print=False))
-        elif normalized_choice in {"r", "render"}:
-            open_menu_section("Render Config", run_render, root)
-        elif choice == "4":
-            menu_config_section(root)
-        elif normalized_choice in {"t", "terraform"}:
+        elif choice in {"5", "config", "configuration", "c"}:
+            menu_config_hub(root)
+        elif choice in {"6", "advanced", "a"}:
+            menu_advanced_hub(root)
+        elif choice in {"t", "terraform"}:
             menu_terraform_hub(root)
-        elif choice == "5":
-            menu_preset_section()
-        elif choice == "6":
-            open_menu_section("Show Config", cmd_config, argparse.Namespace())
-        elif normalized_choice in {"h", "help", "reference"}:
-            menu_reference_hub()
-        elif choice == "7":
-            open_menu_section("Pipeline Composer", cmd_compose, argparse.Namespace())
-        elif choice == "8":
-            open_menu_section("Validate Environment", cmd_doctor, argparse.Namespace(deep=True, strict=False))
-        elif choice == "9":
-            open_menu_section("AWS Doctor", cmd_aws_doctor, argparse.Namespace(environment="prod", strict=False))
-        elif choice == "11":
-            open_menu_section("Bootstrap Backend Plan", cmd_bootstrap, argparse.Namespace(apply=False))
-        elif choice == "12":
-            menu_plan_section(root)
-        elif normalized_choice in {"g", "github"}:
+        elif choice in {"g", "github"}:
             menu_github_hub()
-        elif choice == "13":
-            open_menu_section(
-                "GitHub Setup Commands",
-                cmd_github_setup,
-                argparse.Namespace(
-                    write=False,
-                    apply=False,
-                    deploy_role_arn=None,
-                    plan_role_arn=None,
-                    snyk_token=None,
-                ),
-            )
-        elif choice == "14":
-            open_menu_section("GitHub Doctor", cmd_gh_doctor, argparse.Namespace(strict=False, format="human"))
-        elif choice == "15":
-            open_menu_section("GitHub Actions Status", cmd_gh_status, argparse.Namespace(strict=False, limit=8, format="human"))
-        elif choice == "16":
-            def show_controls_overview() -> None:
-                for topic_name in ["oidc", "backend", "image", "rollback", "dast"]:
-                    draw_box(f"Explain: {topic_name}", explain_text(topic_name))
-
-            open_menu_section("Security Controls", show_controls_overview)
-        elif choice == "17":
-            open_menu_section("Environment Table", cmd_envs, argparse.Namespace())
-        elif normalized_choice in {"p", "report"}:
-            open_menu_section("Export Readiness Report", cmd_report, argparse.Namespace(deep=False, output=None, print=False))
-        elif normalized_choice in {"s", "18", "snapshot", "snapshots"}:
+        elif choice in {"r", "render", "files"}:
+            menu_generated_files_hub(root)
+        elif choice in {"p", "report", "reports"}:
+            menu_reports_hub()
+        elif choice in {"s", "snapshot", "snapshots"}:
             menu_rollback_section(root)
-        elif normalized_choice in {"0", "q", "quit", "exit"}:
+        elif choice in {"h", "help", "reference"}:
+            menu_reference_hub()
+        elif choice in {"0", "q", "quit", "exit"}:
             clear_screen()
             return 0
         else:

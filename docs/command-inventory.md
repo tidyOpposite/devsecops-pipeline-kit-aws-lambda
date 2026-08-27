@@ -44,7 +44,7 @@ their primary output; machine-readable output remains clean. Use
 | Command | Status | Scope | Notes |
 | --- | --- | --- | --- |
 | `devsecops` | Stable | First success | Prints compact readiness status and the shared next action without prompting. |
-| `devsecops menu` | Stable | Interactive CLI | Opens the interactive terminal menu explicitly. |
+| `devsecops menu` | Stable | Interactive CLI | Opens six product sections: Continue setup, Status, Deploy, Diagnose problems, Configuration, and Advanced. Technical tools remain nested under their relevant section. |
 | `devsecops next` | Stable | First success | Shows the single next action for the current project context. Supports `--format human\|json`. |
 | `devsecops start` | Stable | First success | Guided safe onboarding flow. Creates config only after confirmation or `--yes`; never mutates GitHub or AWS. |
 | `devsecops init` | Alias | Configuration | Legacy interactive entry point for creating or updating `.devsecops-pipeline.toml`. Prefer `devsecops config new` for clean non-interactive config generation. |
