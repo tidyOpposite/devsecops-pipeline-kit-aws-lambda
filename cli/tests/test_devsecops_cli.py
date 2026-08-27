@@ -82,6 +82,32 @@ class DevSecOpsCliTests(unittest.TestCase):
         self.assertIn('requires-python = ">=3.11,<3.15"', distribution_doc)
         self.assertIn("Python 3.11, 3.12, 3.13, or 3.14", readme)
 
+    def test_readme_opens_with_a_three_command_first_experience(self) -> None:
+        readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
+        first_screen_sections = [
+            "## What This Product Does",
+            "## Who It Is For",
+            "## Before You Start",
+            "## What This Product Does Not Do",
+            "## Quick Start",
+        ]
+
+        positions = [readme.index(section) for section in first_screen_sections]
+        self.assertEqual(positions, sorted(positions))
+        self.assertLess(readme.index("## Quick Start"), readme.index("## Development Status"))
+        self.assertLess(readme.index("## Quick Start"), readme.index("## Product Contract"))
+        self.assertLess(readme.index("## Quick Start"), readme.index("## Architecture"))
+        self.assertLess(readme.index("## Quick Start"), readme.index("## Repository Layout"))
+        self.assertIn(
+            """```bash
+devsecops start --preset balanced --yes
+devsecops readiness
+devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
+```""",
+            readme,
+        )
+        self.assertIn("Expected result:", readme)
+
     def test_module_execution_does_not_emit_runtime_warning(self) -> None:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(ROOT_DIR / "cli")

@@ -6,18 +6,84 @@
 ![Security controls: evolving](https://img.shields.io/badge/security_controls-evolving-blue)
 ![API stability: 0.x](https://img.shields.io/badge/API_stability-0.x_changes_expected-yellow)
 
-DevSecOps Pipeline Kit is a terminal-first product for configuring,
-validating, and operating a secure AWS Lambda deployment pipeline. The CLI is
-the primary user interface; Terraform, GitHub Actions, AWS OIDC, scanners, and
-rollback logic are the execution layer that the CLI configures and checks.
+DevSecOps Pipeline Kit helps you prepare, validate, and operate a secure AWS
+Lambda container deployment pipeline from one terminal CLI. It turns a local
+configuration into reviewable Terraform and GitHub setup artifacts, then shows
+what still blocks a deployment.
 
-Use the CLI to build a local pipeline configuration, render Terraform and
-GitHub helper artifacts, inspect readiness, diagnose GitHub/AWS setup gaps, and
-recover from local configuration changes with snapshots.
+## What This Product Does
 
-This repository does not include sample Lambda application source code. The
-pipeline expects a prebuilt immutable Lambda container image through
-`LAMBDA_IMAGE_URI`.
+- Creates a local, schema-versioned pipeline configuration.
+- Generates Terraform inputs and GitHub repository setup helpers.
+- Checks local, Terraform, GitHub, AWS, and security readiness.
+- Supports GitHub Actions deployment validation, evidence collection, and
+  automatic Lambda image rollback after a failed production validation.
+
+Terraform, GitHub Actions, AWS OIDC, and security scanners remain visible
+execution layers; the CLI configures and checks them instead of hiding them.
+
+## Who It Is For
+
+Use this project if you are a developer, platform engineer, security engineer,
+or student who already has an AWS Lambda workload and wants a guided,
+reviewable DevSecOps delivery path. It is especially suited to demonstrations,
+technical evaluations, and teams that want explicit infrastructure and
+security controls rather than an opaque deployment service.
+
+## Before You Start
+
+For the no-credentials quick start below, you need:
+
+- Linux, macOS, or WSL2 with `curl` and Python 3.11, 3.12, 3.13, or 3.14.
+- A local checkout of this repository; run the commands from its root.
+- An immutable ECR-style image URI for validation. The example URI is safe to
+  use for the dry run because the CLI does not contact AWS in that step.
+
+A real deployment additionally requires an AWS account, a GitHub repository,
+Terraform, AWS CLI, GitHub CLI, configured OIDC roles, a remote Terraform
+backend, and a real immutable Lambda image in ECR.
+
+## What This Product Does Not Do
+
+- It does not contain, generate, compile, or package your Lambda application.
+- It does not build or push the Lambda container image. Bring a prebuilt image
+  identified by an immutable tag or digest; `latest` and `bootstrap` are
+  rejected for production.
+- It does not deploy anything during the quick start. Production changes run
+  through the repository's manually triggered GitHub Actions workflow.
+- It is not yet a stable `v1.0` platform; review generated artifacts and pin a
+  release for repeatable evaluations.
+
+See [Bring your own image](docs/bring-your-own-image.md) for the workload
+boundary and image requirements.
+
+## Quick Start
+
+Install the latest published release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/main/install.sh | sh
+```
+
+Then run the complete three-command first experience from the repository root:
+
+```bash
+devsecops start --preset balanced --yes
+devsecops readiness
+devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
+```
+
+Expected result:
+
+- `start` creates `.devsecops-pipeline.toml` and shows the next recommended
+  action; it does not change GitHub or AWS.
+- `readiness` lists the remaining blockers and a concrete fix for each one.
+- `dry-run` validates the immutable image URI and previews the files that would
+  be generated. It does not write files and does not require AWS credentials.
+
+Continue with the step-by-step
+[First successful pipeline](docs/first-successful-pipeline.md) guide when you
+are ready to connect GitHub and AWS.
 
 ## Development Status
 
@@ -134,20 +200,13 @@ terraform/modules/api-gateway/      HTTP API, integration, stage, access logs
 docs/                               CLI-first security, scanner, cost, and troubleshooting docs
 ```
 
-## Quick Start
+## Detailed CLI Usage
 
-Install the latest published release with the installer. It finds
-Python 3.11, 3.12, 3.13, or 3.14, verifies the release wheel against `SHA256SUMS`,
-installs into a private virtual environment, and writes a `devsecops` launcher:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/main/install.sh | sh
-devsecops
-```
-
-See [Distribution and compatibility](docs/distribution.md) for pinned install,
-manual wheel install, upgrade, shell completion, checksum verification, and
-supported tool versions.
+The installer verifies the release wheel against `SHA256SUMS`, installs it into
+a private virtual environment, and writes a `devsecops` launcher. See
+[Distribution and compatibility](docs/distribution.md) for pinned installs,
+manual wheel installation, upgrades, shell completion, checksum verification,
+and supported tool versions.
 
 The main menu uses section-style navigation: selecting an item clears the
 terminal, opens that section, and returns to the main menu when you press
@@ -169,26 +228,6 @@ Without installing, run the package module with `PYTHONPATH`:
 ```bash
 PYTHON="${PYTHON:-python3.11}"
 PYTHONPATH=cli "${PYTHON}" -m devsecops_cli dashboard
-```
-
-Recommended first run:
-
-```bash
-devsecops next
-devsecops start --preset balanced
-```
-
-Non-interactive first run:
-
-```bash
-devsecops config new --preset balanced
-devsecops config validate
-devsecops config diff
-devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
-devsecops render
-devsecops readiness
-devsecops report
-devsecops evidence collect --rc
 ```
 
 The CLI is intentionally dependency-free for core flows, so it can run before a
