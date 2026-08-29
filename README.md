@@ -68,20 +68,20 @@ curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit
 Then run the complete three-command first experience from the repository root:
 
 ```bash
-devsecops start --preset balanced --yes
-devsecops readiness
+devsecops setup --preset balanced --yes
+devsecops status
 devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
 ```
 
 Expected result:
 
-- `start` creates `.devsecops-pipeline.toml` and shows the next recommended
+- `setup` creates `.devsecops-pipeline.toml` and shows the next recommended
   action; it does not change GitHub or AWS.
-- `readiness` lists the remaining blockers and a concrete fix for each one.
+- `status` shows one overall score, the remaining blockers, and one next action.
 - `dry-run` validates the immutable image URI and previews the files that would
   be generated. It does not write files and does not require AWS credentials.
 
-Run `devsecops` without arguments at any time to see compact readiness status
+Run `devsecops` without arguments at any time to see compact project status
 and the single recommended next command. Human-readable commands finish with
 the same recommendation, so the setup path can be resumed without memorizing
 the workflow. Machine-readable JSON, TOML, Markdown, generated shell, and
@@ -114,13 +114,13 @@ yet considered stable.
 ## Product Contract
 
 The product boundary is intentionally narrow: `devsecops` is the user-facing
-CLI for creating, validating, rendering, and diagnosing a secure AWS Lambda
+CLI for setting up, validating, generating, and diagnosing a secure AWS Lambda
 delivery pipeline. Terraform modules, GitHub Actions workflows, AWS resources,
 and scanners remain transparent execution layers that the CLI configures and
 checks.
 
 `.devsecops-pipeline.toml` is local source configuration. Files written by
-`devsecops render`, `devsecops report`, and `devsecops github-setup --write`
+`devsecops generate`, `devsecops report`, and `devsecops github-setup --write`
 are CLI-owned generated artifacts. Do not edit generated files directly for
 durable changes; update the local config and regenerate them.
 
@@ -173,9 +173,9 @@ flowchart LR
 
 | Area | Implementation |
 | --- | --- |
-| CLI product | Dependency-free terminal menu, setup wizard, readiness dashboard, config presets, reports, snapshots, rollback, and diagnostics. |
-| CLI-managed config | `.devsecops-pipeline.toml` stores local settings and `devsecops render` generates ignored Terraform/GitHub helper artifacts. |
-| Readiness diagnostics | `devsecops readiness`, `[i] details`, `doctor`, `gh-doctor`, `actions-status`, and `branch-doctor` explain what blocks a deploy-ready pipeline. |
+| CLI product | Dependency-free terminal menu, guided setup, unified status, config presets, reports, snapshots, rollback, and diagnostics. |
+| CLI-managed config | `.devsecops-pipeline.toml` stores local settings and `devsecops generate` generates ignored Terraform/GitHub helper artifacts. |
+| Readiness diagnostics | `devsecops status`, `[i] details`, `doctor`, `gh-doctor`, `actions-status`, and `branch-doctor` explain what blocks a deploy-ready pipeline. |
 | AWS diagnostics | `devsecops aws-doctor` checks AWS identity, backend bucket, lock table, ECR, Lambda execution role, Lambda, API Gateway, CloudWatch logs, and configured ECR image existence. |
 | Environments | `dev`, `staging`, and `prod` are mapped to Terraform workspaces. Resource names include the environment, for example `devsecops-pipeline-prod-lambda`. |
 | Terraform state | Remote S3 backend with DynamoDB locking. `terraform/bootstrap` creates KMS-encrypted state, encrypted locks, access logging, lifecycle retention, and public access blocks. |
@@ -194,7 +194,7 @@ flowchart LR
 pyproject.toml                      Root Python package metadata for `pipx install .`
 cli/devsecops_cli/                  Modular CLI application, domains, and provider adapters
 cli/tests/                          Focused CLI unit tests
-dist/devsecops/                     Ignored CLI-rendered helper artifacts
+dist/devsecops/                     Ignored CLI-generated helper artifacts
 .github/workflows/deploy.yml        CI, PR plan, production deploy, rollback, optional DAST
 .github/workflows/release.yml       Tag release workflow with wheel/sdist artifacts
 terraform/bootstrap/                One-time S3 backend and DynamoDB lock table
@@ -214,8 +214,8 @@ a private virtual environment, and writes a `devsecops` launcher. See
 manual wheel installation, upgrades, shell completion, checksum verification,
 and supported tool versions.
 
-`devsecops next` is the shared decision mechanism behind the default status
-screen, dashboard, interactive menu, and command postludes. Every blocker is
+`devsecops status` is the single public status surface behind the default
+screen, interactive menu, and command postludes. Every blocker is
 shown with what is missing, why it matters, what the recommended command will
 change, the exact next command, and a documentation link.
 
@@ -239,10 +239,10 @@ blocking 100% readiness and the concrete fix for each one.
 The main path stays focused on setup, validation, and deployment. Generated
 deployment files, Terraform, GitHub setup, reports and release evidence,
 security reference, and local snapshots remain available under `Advanced`.
-`Continue setup` uses the shared `next` decision and opens the relevant
+`Continue setup` uses the shared status decision and opens the relevant
 Configuration, Deployment files, GitHub, Diagnostics, Deploy, or Reports
 section instead of forcing the user to find it manually.
-The `Deploy` section keeps readiness, the protected workflow command, recent
+The `Deploy` section keeps deployment status, the protected workflow command, recent
 runs, AWS outputs, health validation, and rollback guidance together. Merely
 opening it never starts a deployment.
 
@@ -251,14 +251,14 @@ For development, install the local package in editable mode:
 ```bash
 PYTHON="${PYTHON:-python3.11}"
 "${PYTHON}" -m pip install -e .
-devsecops dashboard
+devsecops status
 ```
 
 Without installing, run the package module with `PYTHONPATH`:
 
 ```bash
 PYTHON="${PYTHON:-python3.11}"
-PYTHONPATH=cli "${PYTHON}" -m devsecops_cli dashboard
+PYTHONPATH=cli "${PYTHON}" -m devsecops_cli status
 ```
 
 The CLI is intentionally dependency-free for core flows, so it can run before a
@@ -270,24 +270,24 @@ The same first-run path is also shown in `devsecops --help`.
 Useful commands:
 
 ```bash
-devsecops dashboard     # full terminal dashboard with readiness categories
-devsecops dashboard --mode compact
-devsecops dashboard --watch --interval 10
+devsecops status     # compact project status and one next action
+devsecops status --deep
+devsecops status --watch --interval 10
 devsecops tui           # optional Rich/Textual UI bridge
 
-devsecops config new --preset balanced # create clean local source config
+devsecops setup --preset balanced --yes
 devsecops config show --format toml
 devsecops config show --format json
 devsecops config validate
 devsecops config diff
 devsecops config diff --preset strict
-devsecops config set backend.bucket my-state-bucket --render
+devsecops config set backend.bucket my-state-bucket --generate
 devsecops config reset --preset minimal
 devsecops config schema
 
 devsecops preset list   # show available policy profiles
 devsecops preset show strict
-devsecops preset apply strict --render
+devsecops preset apply strict --generate
 
 devsecops doctor local --format compact
 devsecops doctor local --deep --format json
@@ -296,11 +296,11 @@ devsecops doctor aws --environment prod --strict
 devsecops doctor branch --branch main
 devsecops doctor actions --format json
 devsecops doctor all --format compact
-devsecops readiness     # shows what blocks 100% readiness
-devsecops readiness --format json
-devsecops readiness --strict --format compact
+devsecops status     # shows what blocks 100% readiness
+devsecops status --format json
+devsecops status --strict --format compact
 devsecops dry-run --image-uri <immutable-ecr-image-uri>
-devsecops preflight --image-uri <immutable-ecr-image-uri>
+devsecops image validate --image-uri <immutable-ecr-image-uri>
 devsecops health --url https://abc123.execute-api.us-east-1.amazonaws.com/health --aws-sigv4
 devsecops aws outputs --environment prod --format json
 
@@ -320,26 +320,25 @@ devsecops snapshot restore --last --dry-run
 devsecops envs          # environment settings table
 devsecops controls      # security controls matrix
 devsecops inventory --format json # stable command/JSON/artifact contract
-devsecops next          # show the single next setup action for this repo
-devsecops start --preset balanced # guided safe onboarding flow
 devsecops evidence collect --rc # collect local release-candidate evidence
 devsecops criteria --strict # check Version 1.0 criteria and stable blockers
 devsecops completion bash # print shell completion for bash, zsh, or fish
-devsecops render        # writes ignored Terraform/GitHub helper artifacts
-devsecops render --dry-run
+devsecops generate        # writes ignored Terraform/GitHub helper artifacts
+devsecops generate --dry-run
 devsecops report        # exports Markdown readiness report
 devsecops report --format json # exports attachable audit evidence
 devsecops explain oidc  # explains a security control
 ```
 
-Top-level compatibility aliases such as `init`, `set`, `validate-config`,
+Top-level compatibility aliases such as `start`, `next`, `readiness`,
+`dashboard`, `preflight`, `render`, `init`, `set`, `validate-config`,
 `github-setup`, `gh-doctor`, `aws-doctor`, `actions-status`, `branch-doctor`,
 `plan`, `bootstrap`, `snapshots`, and `rollback` still work. New scripts should
 prefer the grouped commands shown above.
 
-The dashboard splits readiness into Local, Terraform, GitHub, AWS, Security,
-and Deployment scores. `--mode compact` keeps the view short; `--watch`
-auto-refreshes every `--interval` seconds.
+`status` splits the project into Local, Terraform, GitHub, AWS, Security, and
+Deployment areas while showing one overall score. `--deep` adds external
+checks; `--watch` auto-refreshes every `--interval` seconds.
 
 The core CLI remains dependency-free. To try the optional Rich/Textual UI:
 
@@ -352,7 +351,7 @@ From a local checkout, `pipx install ".[tui]"` still works.
 
 The clean configuration workflow writes `.devsecops-pipeline.toml`, which is
 intentionally ignored by Git and includes `schema_version = 1`.
-`devsecops render` writes:
+`devsecops generate` writes:
 
 ```text
 terraform/generated.auto.tfvars
@@ -371,8 +370,8 @@ Generated artifacts include CLI-owned headers and are ignored by Git. See
 contract.
 
 The CLI creates local snapshots before commands that overwrite CLI-owned
-configuration or generated artifacts: `init`, `compose`, `set`, `preset`,
-`render`, `report`, and `github-setup --write`. Snapshots are stored under
+configuration or generated artifacts: `setup`, Configuration changes,
+`generate`, `report`, and `github setup --write`. Snapshots are stored under
 `.devsecops/snapshots/`, are ignored by Git, and can be inspected or restored:
 
 ```bash
@@ -418,13 +417,13 @@ Before a stable tag, run:
 devsecops criteria --strict --evidence-dir dist/devsecops/production-evidence/v1.0.0
 ```
 
-The `set` command supports non-interactive configuration for scripts and quick
+The `config set` command supports non-interactive configuration for scripts and quick
 edits:
 
 ```bash
-devsecops set lambda_image_uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:sha-a1b2c3
-devsecops set enable_dast true
-devsecops set environments.prod.lambda_timeout 300 --render
+devsecops config set lambda_image_uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:sha-a1b2c3
+devsecops config set enable_dast true
+devsecops config set environments.prod.lambda_timeout 300 --generate
 devsecops config validate
 devsecops config validate --strict
 ```
@@ -434,11 +433,11 @@ Presets provide a quick starting point:
 ```bash
 devsecops preset list
 devsecops preset show enterprise
-devsecops preset apply minimal --render       # low-cost local/dev experimentation
-devsecops preset apply balanced --render      # default reference settings
-devsecops preset apply strict --render        # enables health validation and DAST
-devsecops preset apply enterprise --render    # locked-down CORS and longer retention
-devsecops preset apply student-demo --render  # simple demonstration profile
+devsecops preset apply minimal --generate       # low-cost local/dev experimentation
+devsecops preset apply balanced --generate      # default reference settings
+devsecops preset apply strict --generate        # enables health validation and DAST
+devsecops preset apply enterprise --generate    # locked-down CORS and longer retention
+devsecops preset apply student-demo --generate  # simple demonstration profile
 ```
 
 For compatibility, `devsecops preset strict --render` still applies the named
@@ -450,8 +449,8 @@ Each preset has a documented security posture and can be compared with
 control catalog, preset comparison, strict validation rules, and audit evidence
 format.
 
-Use the pipeline composer when you want the CLI to ask for individual controls
-and then update all generated outputs in one pass:
+Under `Advanced`, use the compatibility composer when you want the CLI to ask
+for individual controls and then update all generated outputs in one pass:
 
 ```bash
 devsecops compose
@@ -459,18 +458,18 @@ devsecops compose
 
 Composer asks whether to enable Snyk container scanning, DAST, health checks,
 strict CORS, the protected `prod` approval environment, and a separate AWS plan
-role. It updates `.devsecops-pipeline.toml`, renders Terraform/GitHub helper
+role. It updates `.devsecops-pipeline.toml`, generates Terraform/GitHub helper
 artifacts, and writes `dist/devsecops/readiness-report.md`.
 
 ## CLI-Managed Backend Bootstrap
 
 Terraform cannot create the S3 backend it is already using. Configure the
-backend values through the CLI, render helper artifacts, and let the CLI run the
-bootstrap stack:
+backend values through the CLI, generate helper artifacts, and let the CLI run
+the bootstrap stack:
 
 ```bash
-devsecops set backend.bucket <globally-unique-state-bucket> --render
-devsecops set backend.lock_table devsecops-pipeline-terraform-locks --render
+devsecops config set backend.bucket <globally-unique-state-bucket> --generate
+devsecops config set backend.lock_table devsecops-pipeline-terraform-locks --generate
 devsecops bootstrap
 devsecops bootstrap --apply
 ```
@@ -478,7 +477,7 @@ devsecops bootstrap --apply
 `devsecops bootstrap` plans by default. Use `--apply` only after reviewing the
 target AWS account, bucket name, and lock table name.
 
-The rendered backend template is written to `dist/devsecops/backend.tf`. Copy
+The generated backend template is written to `dist/devsecops/backend.tf`. Copy
 or adapt it into `terraform/backend.tf` when you are ready to initialize the
 root Terraform module:
 
@@ -501,7 +500,7 @@ Use the CLI for the normal environment workflow:
 
 ```bash
 devsecops envs
-devsecops preset apply balanced --render
+devsecops preset apply balanced --generate
 devsecops plan dev --create-workspace
 devsecops plan staging --create-workspace
 devsecops plan prod --create-workspace
@@ -580,10 +579,10 @@ For a command-by-command walkthrough with expected output, see
 production-proof release record, use
 [Production deployment evidence](docs/production-deployment-evidence.md).
 
-1. Configure local pipeline state with `devsecops compose`, `init`, `set`, or
-   `preset`.
-2. Render generated artifacts with `devsecops render`.
-3. Check readiness with `devsecops readiness`, `doctor`, and GitHub diagnostics.
+1. Configure local pipeline state with `devsecops setup`; use the Configuration
+   section for later edits.
+2. Generate deployment files with `devsecops generate`.
+3. Check readiness with `devsecops status`, `doctor`, and GitHub diagnostics.
 4. Validate Terraform formatting and configuration in GitHub Actions on pull
    requests or manual runs.
 5. Run Trivy IaC scanning.
@@ -611,7 +610,7 @@ or image digests; do not use `latest` or `bootstrap`.
 Validate the image URI locally before writing it into config:
 
 ```bash
-devsecops preflight --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
+devsecops image validate --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
 ```
 
 The bring-your-own-image path is documented in

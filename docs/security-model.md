@@ -9,7 +9,7 @@ the project-level security policy.
 | Asset | Why it matters |
 | --- | --- |
 | DevSecOps CLI | Primary product interface for configuration, readiness checks, generated artifacts, and local rollback. |
-| Local CLI config | `.devsecops-pipeline.toml` drives rendered Terraform and GitHub setup artifacts. Bad values can produce bad plans. |
+| Local CLI config | `.devsecops-pipeline.toml` drives generated Terraform and GitHub setup artifacts. Bad values can produce bad plans. |
 | Local snapshots | `.devsecops/snapshots/` can restore CLI-owned files, but may contain local operational values. |
 | Generated helper artifacts | Files under `dist/devsecops/` and generated tfvars bridge the CLI and execution layer. |
 | Terraform state | Contains resource identifiers and may contain sensitive configuration. Corruption can break deployments. |
@@ -46,7 +46,7 @@ flowchart LR
 | Accidental local config overwrite | CLI creates snapshots before overwriting CLI-owned config or generated artifacts. |
 | Restoring the wrong local state | Rollback shows snapshot details and change summaries, requires confirmation, and creates a safety snapshot before restore. |
 | Committing local operational data | `.devsecops-pipeline.toml`, `.devsecops/`, generated tfvars, and `dist/` artifacts are ignored by Git. |
-| Misconfigured pipeline hidden from operator | `devsecops readiness`, `[i] details`, `doctor`, and reports show scored readiness gaps and concrete fix actions. |
+| Misconfigured pipeline hidden from operator | `devsecops status`, `[i] details`, `doctor`, and reports show scored readiness gaps and concrete fix actions. |
 | Security controls hidden in Terraform or workflows | `devsecops controls`, `devsecops explain <control>`, and `docs/security-controls.md` map CLI options to generated Terraform, GitHub, AWS, and scanner behavior. |
 | Static cloud credentials leaked from CI | GitHub Actions uses OIDC and short-lived STS credentials; no AWS access keys are stored in the repo. |
 | Overprivileged PR planning | Terraform plan workflows require `AWS_PLAN_ROLE_TO_ASSUME_ARN`, skip forked PRs, and do not fall back to the deploy role. |

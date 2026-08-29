@@ -713,7 +713,7 @@ def print_readiness_breakdown(checks: list[Check], compact: bool = False) -> Non
     headers = ["Area", "Score", "Gaps"] if compact else ["Area", "Score", "OK", "WARN", "FAIL", "INFO"]
     draw_table(headers, rows, title="Readiness")
     print()
-    print(f"Overall: {score_status(overall_breakdown_score(checks))}  legacy score: {progress_bar(readiness_score(checks), width=18)}")
+    print(f"Overall: {score_status(overall_breakdown_score(checks))}")
 
 
 def print_gap_summary(checks: list[Check], limit: int = 3) -> None:
@@ -961,7 +961,7 @@ def render_dashboard(root: Path, mode: str = "full", clear: bool = False) -> Non
     print_next_action(action)
     if not full:
         print()
-        print(info("Run `devsecops dashboard --mode full` for GitHub/AWS/deep Terraform diagnostics."))
+        print(info("Run `devsecops status --deep` for GitHub, AWS, and deep Terraform checks."))
         return
     print()
     draw_table(
@@ -984,6 +984,58 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
             return 0
         print()
         print(info(f"Watching dashboard every {interval}s. Press Ctrl-C to stop."))
+        time.sleep(interval)
+
+
+def status_payload(checks: list[Check], action: dict[str, Any], deep: bool) -> dict[str, Any]:
+    """Return the preferred status contract with one unambiguous score."""
+
+    payload = checks_payload("status", checks, context={"deep": deep})
+    payload["score"] = overall_breakdown_score(checks)
+    payload.pop("overall_breakdown_score", None)
+    payload["next_action"] = {
+        "action": action["id"],
+        "title": action["title"],
+        "detail": action["detail"],
+        "why": action["why"],
+        "changes": action["changes"],
+        "command": action["command"],
+        "docs": action["docs"],
+        "blocked": action["blocked"],
+    }
+    return payload
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Show one status surface: current state, blockers, and next action."""
+
+    root = repo_root()
+    deep = bool(getattr(args, "deep", False))
+    output_format = getattr(args, "format", "human")
+    watch = bool(getattr(args, "watch", False))
+    if watch and output_format != "human":
+        print(fail("--watch is available only with human output."))
+        return EXIT_VALIDATION_FAILED
+
+    interval = max(1, int(getattr(args, "interval", 5)))
+    while True:
+        cfg = load_config(root)
+        checks = collect_dashboard_checks(root, cfg, mode="full" if deep else "compact")
+        action = next_action(root, cfg)
+        if output_format == "json":
+            emit_json(status_payload(checks, action, deep))
+        elif output_format == "compact":
+            print_readiness_breakdown(checks, compact=True)
+            print()
+            print_next_action(action)
+        else:
+            render_dashboard(root, mode="full" if deep else "compact", clear=watch)
+
+        result = strict_exit_code(checks, strict=bool(getattr(args, "strict", False)), fail_on_warn=True)
+        if not watch:
+            return result
+        print()
+        print(info(f"Watching status every {interval}s. Press Ctrl-C to stop."))
         time.sleep(interval)
 
 
@@ -1072,12 +1124,12 @@ def cmd_next(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmd_start(args: argparse.Namespace) -> int:
+def cmd_setup(args: argparse.Namespace) -> int:
     root = repo_root()
     cfg = load_config(root)
     context = project_context(root, cfg)
     draw_box(
-        "Guided Start",
+        "Project Setup",
         [
             "Safe onboarding flow for the first successful pipeline path.",
             f"Project context: {context['stage']}",
@@ -1096,7 +1148,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             try:
                 should_create = prompt_bool(f"Create {CONFIG_FILE} with `{preset_name}` preset", True, allow_cancel=True)
             except InputCancelled:
-                print(info("Start cancelled. No files changed."))
+                print(info("Setup cancelled. No files changed."))
                 return EXIT_OK
         if should_create:
             write_config(root, clean_config(preset_name))
@@ -1116,11 +1168,17 @@ def cmd_start(args: argparse.Namespace) -> int:
         [
             "Production deploy requires a prebuilt Lambda-compatible ECR image.",
             "Use an immutable tag or digest; latest/bootstrap are rejected.",
-            "Validate it with `devsecops preflight --image-uri <immutable-ecr-image-uri>`.",
+            "Validate it with `devsecops image validate --image-uri <immutable-ecr-image-uri>`.",
         ],
     )
     print()
     return cmd_next(argparse.Namespace(format="human"))
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    """Compatibility handler for the previous public command name."""
+
+    return cmd_setup(args)
 
 
 def file_exists_check(root: Path, label: str, path: str) -> dict[str, str]:
@@ -2007,12 +2065,16 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         image_uri=getattr(args, "image_uri", None),
         env_name=getattr(args, "environment", "prod"),
     )
-    emit_check_output(
-        "Preflight",
-        checks,
-        output_format=getattr(args, "format", "human"),
-        context={"environment": getattr(args, "environment", "prod"), "aws_region": cfg["aws_region"]},
-    )
+    output_format = getattr(args, "format", "human")
+    context = {"environment": getattr(args, "environment", "prod"), "aws_region": cfg["aws_region"]}
+    if output_format == "json":
+        kind = "image-validation" if getattr(args, "command", None) == "image" else "preflight"
+        payload = checks_payload(kind, checks, context=context)
+        if kind == "image-validation":
+            payload.pop("overall_breakdown_score", None)
+        emit_json(payload)
+    else:
+        emit_check_output("Validate Image", checks, output_format=output_format, context=context)
     return EXIT_VALIDATION_FAILED if any(check.status == "FAIL" for check in checks) else EXIT_OK
 
 
@@ -2045,7 +2107,7 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
             f"Environment target: {env_name}",
         ],
     )
-    print_render_plan(root, outputs, title="Files that would be rendered")
+    print_render_plan(root, outputs, title="Files that would be generated")
     print()
     print_checks(image_checks)
     print()
@@ -2072,7 +2134,7 @@ def render_plan_rows(root: Path, outputs: dict[Path, str]) -> list[list[str]]:
     return rows
 
 
-def print_render_plan(root: Path, outputs: dict[Path, str], title: str = "Render Plan") -> None:
+def print_render_plan(root: Path, outputs: dict[Path, str], title: str = "Deployment File Plan") -> None:
     draw_table(["File", "Action", "Size"], render_plan_rows(root, outputs), title=title)
 
 
@@ -2087,14 +2149,14 @@ def run_render(root: Path, snapshot: bool = True, dry_run: bool = False) -> int:
     dist = root / DIST_DIR
     dist.mkdir(parents=True, exist_ok=True)
     if snapshot:
-        snapshot_before_change(root, "render", "Before rendering Terraform and GitHub helper artifacts.")
+        snapshot_before_change(root, "generate", "Before generating Terraform and GitHub deployment files.")
 
     for path, content in outputs.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         if path.name.endswith(".sh"):
             path.chmod(0o755)
-        print(ok("Rendered ") + str(path))
+        print(ok("Generated ") + str(path))
     return 0
 
 
@@ -2268,7 +2330,7 @@ def run_plan(root: Path, env_name: str, no_init: bool = False, create_workspace:
         print(fail("Unknown environment: ") + env_name)
         return 1
     if not (root / GENERATED_TFVARS).exists():
-        print(warn("Missing generated tfvars. Running render first."))
+        print(warn("Missing generated tfvars. Generating deployment files first."))
         run_render(root)
 
     if not no_init:
@@ -2495,7 +2557,7 @@ def print_main_menu(root: Path) -> None:
     dast_state = "on" if cfg["enable_dast"] else "off"
 
     print(color("DevSecOps Pipeline Kit", Style.BOLD))
-    print(f"{cfg['project_name']} | {cfg['aws_region']} | readiness {breakdown_score}%")
+    print(f"{cfg['project_name']} | {cfg['aws_region']} | status {breakdown_score}%")
     print(f"image: {image_state} | backend: {backend_state} | health: {health_state} | DAST: {dast_state}")
     print()
     print_next_action(action)
@@ -2517,11 +2579,11 @@ def continue_setup_destination(action: dict[str, Any]) -> str:
     command = str(action["command"])
     if action_id == "missing_project_files":
         return "blocked"
-    if action_id == "missing_config" and command.startswith("devsecops config new"):
-        return "start"
+    if action_id == "missing_config" and command.startswith(("devsecops setup", "devsecops config new")):
+        return "setup"
     if action_id in {"missing_config", "missing_image", "missing_backend"}:
         return "configuration"
-    if action_id == "missing_github_setup" and command == "devsecops render":
+    if action_id == "missing_github_setup" and command in {"devsecops generate", "devsecops render"}:
         return "deployment_files"
     if action_id == "missing_github_setup":
         return "github"
@@ -2537,9 +2599,9 @@ def continue_setup_destination(action: dict[str, Any]) -> str:
 def menu_continue_setup(root: Path) -> None:
     action = next_action(root, load_config(root))
     destination = continue_setup_destination(action)
-    if destination == "start":
+    if destination == "setup":
         clear_screen()
-        cmd_start(argparse.Namespace(preset="balanced", render=False, yes=False))
+        cmd_setup(argparse.Namespace(preset="balanced", render=False, yes=False))
         pause_for_menu()
     elif destination == "configuration":
         menu_config_hub(root)
@@ -2578,12 +2640,12 @@ def menu_deploy_hub() -> None:
     draw_box(
         "Deploy",
         [
-            "Validate readiness, start the protected workflow, or inspect the deployed service.",
+            "Check deployment status, start the protected workflow, or inspect the deployed service.",
             "Opening this section does not change GitHub or AWS.",
         ],
     )
     print()
-    print("[1] Check deployment readiness")
+    print("[1] Check deployment status")
     print("[2] Show production deploy command")
     print("[3] Recent deployment runs")
     print("[4] Deployed AWS resources")
@@ -2596,7 +2658,7 @@ def menu_deploy_hub() -> None:
         return
     print()
     if choice == "1":
-        cmd_readiness(argparse.Namespace(deep=True, strict=False, format="human"))
+        cmd_status(argparse.Namespace(deep=True, strict=False, format="human", watch=False, interval=5))
     elif choice == "2":
         show_production_deploy_command()
     elif choice == "3":
@@ -2622,30 +2684,27 @@ def menu_deploy_hub() -> None:
 
 def menu_config_hub(root: Path) -> None:
     clear_screen()
-    draw_box("Configuration", ["Create, inspect, validate, and edit local source configuration."])
+    draw_box("Configuration", ["Inspect, validate, and edit local source configuration."])
     print()
-    print("[1] Guided configuration")
-    print("[2] Create clean balanced config")
-    print("[3] Show config")
-    print("[4] Validate config")
-    print("[5] Edit one setting")
-    print("[6] Apply policy preset")
-    print("[7] Compare config with canonical form")
-    print("[8] Advanced control composer")
+    print("[1] Project setup")
+    print("[2] Show config")
+    print("[3] Validate config")
+    print("[4] Edit one setting")
+    print("[5] Apply policy preset")
+    print("[6] Compare config with canonical form")
+    print("[7] Advanced control setup")
     print("[0] Back")
     choice = input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
     if choice == "1":
-        run_init(root, force=True, defaults=False, allow_cancel=True)
+        cmd_setup(argparse.Namespace(preset="balanced", render=False, yes=False))
     elif choice == "2":
-        cmd_config(argparse.Namespace(config_command="new", preset="balanced", force=False, render=False))
-    elif choice == "3":
         cmd_config(argparse.Namespace(config_command="show", format="toml"))
-    elif choice == "4":
+    elif choice == "3":
         cmd_config(argparse.Namespace(config_command="validate", format="human"))
-    elif choice == "5":
+    elif choice == "4":
         key = prompt_text("Config key", "backend.bucket")
         if is_cancel_input(key):
             clear_screen()
@@ -2654,17 +2713,17 @@ def menu_config_hub(root: Path) -> None:
         if is_cancel_input(value):
             clear_screen()
             return
-        render_after = prompt_bool("Render artifacts after update", False)
+        render_after = prompt_bool("Generate deployment files after update", False)
         cmd_config(argparse.Namespace(config_command="set", key=key, value=value, render=render_after))
-    elif choice == "6":
+    elif choice == "5":
         preset_name = prompt_text("Preset", "balanced")
         if is_cancel_input(preset_name):
             clear_screen()
             return
         cmd_preset(argparse.Namespace(command="apply", name=preset_name, render=False))
-    elif choice == "7":
+    elif choice == "6":
         cmd_config(argparse.Namespace(config_command="diff", preset=None, exit_code=False))
-    elif choice == "8":
+    elif choice == "7":
         cmd_compose(argparse.Namespace())
     else:
         print(warn("Unknown option."))
@@ -2965,7 +3024,11 @@ def cmd_menu(args: argparse.Namespace) -> int:
         if choice in {"1", "continue", "setup", "next"}:
             menu_continue_setup(root)
         elif choice in {"2", "status", "dashboard", "d"}:
-            open_menu_section("Status", cmd_dashboard, argparse.Namespace(mode="compact", watch=False, interval=5))
+            open_menu_section(
+                "Status",
+                cmd_status,
+                argparse.Namespace(deep=False, strict=False, format="human", watch=False, interval=5),
+            )
         elif choice in {"i", "info", "readiness", "?"}:
             menu_readiness_section(root)
         elif choice in {"3", "deploy"}:
@@ -3007,7 +3070,7 @@ def should_print_next_postlude(args: argparse.Namespace) -> bool:
     """Keep machine-readable output clean while guiding every human flow."""
 
     command = getattr(args, "command", None)
-    if command is None or command in {"menu", "next", "start", "dashboard", "tui", "completion"}:
+    if command is None or command in {"menu", "setup", "status", "next", "start", "dashboard", "tui", "completion"}:
         return False
     if getattr(args, "format", None) in {"json", "markdown", "toml"}:
         return False

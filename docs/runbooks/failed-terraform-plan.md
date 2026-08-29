@@ -29,7 +29,7 @@ gh run view <run-id> --log-failed
 
 ## Fix
 
-1. Run `devsecops render --dry-run`, then `devsecops render` if generated
+1. Run `devsecops generate --dry-run`, then `devsecops generate` if generated
    variables are stale.
 2. Run `devsecops github setup --write` and compare required variables/secrets.
 3. Confirm backend resources with `devsecops doctor aws --environment prod`.

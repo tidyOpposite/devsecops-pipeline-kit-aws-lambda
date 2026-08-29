@@ -15,7 +15,7 @@ run does not write files and does not require AWS credentials.
 
 ```bash
 devsecops --version
-devsecops next
+devsecops status
 devsecops dry-run \
   --preset balanced \
   --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
@@ -27,7 +27,7 @@ Expected output includes:
 First Successful Pipeline Dry Run
 No files changed.
 AWS credentials are not required for this dry run.
-Files that would be rendered
+Files that would be generated
 Lambda image shape          OK
 Lambda image immutability   OK
 ```
@@ -35,34 +35,34 @@ Lambda image immutability   OK
 If you only want to preview generated files from an existing config:
 
 ```bash
-devsecops render --dry-run
+devsecops generate --dry-run
 ```
 
 Expected output includes:
 
 ```text
 Dry run only. No files changed.
-Render Plan
+Deployment File Plan
 terraform/generated.auto.tfvars
 dist/devsecops/github-setup.sh
 ```
 
 ## 2. Create Local Source Config
 
-Use the guided first-start flow when you want the CLI to explain the current
+Use the guided setup flow when you want the CLI to explain the current
 context and create missing local config after confirmation:
 
 ```bash
-devsecops start --preset balanced
+devsecops setup --preset balanced
 ```
 
 For a non-interactive path:
 
 ```bash
-devsecops config new --preset balanced
+devsecops setup --preset balanced --yes
 devsecops config validate
 devsecops config diff
-devsecops next
+devsecops status
 ```
 
 Expected output:
@@ -81,26 +81,26 @@ must be an AWS Lambda-compatible container image in ECR and must use an
 immutable tag or digest.
 
 ```bash
-devsecops preflight \
+devsecops image validate \
   --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
 ```
 
 Expected output:
 
 ```text
-Preflight
+Validate Image
 Lambda image URI            OK
 Lambda image shape          OK
 Lambda image immutability   OK
 Lambda image region         OK
 ```
 
-Then write the image URI into local config and render:
+Then write the image URI into local config and generate the deployment files:
 
 ```bash
 devsecops config set lambda_image_uri \
-  123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123 \
-  --render
+  123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
+devsecops generate
 ```
 
 ## 4. Configure Terraform Backend
@@ -108,8 +108,9 @@ devsecops config set lambda_image_uri \
 Choose globally unique backend names for your AWS account:
 
 ```bash
-devsecops config set backend.bucket my-devsecops-pipeline-tfstate --render
-devsecops config set backend.lock_table devsecops-pipeline-terraform-locks --render
+devsecops config set backend.bucket my-devsecops-pipeline-tfstate
+devsecops config set backend.lock_table devsecops-pipeline-terraform-locks
+devsecops generate
 devsecops terraform bootstrap
 ```
 
@@ -151,13 +152,12 @@ devsecops doctor github --strict
 devsecops doctor branch --branch main
 ```
 
-## 6. Render, Report, And Review
+## 6. Generate, Report, And Review
 
 ```bash
-devsecops render
-devsecops readiness
+devsecops generate
+devsecops status
 devsecops report
-devsecops next
 ```
 
 Expected output should either show no scored gaps or point to a concrete next

@@ -17,7 +17,7 @@ COMPLETION_SHELLS = ("bash", "zsh", "fish")
 def build_parser(handlers: Any) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="devsecops",
-        description="CLI product for creating, validating, rendering, and diagnosing a secure AWS Lambda delivery pipeline.",
+        description="CLI product for setting up, validating, generating, and diagnosing a secure AWS Lambda delivery pipeline.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent(
             """\
@@ -27,8 +27,8 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
 
             Recommended first run:
               devsecops
-              devsecops start --preset balanced --yes
-              devsecops readiness
+              devsecops setup --preset balanced --yes
+              devsecops status
               devsecops dry-run --image-uri <immutable-ecr-image-uri>
 
             `devsecops` without arguments shows compact status and one next action.
@@ -38,9 +38,14 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
               README.md
               docs/command-inventory.md
               docs/generated-artifacts.md
+
+            Advanced maintainer commands:
               devsecops inventory --format json
+              devsecops criteria --strict
+              devsecops evidence collect --rc
 
             Legacy aliases still work:
+              start, next, readiness, dashboard, preflight, render,
               init, set, validate-config, snapshots, rollback,
               github-setup, gh-doctor, aws-doctor, actions-status, branch-doctor,
               plan, bootstrap
@@ -62,14 +67,22 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     subparsers = parser.add_subparsers(
         dest="command",
-        metavar="{menu,config,next,start,criteria,dry-run,preflight,health,doctor,aws,render,github,terraform,snapshot,readiness,report,dashboard,explain,inventory,evidence,completion}",
+        metavar="{menu,setup,status,dry-run,image,generate,doctor,health,config,github,aws,terraform,snapshot,report,explain,completion}",
     )
     parser.set_defaults(func=handlers.cmd_overview)
 
     menu_parser = subparsers.add_parser("menu", help="Open the simplified interactive product menu.")
     menu_parser.set_defaults(func=handlers.cmd_menu)
 
-    dashboard_parser = subparsers.add_parser("dashboard", help="Print a one-screen pipeline dashboard.")
+    status_parser = subparsers.add_parser("status", help="Show project status and the single recommended next action.")
+    status_parser.add_argument("--deep", action="store_true", help="Include GitHub, AWS, and deep Terraform checks.")
+    status_parser.add_argument("--strict", action="store_true", help="Exit non-zero when a scored status gap remains.")
+    status_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
+    status_parser.add_argument("--watch", action="store_true", help="Auto-refresh human status until interrupted.")
+    status_parser.add_argument("--interval", type=int, default=5, help="Seconds between status refreshes in watch mode.")
+    status_parser.set_defaults(func=handlers.cmd_status)
+
+    dashboard_parser = subparsers.add_parser("dashboard", help=argparse.SUPPRESS)
     dashboard_parser.add_argument("--watch", action="store_true", help="Auto-refresh the dashboard until interrupted.")
     dashboard_parser.add_argument("--interval", type=int, default=5, help="Seconds between dashboard refreshes in watch mode.")
     dashboard_parser.add_argument("--mode", choices=["compact", "full"], default="full", help="Dashboard detail level.")
@@ -80,22 +93,28 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     completion_parser.add_argument("--program", default="devsecops", help="Program name to complete.")
     completion_parser.set_defaults(func=handlers.cmd_completion)
 
-    inventory_parser = subparsers.add_parser("inventory", help="Print the stable command, JSON, migration, and artifact contract.")
+    inventory_parser = subparsers.add_parser("inventory", help=argparse.SUPPRESS)
     inventory_parser.add_argument("--format", choices=["human", "markdown", "json"], default="human", help="Output mode.")
     inventory_parser.add_argument("--status", choices=["all", "stable", "alias", "experimental", "support"], default="all", help="Command status filter.")
     inventory_parser.set_defaults(func=handlers.cmd_inventory)
 
-    next_parser = subparsers.add_parser("next", help="Show the single next action for the current project context.")
+    next_parser = subparsers.add_parser("next", help=argparse.SUPPRESS)
     next_parser.add_argument("--format", choices=["human", "json"], default="human", help="Output mode.")
     next_parser.set_defaults(func=handlers.cmd_next)
 
-    start_parser = subparsers.add_parser("start", help="Run the guided safe first-start flow.")
+    setup_parser = subparsers.add_parser("setup", help="Set up the project through one safe guided flow.")
+    setup_parser.add_argument("--preset", choices=PRESET_ORDER, default="balanced", help="Preset to use when creating config.")
+    setup_parser.add_argument("--generate", dest="render", action="store_true", help="Generate deployment files after config exists.")
+    setup_parser.add_argument("--yes", action="store_true", help="Create missing config without prompting.")
+    setup_parser.set_defaults(func=handlers.cmd_setup)
+
+    start_parser = subparsers.add_parser("start", help=argparse.SUPPRESS)
     start_parser.add_argument("--preset", choices=PRESET_ORDER, default="balanced", help="Preset to use when creating config.")
     start_parser.add_argument("--render", action="store_true", help="Render artifacts after config exists.")
     start_parser.add_argument("--yes", action="store_true", help="Create missing config without prompting.")
     start_parser.set_defaults(func=handlers.cmd_start)
 
-    criteria_parser = subparsers.add_parser("criteria", help="Check Version 1.0 criteria and stable-release evidence blockers.")
+    criteria_parser = subparsers.add_parser("criteria", help=argparse.SUPPRESS)
     criteria_parser.add_argument("--format", choices=["human", "json"], default="human", help="Output mode.")
     criteria_parser.add_argument(
         "--evidence-dir",
@@ -104,7 +123,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     criteria_parser.add_argument("--strict", action="store_true", help="Exit non-zero until all criteria and stable-release gates are OK.")
     criteria_parser.set_defaults(func=handlers.cmd_criteria)
 
-    evidence_parser = subparsers.add_parser("evidence", help="Collect release or RC evidence artifacts.")
+    evidence_parser = subparsers.add_parser("evidence", help=argparse.SUPPRESS)
     evidence_parser.set_defaults(func=handlers.cmd_evidence)
     evidence_subparsers = evidence_parser.add_subparsers(dest="evidence_command", metavar="{collect}")
     evidence_collect_parser = evidence_subparsers.add_parser("collect", help="Collect local release-candidate evidence artifacts.")
@@ -137,7 +156,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     doctor_parser.set_defaults(func=handlers.cmd_doctor, doctor_command="local")
     doctor_subparsers = doctor_parser.add_subparsers(dest="doctor_command", metavar="{local,github,aws,branch,actions,all}")
 
-    doctor_local_parser = doctor_subparsers.add_parser("local", help="Check local config, files, tools, and render state.")
+    doctor_local_parser = doctor_subparsers.add_parser("local", help="Check local config, files, tools, and deployment-file state.")
     doctor_local_parser.add_argument("--deep", action="store_true", help="Run Terraform validate and AWS resource checks.")
     doctor_local_parser.add_argument("--strict", action="store_true", help="Exit non-zero on failed scored checks.")
     doctor_local_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
@@ -174,7 +193,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     doctor_all_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     doctor_all_parser.set_defaults(func=handlers.cmd_doctor)
 
-    readiness_parser = subparsers.add_parser("readiness", help="Show what blocks 100%% readiness.")
+    readiness_parser = subparsers.add_parser("readiness", help=argparse.SUPPRESS)
     readiness_parser.add_argument("--deep", action="store_true", help="Include Terraform/AWS deep checks.")
     readiness_parser.add_argument("--strict", action="store_true", help="Exit non-zero on any scored readiness gap.")
     readiness_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
@@ -186,7 +205,16 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     dry_run_parser.add_argument("--environment", choices=ENVIRONMENTS, default="prod", help="Environment target for image naming checks.")
     dry_run_parser.set_defaults(func=handlers.cmd_dry_run)
 
-    preflight_parser = subparsers.add_parser("preflight", help="Run local preflight checks for the Lambda image before deploy.")
+    image_parser = subparsers.add_parser("image", help="Validate the Lambda image before deployment.")
+    image_parser.set_defaults(func=handlers.cmd_preflight, image_command="validate", image_uri=None, environment="prod", format="human")
+    image_subparsers = image_parser.add_subparsers(dest="image_command", metavar="{validate}")
+    image_validate_parser = image_subparsers.add_parser("validate", help="Validate image URI, immutability, region, and repository naming.")
+    image_validate_parser.add_argument("--image-uri", help="Image URI to validate. Defaults to lambda_image_uri from local config.")
+    image_validate_parser.add_argument("--environment", choices=ENVIRONMENTS, default="prod", help="Environment target for image naming checks.")
+    image_validate_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
+    image_validate_parser.set_defaults(func=handlers.cmd_preflight)
+
+    preflight_parser = subparsers.add_parser("preflight", help=argparse.SUPPRESS)
     preflight_parser.add_argument("--image-uri", help="Image URI to check. Defaults to lambda_image_uri from local config.")
     preflight_parser.add_argument("--environment", choices=ENVIRONMENTS, default="prod", help="Environment target for image naming checks.")
     preflight_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
@@ -200,7 +228,11 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     health_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     health_parser.set_defaults(func=handlers.cmd_health)
 
-    render_parser = subparsers.add_parser("render", help="Render CLI-owned Terraform/GitHub helper artifacts.")
+    generate_parser = subparsers.add_parser("generate", help="Generate CLI-owned Terraform and GitHub deployment files.")
+    generate_parser.add_argument("--dry-run", action="store_true", help="Preview generated files without writing them.")
+    generate_parser.set_defaults(func=handlers.cmd_render)
+
+    render_parser = subparsers.add_parser("render", help=argparse.SUPPRESS)
     render_parser.add_argument("--dry-run", action="store_true", help="Preview generated files without writing them.")
     render_parser.set_defaults(func=handlers.cmd_render)
 
@@ -330,7 +362,8 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
         help="Use `list`, `show`, `apply`, or a preset name for backward-compatible apply.",
     )
     preset_parser.add_argument("name", nargs="?", help="Preset name for `show` or `apply`.")
-    preset_parser.add_argument("--render", action="store_true", help="Render artifacts after applying preset.")
+    preset_parser.add_argument("--generate", dest="render", action="store_true", help="Generate deployment files after applying preset.")
+    preset_parser.add_argument("--render", dest="render", action="store_true", help=argparse.SUPPRESS)
     preset_parser.set_defaults(func=handlers.cmd_preset)
 
     compose_parser = subparsers.add_parser("compose", help=argparse.SUPPRESS)
@@ -393,16 +426,20 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
         help="Output format for `devsecops config` compatibility show mode.",
     )
     config_parser.set_defaults(func=handlers.cmd_config, config_command="show")
-    config_subparsers = config_parser.add_subparsers(dest="config_command")
+    config_subparsers = config_parser.add_subparsers(
+        dest="config_command",
+        metavar="{show,validate,diff,reset,set,schema}",
+    )
 
     config_show_parser = config_subparsers.add_parser("show", help="Print local source config.")
     config_show_parser.add_argument("--format", choices=["toml", "json"], default="toml", help="Output format.")
     config_show_parser.set_defaults(func=handlers.cmd_config)
 
-    config_new_parser = config_subparsers.add_parser("new", help="Create a clean local source config.")
+    config_new_parser = config_subparsers.add_parser("new", help=argparse.SUPPRESS)
     config_new_parser.add_argument("--preset", choices=PRESET_ORDER, default="balanced", help="Preset to use for the clean config.")
     config_new_parser.add_argument("--force", action="store_true", help="Replace an existing config after taking a snapshot.")
-    config_new_parser.add_argument("--render", action="store_true", help="Render artifacts after writing config.")
+    config_new_parser.add_argument("--generate", dest="render", action="store_true", help="Generate deployment files after writing config.")
+    config_new_parser.add_argument("--render", dest="render", action="store_true", help=argparse.SUPPRESS)
     config_new_parser.set_defaults(func=handlers.cmd_config)
 
     config_validate_parser = config_subparsers.add_parser("validate", help="Validate local source config values.")
@@ -417,28 +454,54 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
 
     config_reset_parser = config_subparsers.add_parser("reset", help="Reset local source config to a clean preset.")
     config_reset_parser.add_argument("--preset", choices=PRESET_ORDER, default="balanced", help="Preset to reset to.")
-    config_reset_parser.add_argument("--render", action="store_true", help="Render artifacts after resetting config.")
+    config_reset_parser.add_argument("--generate", dest="render", action="store_true", help="Generate deployment files after resetting config.")
+    config_reset_parser.add_argument("--render", dest="render", action="store_true", help=argparse.SUPPRESS)
     config_reset_parser.set_defaults(func=handlers.cmd_config)
 
     config_set_parser = config_subparsers.add_parser("set", help="Set a local source config value.")
     config_set_parser.add_argument("key", help="Config key, for example backend.bucket.")
     config_set_parser.add_argument("value", help="New value. Lists use comma-separated values.")
-    config_set_parser.add_argument("--render", action="store_true", help="Render artifacts after updating config.")
+    config_set_parser.add_argument("--generate", dest="render", action="store_true", help="Generate deployment files after updating config.")
+    config_set_parser.add_argument("--render", dest="render", action="store_true", help=argparse.SUPPRESS)
     config_set_parser.set_defaults(func=handlers.cmd_config)
 
-    config_create_parser = config_subparsers.add_parser("create", help="Alias for config new.")
+    config_create_parser = config_subparsers.add_parser("create", help=argparse.SUPPRESS)
     config_create_parser.add_argument("--preset", choices=PRESET_ORDER, default="balanced", help="Preset to use for the clean config.")
     config_create_parser.add_argument("--force", action="store_true", help="Replace an existing config after taking a snapshot.")
-    config_create_parser.add_argument("--render", action="store_true", help="Render artifacts after writing config.")
+    config_create_parser.add_argument("--generate", dest="render", action="store_true", help="Generate deployment files after writing config.")
+    config_create_parser.add_argument("--render", dest="render", action="store_true", help=argparse.SUPPRESS)
     config_create_parser.set_defaults(func=handlers.cmd_config)
 
     config_schema_parser = config_subparsers.add_parser("schema", help="Print the local config schema contract.")
     config_schema_parser.add_argument("--format", choices=["json", "markdown"], default="json", help="Schema output format.")
     config_schema_parser.set_defaults(func=handlers.cmd_config)
-    if hasattr(subparsers, "_choices_actions"):
-        subparsers._choices_actions = [  # type: ignore[attr-defined]
-            choice for choice in subparsers._choices_actions if getattr(choice, "help", None) != argparse.SUPPRESS
-        ]
+    for parser_choices in (subparsers, config_subparsers):
+        if hasattr(parser_choices, "_choices_actions"):
+            parser_choices._choices_actions = [  # type: ignore[attr-defined]
+                choice for choice in parser_choices._choices_actions if getattr(choice, "help", None) != argparse.SUPPRESS
+            ]
+    primary_order = [
+        "menu",
+        "setup",
+        "status",
+        "dry-run",
+        "image",
+        "generate",
+        "doctor",
+        "health",
+        "config",
+        "github",
+        "aws",
+        "terraform",
+        "snapshot",
+        "report",
+        "explain",
+        "completion",
+    ]
+    order_index = {name: index for index, name in enumerate(primary_order)}
+    subparsers._choices_actions.sort(  # type: ignore[attr-defined]
+        key=lambda choice: order_index.get(getattr(choice, "dest", ""), len(primary_order))
+    )
     return parser
 
 

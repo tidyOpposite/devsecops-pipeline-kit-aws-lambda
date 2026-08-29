@@ -6,7 +6,7 @@ wrong region, or not found in ECR.
 ## Diagnose
 
 ```bash
-devsecops preflight --image-uri <immutable-ecr-image-uri>
+devsecops image validate --image-uri <immutable-ecr-image-uri>
 devsecops doctor github --strict
 devsecops doctor aws --environment prod
 devsecops aws outputs --environment prod
@@ -24,6 +24,6 @@ devsecops aws outputs --environment prod
 
 1. Publish the workload image in the same region as `aws_region`.
 2. Use an immutable tag or digest.
-3. Set the value with `devsecops set lambda_image_uri <image-uri> --render`.
+3. Set the value with `devsecops config set lambda_image_uri <image-uri> --generate`.
 4. Apply GitHub setup with `devsecops github setup --apply ...`.
-5. Rerun `devsecops preflight` and `devsecops doctor github --strict`.
+5. Rerun `devsecops image validate` and `devsecops doctor github --strict`.

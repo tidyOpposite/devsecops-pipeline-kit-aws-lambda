@@ -39,8 +39,8 @@ LAMBDA_IMAGE_URI=123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline
 Then return to this repository and run:
 
 ```bash
-devsecops preflight --image-uri "$LAMBDA_IMAGE_URI"
-devsecops config set lambda_image_uri "$LAMBDA_IMAGE_URI" --render
+devsecops image validate --image-uri "$LAMBDA_IMAGE_URI"
+devsecops config set lambda_image_uri "$LAMBDA_IMAGE_URI" --generate
 ```
 
 This keeps the product boundary clean: workload code lives in the workload

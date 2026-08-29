@@ -2,7 +2,7 @@
 
 DevSecOps Pipeline Kit separates source configuration from generated helper
 artifacts. This keeps the CLI product predictable: users edit or create local
-configuration, then the CLI renders deterministic files for Terraform, GitHub,
+configuration, then the CLI generates deterministic files for Terraform, GitHub,
 and operator checklists.
 
 The generated artifact compatibility contract is also listed in
@@ -16,12 +16,12 @@ devsecops inventory --format json
 
 | File | Owner | Commit? | How to change it |
 | --- | --- | --- | --- |
-| `.devsecops-pipeline.toml` | CLI-managed local source config | No | Use `devsecops config new`, `devsecops config reset`, `devsecops set`, `devsecops preset apply`, `devsecops compose`, or a careful manual edit followed by `devsecops config validate`. |
-| `terraform/generated.auto.tfvars` | CLI-owned generated artifact | No | Update `.devsecops-pipeline.toml`, then run `devsecops render`. |
-| `dist/devsecops/backend.tf` | CLI-owned generated template | No | Update backend settings, then run `devsecops render`. Copy or adapt into `terraform/backend.tf` only after review. |
-| `dist/devsecops/github-variables.env` | CLI-owned generated helper | No | Update `.devsecops-pipeline.toml`, then run `devsecops render`. |
-| `dist/devsecops/github-setup.sh` | CLI-owned generated helper | No | Update `.devsecops-pipeline.toml`, then run `devsecops render` or `devsecops github-setup --write`. |
-| `dist/devsecops/setup-checklist.md` | CLI-owned generated checklist | No | Update `.devsecops-pipeline.toml`, then run `devsecops render`. |
+| `.devsecops-pipeline.toml` | CLI-managed local source config | No | Use `devsecops setup` initially; use Configuration commands or the Advanced control editor for later changes, then run `devsecops config validate`. |
+| `terraform/generated.auto.tfvars` | CLI-owned generated artifact | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
+| `dist/devsecops/backend.tf` | CLI-owned generated template | No | Update backend settings, then run `devsecops generate`. Copy or adapt into `terraform/backend.tf` only after review. |
+| `dist/devsecops/github-variables.env` | CLI-owned generated helper | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
+| `dist/devsecops/github-setup.sh` | CLI-owned generated helper | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate` or `devsecops github-setup --write`. |
+| `dist/devsecops/setup-checklist.md` | CLI-owned generated checklist | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
 | `dist/devsecops/readiness-report.md` | CLI-owned generated report | No | Run `devsecops report` after changing config or environment state. |
 | `dist/devsecops/audit-report.json` | CLI-owned generated audit evidence | No | Run `devsecops report --format json` after changing config, controls, readiness, or release evidence. |
 | `dist/devsecops/evidence/rc/*` | CLI-owned generated release-candidate evidence | No | Run `devsecops evidence collect --rc` after local validation or before attaching an RC evidence bundle. Includes `criteria.json` from `devsecops criteria --format json`. |
@@ -30,7 +30,7 @@ devsecops inventory --format json
 
 ## CLI-Owned Header
 
-Rendered text files include a header that identifies them as CLI-owned. JSON
+Generated text files include a header that identifies them as CLI-owned. JSON
 reports use `kind`, `schema_version`, and generated-path documentation for the
 same ownership signal. The ownership marker means:
 
@@ -59,14 +59,14 @@ strict config validation, control catalog state, policy preset posture, and
 least-privilege role guidance. It is still generated output, not durable source
 configuration.
 
-## Compatibility And Re-rendering
+## Compatibility And Regeneration
 
 Generated artifacts are deterministic outputs of local source config plus the
-CLI generator version. Re-render when config values change, when a documented
-schema migration changes normalized config values, or when release notes say
-the artifact contract changed.
+CLI generator version. Generate the files again when config values change,
+when a documented schema migration changes normalized config values, or when
+release notes say the artifact contract changed.
 
-| File | Compatibility | Re-render when | Expected diffs |
+| File | Compatibility | Generate again when | Expected diffs |
 | --- | --- | --- | --- |
 | `terraform/generated.auto.tfvars` | Stable Terraform variables | Config values, schema migration output, or Terraform variable contract changes | HCL assignment values and `environment_config` entries. |
 | `dist/devsecops/backend.tf` | Stable review template | `backend.*` config values or backend template policy changes | S3 backend attributes such as bucket, key, region, lock table, or workspace prefix. |
@@ -78,18 +78,18 @@ the artifact contract changed.
 | `dist/devsecops/evidence/rc/manifest.json` | Stable RC evidence manifest | Release-candidate evidence is collected | `generated_at`, evidence file list, and Terraform validation status. |
 | `dist/devsecops/evidence/rc/criteria.json` | Stable Version 1.0 criteria evidence | Release-candidate evidence is collected or stable blockers change | `generated_at`, criteria status, stable-release gate status, and next actions. |
 
-If a re-render diff only contains expected value changes, review and continue.
+If a regeneration diff only contains expected value changes, review and continue.
 Unexpected new files, missing CLI-owned headers, or changed GitHub/AWS mutation
 commands should be treated as release-review findings before applying them.
 
 ## Backend Template Exception
 
 The repository contains `terraform/backend.tf` as the Terraform backend file
-used by the root module. The CLI also renders `dist/devsecops/backend.tf` as a
-reviewable template. Treat the rendered file as a helper, not as an automatic
+used by the root module. The CLI also generates `dist/devsecops/backend.tf` as a
+reviewable template. Treat the generated file as a helper, not as an automatic
 replacement for the tracked Terraform backend file.
 
-When you are ready to switch backend values, review the rendered template and
+When you are ready to switch backend values, review the generated template and
 copy or adapt the backend block intentionally.
 
 ## Rollback Boundary

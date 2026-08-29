@@ -6,7 +6,7 @@ Use this when Terraform validation, Trivy, Snyk, `/health`, or OWASP ZAP fails.
 
 ```bash
 devsecops github status --format compact
-devsecops readiness --strict --format compact
+devsecops status --strict --format compact
 devsecops health --aws-sigv4
 gh run view <run-id> --log-failed
 ```

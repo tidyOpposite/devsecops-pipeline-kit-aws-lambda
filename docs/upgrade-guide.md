@@ -38,20 +38,20 @@ PYTHON="${PYTHON:-python3.11}"
 devsecops --version
 ```
 
-Validate the existing config before rendering:
+Validate the existing config before generating deployment files:
 
 ```bash
 devsecops config validate
 devsecops config schema --format markdown
 devsecops config diff
-devsecops render --dry-run
+devsecops generate --dry-run
 ```
 
-Only render after reviewing the dry-run output:
+Only generate files after reviewing the dry-run output:
 
 ```bash
-devsecops render
-devsecops readiness --format compact
+devsecops generate
+devsecops status --format compact
 ```
 
 ## Schema Change Policy
@@ -68,7 +68,7 @@ before it ships:
 * add tests that generated artifact paths still match the compatibility
   contract;
 * add changelog and release-note upgrade sections;
-* document whether generated files must be re-rendered;
+* document whether generated files must be regenerated;
 * document rollback expectations for CLI-owned files.
 
 ## Migration Behavior
@@ -88,11 +88,11 @@ Expected release-note format for schema changes:
 
 | From | To | Automatic behavior | Manual action |
 | --- | --- | --- | --- |
-| `1` | `2` | Describe the exact fields added, renamed, or transformed. | Describe every required operator decision before `devsecops render`. |
+| `1` | `2` | Describe the exact fields added, renamed, or transformed. | Describe every required operator decision before `devsecops generate`. |
 
 ## Rollback After Upgrade
 
-If an upgraded CLI renders unexpected helper artifacts:
+If an upgraded CLI generates unexpected helper artifacts:
 
 ```bash
 devsecops snapshot list

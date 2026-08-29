@@ -25,16 +25,16 @@ Digest shape:
 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo@sha256:<64-hex-digest>
 ```
 
-## Local Preflight
+## Validate The Image Locally
 
-Run preflight before writing the value into config:
+Validate the image before writing the value into config:
 
 ```bash
-devsecops preflight \
+devsecops image validate \
   --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
 ```
 
-Preflight checks:
+Image validation checks:
 
 * URI is present;
 * URI matches ECR image shape;
@@ -42,12 +42,12 @@ Preflight checks:
 * image region matches `aws_region`;
 * repository name is visible for review.
 
-Write the value after preflight passes:
+Write the value after image validation passes:
 
 ```bash
 devsecops config set lambda_image_uri \
   123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123 \
-  --render
+  --generate
 ```
 
 ## HTTP Validation Contract

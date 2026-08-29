@@ -68,7 +68,7 @@ devsecops --version
 
 ## Upgrade
 
-Run the installer again, then validate local config before rendering or applying
+Run the installer again, then validate local config before generating or applying
 anything:
 
 ```bash
@@ -76,7 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit
 devsecops --version
 devsecops config validate
 devsecops config diff
-devsecops render --dry-run
+devsecops generate --dry-run
 ```
 
 Read [Upgrade guide](upgrade-guide.md) before upgrading across a release that

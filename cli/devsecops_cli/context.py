@@ -122,9 +122,9 @@ def next_action(
         return _next_action(
             action_id="missing_config",
             title="Local source configuration is missing",
-            why=f"{CONFIG_FILE} is the source of truth for rendering and readiness checks.",
+            why=f"{CONFIG_FILE} is the source of truth for generated deployment files and status checks.",
             changes=f"Creates {CONFIG_FILE} from the balanced preset; GitHub and AWS are not changed.",
-            command="devsecops config new --preset balanced",
+            command="devsecops setup --preset balanced --yes",
             docs="docs/first-successful-pipeline.md",
             context=context,
         )
@@ -132,7 +132,7 @@ def next_action(
         return _next_action(
             action_id="missing_config",
             title="Local source configuration is invalid",
-            why=f"{len(validation_failures)} invalid config setting(s) block rendering and deployment.",
+            why=f"{len(validation_failures)} invalid config setting(s) block deployment-file generation and deployment.",
             changes="Nothing is changed automatically; validation identifies the settings that must be corrected.",
             command="devsecops config validate",
             docs="docs/troubleshooting.md#config-validation-fails",
@@ -144,8 +144,8 @@ def next_action(
             action_id="missing_image",
             title="An immutable Lambda image is not configured",
             why="Production deployment requires a prebuilt Lambda container image identified by an immutable tag or digest.",
-            changes="Stores the image URI in local config and regenerates CLI-owned Terraform and GitHub helper artifacts.",
-            command="devsecops config set lambda_image_uri <immutable-ecr-image-uri> --render",
+            changes="Stores the image URI in local config; GitHub and AWS are not changed.",
+            command="devsecops config set lambda_image_uri <immutable-ecr-image-uri>",
             docs="docs/bring-your-own-image.md",
             context=context,
         )
@@ -155,8 +155,8 @@ def next_action(
             action_id="missing_backend",
             title="The Terraform backend bucket is not configured",
             why="A real S3 bucket is required for shared, locked Terraform state before production setup.",
-            changes="Updates the local backend bucket setting and regenerates CLI-owned helper artifacts.",
-            command="devsecops config set backend.bucket <state-bucket> --render",
+            changes="Updates the local backend bucket setting; GitHub and AWS are not changed.",
+            command="devsecops config set backend.bucket <state-bucket>",
             docs="docs/first-successful-pipeline.md#4-configure-terraform-backend",
             context=context,
         )
@@ -174,9 +174,9 @@ def next_action(
         return _next_action(
             action_id="missing_github_setup",
             title="Generated deployment helpers are missing",
-            why="Terraform inputs and the GitHub setup script must be rendered from the validated local configuration.",
+            why="Terraform inputs and the GitHub setup script must be generated from the validated local configuration.",
             changes="Creates or updates only CLI-owned files under terraform/ and dist/devsecops/.",
-            command="devsecops render",
+            command="devsecops generate",
             docs="docs/first-successful-pipeline.md#5-configure-github-repository-settings",
             context=context,
         )

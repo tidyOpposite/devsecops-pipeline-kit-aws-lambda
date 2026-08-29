@@ -100,8 +100,8 @@ class DevSecOpsCliTests(unittest.TestCase):
         self.assertLess(readme.index("## Quick Start"), readme.index("## Repository Layout"))
         self.assertIn(
             """```bash
-devsecops start --preset balanced --yes
-devsecops readiness
+devsecops setup --preset balanced --yes
+devsecops status
 devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
 ```""",
             readme,
@@ -286,7 +286,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             outputs = cli.render_outputs(root, golden_config())
 
         rendered_paths = {str(path.relative_to(root)) for path in outputs}
-        contract_paths = {item["path"] for item in cli.GENERATED_ARTIFACT_CONTRACTS if item["producer"].startswith("devsecops render")}
+        contract_paths = {item["path"] for item in cli.GENERATED_ARTIFACT_CONTRACTS if item["producer"].startswith("devsecops generate")}
 
         self.assertTrue(rendered_paths.issubset(contract_paths))
         self.assertIn(str(cli.GENERATED_TFVARS), contract_paths)
@@ -329,7 +329,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertEqual(result, 0)
         self.assertIn("No files changed", output)
         self.assertIn("AWS credentials are not required", output)
-        self.assertIn("Files that would be rendered", output)
+        self.assertIn("Files that would be generated", output)
 
     def test_render_dry_run_previews_without_writing_generated_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -431,7 +431,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             "health.json",
             "cloudwatch-tail.txt",
             "active-lambda-image.txt",
-            "devsecops readiness --strict --format json",
+            "devsecops status --strict --format json",
             "devsecops doctor aws --environment prod --strict --format json",
             "Roll back Lambda image on failed deployment validation",
         ]:
@@ -466,7 +466,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
 
         self.assertIn("[Stability contract](stability-contract.md)", command_inventory)
         self.assertIn("devsecops inventory --format json", command_inventory)
-        self.assertIn("Compatibility And Re-rendering", generated_doc)
+        self.assertIn("Compatibility And Regeneration", generated_doc)
         self.assertIn("future `schema_version` greater than this CLI", upgrade_doc)
         self.assertIn("Stability Contract Gate", release_checklist)
         self.assertIn("[Stability contract](docs/stability-contract.md)", readme)
@@ -520,9 +520,9 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         help_text = cli.build_parser().format_help()
         self.assertIn("CLI product", help_text)
         self.assertIn("Product boundary:", help_text)
-        self.assertIn("devsecops start --preset balanced --yes", help_text)
+        self.assertIn("devsecops setup --preset balanced --yes", help_text)
         self.assertIn("devsecops dry-run --image-uri <immutable-ecr-image-uri>", help_text)
-        self.assertIn("devsecops readiness", help_text)
+        self.assertIn("devsecops status", help_text)
         self.assertIn("without arguments shows compact status and one next action", help_text)
         self.assertIn("Human-readable commands finish with the same recommended next step", help_text)
         self.assertIn("devsecops inventory --format json", help_text)
@@ -533,7 +533,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
     def test_top_level_help_is_grouped_and_legacy_aliases_are_not_primary_choices(self) -> None:
         help_text = cli.build_parser().format_help()
         self.assertIn(
-            "{menu,config,next,start,criteria,dry-run,preflight,health,doctor,aws,render,github,terraform,snapshot,readiness,report,dashboard,explain,inventory,evidence,completion}",
+            "{menu,setup,status,dry-run,image,generate,doctor,health,config,github,aws,terraform,snapshot,report,explain,completion}",
             help_text,
         )
         self.assertIn("Legacy aliases still work", help_text)
@@ -541,6 +541,16 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertNotIn("==SUPPRESS==", help_text)
         self.assertNotIn("gh-doctor           ", help_text)
         self.assertNotIn("aws-doctor          ", help_text)
+        for legacy in ["next                ", "start               ", "readiness           ", "dashboard           ", "preflight           ", "render              "]:
+            self.assertNotIn(legacy, help_text)
+
+        config_buffer = io.StringIO()
+        with redirect_stdout(config_buffer), self.assertRaises(SystemExit):
+            cli.main(["config", "--help"])
+        config_help = config_buffer.getvalue()
+        self.assertIn("{show,validate,diff,reset,set,schema}", config_help)
+        self.assertNotIn("new                 ", config_help)
+        self.assertNotIn("create              ", config_help)
 
     def test_completion_scripts_cover_common_shells(self) -> None:
         bash = cli.completion_script("bash")
@@ -548,14 +558,13 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         fish = cli.completion_script("fish")
 
         self.assertIn("complete -F _devsecops_completion devsecops", bash)
-        self.assertIn("config next start criteria dry-run preflight", bash)
-        self.assertIn("show new validate diff reset set create schema", bash)
+        self.assertIn("menu setup status dry-run image generate", bash)
+        self.assertIn("show validate diff reset set schema", bash)
         self.assertIn("#compdef devsecops", zsh)
-        self.assertIn("compadd 'menu' 'config'", zsh)
+        self.assertIn("compadd 'menu' 'setup' 'status'", zsh)
         self.assertIn("complete -c devsecops", fish)
-        self.assertIn("inventory", bash)
-        self.assertIn("evidence", bash)
-        self.assertIn("inventory", zsh)
+        self.assertIn("image validate", bash)
+        self.assertNotIn("compgen -W \"next start", bash)
         self.assertIn("completion", fish)
 
         buffer = io.StringIO()
@@ -577,8 +586,10 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertEqual(payload["schema_version"], cli.CONTRACT_SCHEMA_VERSION)
         self.assertEqual(by_command["devsecops terraform plan"]["status"], "stable")
         self.assertEqual(by_command["devsecops terraform bootstrap"]["status"], "stable")
-        self.assertEqual(by_command["devsecops next"]["status"], "stable")
-        self.assertEqual(by_command["devsecops start"]["status"], "stable")
+        self.assertEqual(by_command["devsecops status"]["status"], "stable")
+        self.assertEqual(by_command["devsecops setup"]["status"], "stable")
+        self.assertEqual(by_command["devsecops next"]["alias_for"], "devsecops status")
+        self.assertEqual(by_command["devsecops start"]["alias_for"], "devsecops setup")
         self.assertEqual(by_command["devsecops criteria"]["status"], "stable")
         self.assertEqual(by_command["devsecops evidence collect"]["status"], "stable")
         self.assertEqual(by_command["devsecops rollback"]["alias_for"], "devsecops snapshot restore")
@@ -606,10 +617,15 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
 
     def test_new_ux_commands_have_help(self) -> None:
         for command in [
+            ["setup", "--help"],
+            ["status", "--help"],
+            ["image", "validate", "--help"],
+            ["generate", "--help"],
+            # Compatibility aliases remain callable even though they are hidden.
             ["next", "--help"],
             ["start", "--help"],
-            ["criteria", "--help"],
-            ["evidence", "collect", "--help"],
+            ["preflight", "--help"],
+            ["render", "--help"],
         ]:
             buffer = io.StringIO()
             with redirect_stdout(buffer):
@@ -782,7 +798,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
                     result = cli.main(["start", "--yes"])
 
             self.assertTrue((root / cli.CONFIG_FILE).exists())
-            self.assertIn("Guided Start", buffer.getvalue())
+            self.assertIn("Project Setup", buffer.getvalue())
             self.assertIn("Next Action", buffer.getvalue())
 
         self.assertEqual(result, cli.EXIT_OK)
@@ -853,20 +869,18 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         first_success_doc = (ROOT_DIR / "docs/first-successful-pipeline.md").read_text(encoding="utf-8")
         command_status = {item["command"]: item["status"] for item in cli.command_contracts()}
         required_stable_commands = [
-            "devsecops next",
-            "devsecops start",
-            "devsecops config new",
+            "devsecops status",
+            "devsecops setup",
             "devsecops config validate",
             "devsecops config diff",
             "devsecops dry-run",
-            "devsecops render",
-            "devsecops preflight",
+            "devsecops generate",
+            "devsecops image validate",
             "devsecops config set",
             "devsecops terraform bootstrap",
             "devsecops github setup",
             "devsecops doctor github",
             "devsecops doctor branch",
-            "devsecops readiness",
             "devsecops report",
             "devsecops github status",
             "devsecops doctor aws",
@@ -893,6 +907,52 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertEqual(payload["kind"], "readiness")
         self.assertIn("checks", payload)
         self.assertIn("gaps", payload)
+
+    def test_status_json_has_one_score_and_includes_the_next_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with patch.object(cli, "repo_root", return_value=root):
+                buffer = io.StringIO()
+                with redirect_stdout(buffer):
+                    result = cli.main(["status", "--format", "json"])
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(result, cli.EXIT_OK)
+        self.assertEqual(payload["kind"], "status")
+        self.assertIn("score", payload)
+        self.assertNotIn("overall_breakdown_score", payload)
+        self.assertEqual(payload["next_action"]["action"], "missing_project_files")
+        self.assertIn("command", payload["next_action"])
+
+    def test_status_human_output_does_not_show_a_second_legacy_score(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with patch.object(cli, "repo_root", return_value=root):
+                buffer = io.StringIO()
+                with redirect_stdout(buffer):
+                    result = cli.main(["status"])
+
+        self.assertEqual(result, cli.EXIT_OK)
+        self.assertIn("Overall:", buffer.getvalue())
+        self.assertNotIn("legacy score", buffer.getvalue())
+
+    def test_image_validate_uses_plain_language_json_while_preflight_keeps_legacy_kind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with patch.object(cli, "repo_root", return_value=root):
+                preferred = io.StringIO()
+                with redirect_stdout(preferred):
+                    cli.main(["image", "validate", "--format", "json"])
+                legacy = io.StringIO()
+                with redirect_stdout(legacy):
+                    cli.main(["preflight", "--format", "json"])
+
+        preferred_payload = json.loads(preferred.getvalue())
+        legacy_payload = json.loads(legacy.getvalue())
+        self.assertEqual(preferred_payload["kind"], "image-validation")
+        self.assertNotIn("overall_breakdown_score", preferred_payload)
+        self.assertEqual(legacy_payload["kind"], "preflight")
+        self.assertIn("overall_breakdown_score", legacy_payload)
 
     def test_doctor_group_json_and_legacy_alias_share_payload_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -925,6 +985,14 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
 
         self.assertEqual(result, 0)
         self.assertEqual(cfg["backend"]["bucket"], "state-bucket")
+
+    def test_generate_flag_replaces_render_flag_without_breaking_compatibility(self) -> None:
+        parser = cli.build_parser()
+        preferred = parser.parse_args(["config", "set", "backend.bucket", "state-bucket", "--generate"])
+        legacy = parser.parse_args(["config", "set", "backend.bucket", "state-bucket", "--render"])
+
+        self.assertTrue(preferred.render)
+        self.assertTrue(legacy.render)
 
     def test_grouped_snapshot_list_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1332,7 +1400,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
                 cli.render_dashboard(root, mode="compact")
             compact_output = compact.getvalue()
             self.assertIn("Readiness", compact_output)
-            self.assertIn("Run `devsecops dashboard --mode full`", compact_output)
+            self.assertIn("Run `devsecops status --deep`", compact_output)
 
             full = io.StringIO()
             dashboard_checks = [
@@ -2091,10 +2159,12 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
     def test_continue_setup_routes_from_the_shared_next_action(self) -> None:
         cases = [
             ("missing_project_files", "cd /project", "blocked"),
-            ("missing_config", "devsecops config new --preset balanced", "start"),
+            ("missing_config", "devsecops setup --preset balanced --yes", "setup"),
+            ("missing_config", "devsecops config new --preset balanced", "setup"),
             ("missing_config", "devsecops config validate", "configuration"),
             ("missing_image", "devsecops config set lambda_image_uri value", "configuration"),
             ("missing_backend", "devsecops config set backend.bucket value", "configuration"),
+            ("missing_github_setup", "devsecops generate", "deployment_files"),
             ("missing_github_setup", "devsecops render", "deployment_files"),
             ("missing_github_setup", "devsecops github setup --apply", "github"),
             ("missing_aws_evidence", "aws sts get-caller-identity", "diagnostics"),

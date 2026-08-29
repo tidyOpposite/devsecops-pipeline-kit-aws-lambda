@@ -24,7 +24,7 @@ gh run view <run-id> --log-failed
 
 1. Confirm `devsecops doctor github --strict` and `devsecops doctor branch` are
    clean.
-2. Confirm `devsecops preflight --image-uri <immutable-ecr-image-uri>` passes.
+2. Confirm `devsecops image validate --image-uri <immutable-ecr-image-uri>` passes.
 3. Confirm deployed state with `devsecops aws outputs --environment prod`.
 4. Fix IAM, image, or Terraform errors from the failed step log.
 5. Rerun the production workflow only after the failed run has completed.

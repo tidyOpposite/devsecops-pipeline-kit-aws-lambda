@@ -2,8 +2,8 @@
 
 The CLI is the product surface for enabling, explaining, and checking scanner
 gates. GitHub Actions runs the scanners, while `devsecops compose`,
-`devsecops controls`, `devsecops readiness`, `devsecops preset`, and
-`devsecops render` help the operator choose and validate the active policy.
+`devsecops controls`, `devsecops status`, `devsecops preset`, and
+`devsecops generate` help the operator choose and validate the active policy.
 
 The kit intentionally separates infrastructure scanning from workload source
 scanning. This repository owns the CLI-managed AWS deployment template;
@@ -27,9 +27,9 @@ devsecops controls
 devsecops explain dast
 devsecops compose
 devsecops preset show strict
-devsecops preset apply strict --render
-devsecops set enable_snyk_scan true --render
-devsecops set enable_dast true --render
+devsecops preset apply strict --generate
+devsecops config set enable_snyk_scan true --generate
+devsecops config set enable_dast true --generate
 devsecops gh-doctor
 ```
 
@@ -39,7 +39,7 @@ implement `/health` and can tolerate passive dynamic scanning.
 `enterprise` also enables those gates while using locked-down CORS and longer
 log retention. `student-demo` keeps scanning gates off for short demonstrations.
 
-Snyk container scanning is controlled by `enable_snyk_scan`, rendered as the
+Snyk container scanning is controlled by `enable_snyk_scan`, generated as the
 `ENABLE_SNYK_SCAN` GitHub variable, and also requires `SNYK_TOKEN`.
 
 ## Source SAST And SCA

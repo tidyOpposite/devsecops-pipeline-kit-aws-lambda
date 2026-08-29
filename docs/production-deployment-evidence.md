@@ -83,14 +83,14 @@ build and checksum commands from [Release checklist](release-checklist.md).
 
 ## 2. Prove Local Configuration
 
-Create or inspect the source config, validate it strictly, render helper
+Create or inspect the source config, validate it strictly, generate helper
 artifacts, and export both Markdown and JSON evidence:
 
 ```bash
 devsecops config show --format json > "${EVIDENCE_DIR}/config.json"
 devsecops config validate --strict --format json > "${EVIDENCE_DIR}/config-validate.json"
-devsecops render
-devsecops readiness --strict --format json > "${EVIDENCE_DIR}/readiness.json"
+devsecops generate
+devsecops status --strict --format json > "${EVIDENCE_DIR}/readiness.json"
 devsecops report --output "${EVIDENCE_DIR}/readiness-report.md"
 devsecops report --format json --output "${EVIDENCE_DIR}/audit-report.json"
 
@@ -257,7 +257,7 @@ Before accepting the production proof, confirm:
 
 * Release artifact checksum verification passed.
 * `devsecops config validate --strict` passed.
-* `devsecops readiness --strict` passed before dispatch.
+* `devsecops status --strict` passed before dispatch.
 * `doctor github` and `doctor branch` showed no blocking GitHub setup gaps.
 * Production workflow ran from `main` with `mode=deploy` and
   `environment=prod`.

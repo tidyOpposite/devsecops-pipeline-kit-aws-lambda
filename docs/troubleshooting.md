@@ -9,13 +9,13 @@ behind the CLI.
 Run:
 
 ```bash
-devsecops next
-devsecops start --preset balanced
-devsecops dashboard --mode compact
-devsecops dashboard --watch --interval 10
+devsecops status
+devsecops setup --preset balanced
+devsecops status
+devsecops status --watch --interval 10
 devsecops tui
-devsecops readiness
-devsecops readiness --strict --format compact
+devsecops status
+devsecops status --strict --format compact
 devsecops doctor
 devsecops doctor --deep
 devsecops github status --format compact
@@ -23,9 +23,9 @@ devsecops aws outputs --environment prod
 devsecops health --aws-sigv4
 ```
 
-Use `[i] details` from the main menu or `devsecops readiness` to see only the
+Use `[i] details` from the main menu or `devsecops status` to see only the
 checks that block 100% readiness and the concrete fix for each one. Use
-`devsecops doctor` when you need the full local check list. The dashboard
+`devsecops doctor` when you need the full local check list. Project status
 groups readiness into Local, Terraform, GitHub, AWS, Security, and Deployment
 scores.
 
@@ -34,7 +34,7 @@ every Version 1.0 criterion plus the external production and WSL2 evidence
 gates, then prints the next missing artifact or command.
 
 `devsecops tui` uses optional Rich/Textual dependencies. Without them, it falls
-back to the compact dashboard. For a published install, add the dependencies
+back to compact status. For a published install, add the dependencies
 with `python3.11 -m pipx inject devsecops-pipeline-cli "rich>=13.7" "textual>=0.79"`.
 For development from a local checkout, use
 `PYTHON="${PYTHON:-python3.11}"` and `"${PYTHON}" -m pip install -e ".[tui]"`.
@@ -109,7 +109,7 @@ traffic. For cloud rollback diagnostics, use
 Create a clean local source config:
 
 ```bash
-devsecops config new --preset balanced
+devsecops setup --preset balanced --yes
 devsecops config validate
 ```
 
@@ -130,7 +130,7 @@ terraform/modules/lambda/main.tf
 .github/workflows/deploy.yml
 ```
 
-Restore those files from the repository before running `devsecops render`,
+Restore those files from the repository before running `devsecops generate`,
 Terraform plans, or production workflow dispatch.
 
 ### Config validation fails
@@ -147,16 +147,16 @@ Then rerun:
 
 ```bash
 devsecops config validate
-devsecops render --dry-run
+devsecops generate --dry-run
 ```
 
-### Readiness says backend bucket is missing
+### Status says backend bucket is missing
 
-Set a real backend bucket through the CLI and render generated artifacts:
+Set a real backend bucket through the CLI and generate deployment files:
 
 ```bash
-devsecops set backend.bucket my-state-bucket --render
-devsecops readiness
+devsecops config set backend.bucket my-state-bucket --generate
+devsecops status
 ```
 
 Then plan or apply the bootstrap stack:
@@ -175,19 +175,19 @@ names are correct.
 Set an immutable Lambda container image:
 
 ```bash
-devsecops preflight --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:sha-a1b2c3
-devsecops set lambda_image_uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:sha-a1b2c3 --render
-devsecops readiness
+devsecops image validate --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:sha-a1b2c3
+devsecops config set lambda_image_uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:sha-a1b2c3 --generate
+devsecops status
 ```
 
 The production workflow rejects `latest` and `bootstrap` because rollback and
 auditability depend on stable image identity.
 
-If preflight reports a region mismatch, publish or select an image in the same
+If image validation reports a region mismatch, publish or select an image in the same
 region as `aws_region`, then rerun:
 
 ```bash
-devsecops preflight --image-uri <immutable-ecr-image-uri>
+devsecops image validate --image-uri <immutable-ecr-image-uri>
 ```
 
 See [Bring your own Lambda image](bring-your-own-image.md) for the image
@@ -195,13 +195,13 @@ contract.
 
 ### Update one setting without rerunning the wizard
 
-Use `devsecops set` with a dotted config key:
+Use `devsecops config set` with a dotted config key:
 
 ```bash
-devsecops set backend.bucket my-state-bucket --render
-devsecops set enable_dast true
-devsecops set environments.prod.lambda_memory_size 2048
-devsecops validate-config
+devsecops config set backend.bucket my-state-bucket --generate
+devsecops config set enable_dast true
+devsecops config set environments.prod.lambda_memory_size 2048
+devsecops config validate
 ```
 
 ### Rebuild config and generated outputs from controls
@@ -213,16 +213,16 @@ helpers:
 devsecops compose
 ```
 
-It updates `.devsecops-pipeline.toml`, renders Terraform/GitHub helper
+It updates `.devsecops-pipeline.toml`, generates Terraform/GitHub helper
 artifacts, and rewrites `dist/devsecops/readiness-report.md`.
 
 ### Generated files look stale
 
-Render again:
+Generate them again:
 
 ```bash
-devsecops render
-devsecops readiness
+devsecops generate
+devsecops status
 ```
 
 Generated files are intentionally ignored by Git. They are local bridge files
@@ -438,7 +438,7 @@ Production deploy workflow dispatch must run from `main`:
 ```bash
 git branch --show-current
 git switch main
-devsecops readiness
+devsecops status
 ```
 
 ## GitHub OIDC
@@ -478,7 +478,7 @@ skipped by design. Run the plan from a trusted branch or use a reviewed manual
 Prefer the CLI bootstrap flow:
 
 ```bash
-devsecops set backend.bucket <globally-unique-state-bucket> --render
+devsecops config set backend.bucket <globally-unique-state-bucket> --generate
 devsecops bootstrap --apply
 ```
 
@@ -528,7 +528,7 @@ The root module rejects unsupported workspaces. Valid values are `dev`,
 Set the value through the CLI, render, then apply GitHub setup:
 
 ```bash
-devsecops set lambda_image_uri <immutable-image-uri> --render
+devsecops config set lambda_image_uri <immutable-image-uri> --generate
 devsecops gh-setup --apply \
   --deploy-role-arn <deploy-role-arn> \
   --plan-role-arn <plan-role-arn>
@@ -545,7 +545,7 @@ exists.
 Run:
 
 ```bash
-devsecops preflight --image-uri <immutable-ecr-image-uri>
+devsecops image validate --image-uri <immutable-ecr-image-uri>
 devsecops aws outputs --environment prod
 ```
 

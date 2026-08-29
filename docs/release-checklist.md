@@ -191,8 +191,8 @@ devsecops inventory --format json
 devsecops inventory --status stable --format markdown
 devsecops config schema --format json
 devsecops config schema --format markdown
-devsecops next --format json
-devsecops render --dry-run
+devsecops status --format json
+devsecops generate --dry-run
 ```
 
 Confirm:

@@ -26,9 +26,10 @@ devsecops inventory --status stable --format markdown
 
 | Workflow | Stable commands and flags |
 | --- | --- |
-| First success | `devsecops`, `devsecops next --format`, `devsecops start --preset --render --yes`, `devsecops config new --preset --force --render`, `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops dry-run --preset --image-uri --environment`, `devsecops preflight --image-uri --environment --format` |
-| Diagnostics | `devsecops readiness --deep --strict --format`, `devsecops doctor local --deep --strict --format`, `devsecops doctor github --strict --format`, `devsecops doctor aws --environment --strict --format`, `devsecops doctor branch --branch --strict --format`, `devsecops doctor actions --limit --strict --format`, `devsecops doctor all --deep --branch --environment --strict --format` |
-| Rendering and reports | `devsecops render --dry-run`, `devsecops report --deep --format --output --print`, `devsecops evidence collect --rc --output`, `devsecops criteria --format --evidence-dir --strict` |
+| First success | `devsecops`, `devsecops setup --preset --generate --yes`, `devsecops status --deep --strict --format --watch --interval`, `devsecops dry-run --preset --image-uri --environment`, `devsecops image validate --image-uri --environment --format` |
+| Troubleshooting | `devsecops doctor local --deep --strict --format`, `devsecops doctor github --strict --format`, `devsecops doctor aws --environment --strict --format`, `devsecops doctor branch --branch --strict --format`, `devsecops doctor actions --limit --strict --format`, `devsecops doctor all --deep --branch --environment --strict --format` |
+| Configuration and generation | `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops generate --dry-run`, `devsecops report --deep --format --output --print` |
+| Advanced release maintenance | `devsecops inventory --format --status`, `devsecops evidence collect --rc --output`, `devsecops criteria --format --evidence-dir --strict` |
 | GitHub setup | `devsecops github setup --write --apply --deploy-role-arn --plan-role-arn --snyk-token`, `devsecops github status --limit --strict --format`, `devsecops github branch --branch --strict --format`, `devsecops github doctor --strict --format` |
 | Terraform helpers | `devsecops terraform plan <environment> --no-init --create-workspace`, `devsecops terraform bootstrap --apply` |
 | Snapshots | `devsecops snapshot list --format`, `devsecops snapshot show <selection> --format`, `devsecops snapshot restore --to --last --dry-run --yes` |
@@ -47,15 +48,17 @@ without a deprecation window.
 | Kind | Commands | Stable keys |
 | --- | --- | --- |
 | `config` | `devsecops config validate --format json` | `kind`, `schema_version`, `score`, `overall_breakdown_score`, `breakdown`, `gaps`, `checks` |
-| `readiness` | `devsecops readiness --format json` | `kind`, `schema_version`, `score`, `overall_breakdown_score`, `breakdown`, `gaps`, `checks`, `context` |
-| `preflight` | `devsecops preflight --format json` | `kind`, `schema_version`, `score`, `overall_breakdown_score`, `breakdown`, `gaps`, `checks`, `context` |
+| `status` | `devsecops status --format json` | `kind`, `schema_version`, `score`, `breakdown`, `gaps`, `checks`, `context`, `next_action` |
+| `image-validation` | `devsecops image validate --format json` | `kind`, `schema_version`, `score`, `breakdown`, `gaps`, `checks`, `context` |
+| `readiness` | `devsecops readiness --format json` (compatibility alias) | Existing legacy keys remain stable. |
+| `preflight` | `devsecops preflight --format json` (compatibility alias) | Existing legacy keys remain stable. |
 | `health` | `devsecops health --format json` | `kind`, `schema_version`, `score`, `overall_breakdown_score`, `breakdown`, `gaps`, `checks`, `context` |
 | `github-actions-status` | `devsecops github status --format json`, `devsecops doctor actions --format json` | `kind`, `schema_version`, `error`, `runs`, `failed_jobs`, `failed_steps`, `next_actions` |
 | `aws-outputs` | `devsecops aws outputs --format json` | `kind`, `schema_version`, `environment`, `outputs`, `checks`, `next_actions` |
 | `snapshots` | `devsecops snapshot list --format json` | `kind`, `schema_version`, `snapshots` |
 | `snapshot` | `devsecops snapshot show --format json` | `kind`, `schema_version`, `snapshot` |
 | `audit-evidence` | `devsecops report --format json` | `kind`, `schema_version`, `cli_version`, `project`, `readiness`, `config_validation`, `controls` |
-| `next-action` | `devsecops next --format json` | `kind`, `schema_version`, `context`, `action`, `command`, `detail`, `why`, `changes`, `blocked`, `docs` |
+| `next-action` | `devsecops next --format json` (compatibility alias) | `kind`, `schema_version`, `context`, `action`, `command`, `detail`, `why`, `changes`, `blocked`, `docs` |
 | `release-candidate-evidence` | `devsecops evidence collect --rc` | `kind`, `schema_version`, `generated_at`, `output_dir`, `files`, `terraform_validate` |
 | `v1-criteria` | `devsecops criteria --format json` | `kind`, `schema_version`, `cli_version`, `stable_ready`, `criteria`, `stable_release_gates`, `next_actions` |
 | `control-catalog` | `devsecops controls --format json` | `kind`, `schema_version`, `controls` |
@@ -98,7 +101,7 @@ Every future schema-changing release must:
 * update `devsecops config schema --format json` and `--format markdown`;
 * add tests for legacy load, migrated output, future-version refusal, and
   rollback expectations;
-* document whether `devsecops render`, `devsecops report`, or
+* document whether `devsecops generate`, `devsecops report`, or
   `devsecops github setup --write` must be rerun.
 
 Rollback after migration is local only. Snapshot restore can recover

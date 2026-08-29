@@ -5,7 +5,20 @@ semantic versioning.
 
 ## Unreleased
 
-No changes yet.
+### Added
+
+* Preferred `setup`, `status`, `image validate`, and `generate` commands with
+  matching help, shell completion, documentation, and machine-readable
+  contracts.
+
+### Changed
+
+* Unified the first-run vocabulary around one setup flow and one status surface
+  that includes the shared next action.
+* Moved release-maintainer commands out of primary help and removed the second
+  legacy readiness percentage from human status output.
+* Kept `start`, `next`, `readiness`, `dashboard`, `preflight`, `render`, and
+  `--render` callable as compatibility aliases with their existing JSON kinds.
 
 ## v0.13.1 - 2026-08-24
 

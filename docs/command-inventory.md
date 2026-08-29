@@ -28,36 +28,47 @@ The README quick start and `devsecops --help` use the same first-run path:
 
 ```bash
 devsecops
-devsecops start --preset balanced --yes
-devsecops readiness
+devsecops setup --preset balanced --yes
+devsecops status
 devsecops dry-run --image-uri <immutable-ecr-image-uri>
 ```
 
-`devsecops` without arguments prints compact readiness status and the single
-next action selected by the same algorithm used by `next`, dashboard, and the
-interactive menu. Human-readable commands repeat that recommendation after
-their primary output; machine-readable output remains clean. Use
+`devsecops` without arguments and `devsecops status` use the same status and
+next-action algorithm as the interactive menu. Human-readable commands repeat
+that recommendation after their primary output; machine-readable output
+remains clean. Use
 `devsecops menu` when you prefer the interactive path.
+
+## Preferred Terminology
+
+| Preferred product term | Compatibility names | Use it for |
+| --- | --- | --- |
+| `setup` | `start`, `config new`; `compose` remains an Advanced editor | Starting or resuming initial project setup. |
+| `status` | `dashboard`, `readiness`, `next` | One score, status areas, blockers, and the next action. |
+| `image validate` | `preflight` | Validating the Lambda image before deployment. |
+| `generate` / “Generate deployment files” | `render`, `--render` | Creating CLI-owned Terraform and GitHub helper files. |
+| `doctor` / “Diagnose problems” | — | Technical troubleshooting after status identifies a problem. |
+| `Advanced` / release maintenance | `criteria`, `evidence`, `inventory` | Maintainer evidence and contract work, not the first-run path. |
+
+Compatibility names remain callable through the documented deprecation window,
+but they are hidden from primary help and shell completion.
 
 ## Commands
 
 | Command | Status | Scope | Notes |
 | --- | --- | --- | --- |
-| `devsecops` | Stable | First success | Prints compact readiness status and the shared next action without prompting. |
+| `devsecops` | Stable | First success | Prints compact project status and the shared next action without prompting. |
 | `devsecops menu` | Stable | Interactive CLI | Opens six product sections: Continue setup, Status, Deploy, Diagnose problems, Configuration, and Advanced. Technical tools remain nested under their relevant section. |
-| `devsecops next` | Stable | First success | Shows the single next action for the current project context. Supports `--format human\|json`. |
-| `devsecops start` | Stable | First success | Guided safe onboarding flow. Creates config only after confirmation or `--yes`; never mutates GitHub or AWS. |
-| `devsecops init` | Alias | Configuration | Legacy interactive entry point for creating or updating `.devsecops-pipeline.toml`. Prefer `devsecops config new` for clean non-interactive config generation. |
-| `devsecops readiness` | Stable | Diagnostics | Shows scored readiness gaps and concrete next actions. Supports `--strict` and `--format human\|compact\|json`. |
+| `devsecops setup` | Stable | First success | The single guided onboarding entry point. Creates config only after confirmation or `--yes`; `--generate` also creates deployment files. Never mutates GitHub or AWS. |
+| `devsecops status` | Stable | First success | Shows one overall score, status by area, blockers, and one next action. Supports `--deep`, `--strict`, `--watch`, and `--format human\|compact\|json`. |
 | `devsecops dry-run` | Stable | First success | Previews the first-success path without writing files or requiring AWS credentials. |
-| `devsecops preflight` | Stable | First success | Checks Lambda image URI shape, immutability, and region before production deploy. |
+| `devsecops image validate` | Stable | First success | Checks Lambda image URI shape, immutability, and region before production deploy. |
 | `devsecops health` | Stable | Operations | Validates the deployed `/health` endpoint outside GitHub Actions. Uses Terraform output unless `--url` is provided; use `--aws-sigv4` for IAM-protected API Gateway routes. |
-| `devsecops render` | Stable | Generation | Writes CLI-owned Terraform and GitHub helper artifacts. Use `--dry-run` to preview file changes. |
+| `devsecops generate` | Stable | Generation | Writes CLI-owned Terraform and GitHub helper artifacts. Use `--dry-run` to preview file changes. |
 | `devsecops report` | Stable | Reporting | Writes a CLI-owned Markdown readiness report or JSON audit evidence with `--format json`. |
-| `devsecops evidence collect` | Stable | Reporting | Collects local release-candidate evidence artifacts with `--rc`. |
-| `devsecops criteria` | Stable | Release | Checks every Version 1.0 criterion and the external evidence gates that still block a stable tag. Supports `--strict`, `--evidence-dir`, and `--format human\|json`. |
-| `devsecops dashboard` | Stable | Diagnostics | Prints a one-screen readiness dashboard. |
-| `devsecops inventory` | Stable | Stability | Prints the command, flag, JSON output, generated artifact, deprecation, and migration contract. Supports `--format human\|markdown\|json` and `--status all\|stable\|alias\|experimental\|support`. |
+| `devsecops evidence collect` | Stable | Advanced / release | Collects local release-candidate evidence artifacts with `--rc`. |
+| `devsecops criteria` | Stable | Advanced / release | Checks every Version 1.0 criterion and the external evidence gates that still block a stable tag. |
+| `devsecops inventory` | Stable | Advanced / maintenance | Prints the command, JSON, generated artifact, deprecation, and migration contracts. |
 | `devsecops completion <shell>` | Stable | Distribution | Prints dependency-free shell completion for `bash`, `zsh`, or `fish`. |
 | `devsecops doctor` | Stable | Diagnostics | Primary diagnostics group for local, GitHub, AWS, branch, Actions, and all-in-one checks. |
 | `devsecops doctor local` | Stable | Diagnostics | Checks local readiness. `--deep` adds external Terraform/AWS checks and may vary by installed tools. |
@@ -73,7 +84,7 @@ their primary output; machine-readable output remains clean. Use
 | `devsecops set` | Alias | Configuration | Compatibility alias for `devsecops config set`. |
 | `devsecops config` | Alias | Configuration | Compatibility shorthand for `devsecops config show`. |
 | `devsecops config show` | Stable | Configuration | Prints the current local source config as TOML or normalized JSON. |
-| `devsecops config new` | Stable | Configuration | Creates a clean schema-versioned config from a preset. Refuses to overwrite unless `--force` is passed. |
+| `devsecops config new` | Alias | Configuration | Lower-level compatibility entry point for clean config creation. Prefer `devsecops setup`. |
 | `devsecops config validate` | Stable | Configuration | Validates the local source config before Terraform or GitHub commands run. Use `--strict` to fail on production-risk warnings. |
 | `devsecops config diff` | Stable | Configuration | Shows canonical TOML drift or compares the current config against a preset. |
 | `devsecops config reset` | Stable | Configuration | Resets local source config to a clean preset after taking a snapshot. |
@@ -83,7 +94,7 @@ their primary output; machine-readable output remains clean. Use
 | `devsecops preset show <name>` | Stable | Configuration | Prints a preset summary. |
 | `devsecops preset apply <name>` | Stable | Configuration | Applies a preset while preserving user-specific identity values. |
 | `devsecops preset <name>` | Alias | Configuration | Backward-compatible shorthand for `devsecops preset apply <name>`. |
-| `devsecops compose` | Experimental | Configuration | Interactive control picker that writes config, artifacts, and a report in one pass. |
+| `devsecops compose` | Experimental | Advanced configuration | Interactive control picker. Prefer `devsecops setup` for onboarding. |
 | `devsecops snapshot` | Stable | Recovery | Primary snapshot group for list, show, and restore workflows. |
 | `devsecops snapshot list` | Stable | Recovery | Lists local snapshots of CLI-owned files. |
 | `devsecops snapshot show` | Stable | Recovery | Shows snapshot details and changes since the snapshot. |
@@ -112,26 +123,32 @@ their primary output; machine-readable output remains clean. Use
 | `devsecops architecture` | Support | Inspection | Prints the architecture tree. |
 | `devsecops explain [topic]` | Support | Inspection | Explains a pipeline security control. |
 | `devsecops tui` | Experimental | UI | Optional Rich/Textual UI bridge. Requires installing optional dependencies. |
+| `devsecops start` | Alias | Compatibility | Previous name for `devsecops setup`. |
+| `devsecops next` | Alias | Compatibility | Previous next-action-only view. Prefer `devsecops status`. |
+| `devsecops readiness` | Alias | Compatibility | Previous readiness-only view. Prefer `devsecops status`; legacy JSON stays stable. |
+| `devsecops dashboard` | Alias | Compatibility | Previous dashboard view. Prefer `devsecops status`. |
+| `devsecops preflight` | Alias | Compatibility | Previous name for `devsecops image validate`; legacy JSON stays stable. |
+| `devsecops render` | Alias | Compatibility | Previous name for `devsecops generate`. |
 
 ## Examples
 
 | Workflow | Example |
 | --- | --- |
 | Interactive menu | `devsecops menu` |
-| Next action | `devsecops next` |
-| Guided start | `devsecops start --preset balanced` |
-| Dashboard | `devsecops dashboard --mode compact` |
+| Project setup | `devsecops setup --preset balanced` |
+| Project status and next action | `devsecops status` |
+| Deep project status | `devsecops status --deep` |
 | Shell completion | `devsecops completion bash` |
-| Clean config | `devsecops config new --preset balanced` |
+| Legacy clean-config entry point | `devsecops config new --preset balanced` |
 | Show config | `devsecops config show --format json` |
 | Validate config | `devsecops config validate` |
 | Strict config validation | `devsecops config validate --strict` |
 | Diff config | `devsecops config diff --preset strict` |
-| Set config | `devsecops config set backend.bucket my-state-bucket --render` |
+| Set config | `devsecops config set backend.bucket my-state-bucket --generate` |
 | Reset config | `devsecops config reset --preset minimal` |
 | Config schema | `devsecops config schema --format markdown` |
-| Render artifacts | `devsecops render` |
-| Render dry run | `devsecops render --dry-run` |
+| Generate deployment files | `devsecops generate` |
+| Preview deployment files | `devsecops generate --dry-run` |
 | Audit evidence | `devsecops report --format json` |
 | RC evidence collection | `devsecops evidence collect --rc` |
 | Version 1.0 criteria check | `devsecops criteria --strict` |
@@ -139,9 +156,9 @@ their primary output; machine-readable output remains clean. Use
 | Release candidate checklist | `docs/v1.0.0-release-candidate-checklist.md` |
 | Stability contract JSON | `devsecops inventory --format json` |
 | First-success dry run | `devsecops dry-run --image-uri <immutable-ecr-image-uri>` |
-| Image preflight | `devsecops preflight --image-uri <immutable-ecr-image-uri>` |
-| Readiness | `devsecops readiness --format json` |
-| Strict readiness | `devsecops readiness --strict --format compact` |
+| Validate image | `devsecops image validate --image-uri <immutable-ecr-image-uri>` |
+| Status JSON | `devsecops status --format json` |
+| Strict status | `devsecops status --strict --format compact` |
 | Local doctor | `devsecops doctor local --deep --format compact` |
 | GitHub doctor | `devsecops doctor github --format json` |
 | AWS doctor | `devsecops doctor aws --environment prod --strict` |
@@ -160,8 +177,8 @@ their primary output; machine-readable output remains clean. Use
 | Snapshot restore | `devsecops snapshot restore --last --dry-run` |
 | Preset list | `devsecops preset list` |
 | Preset show | `devsecops preset show strict` |
-| Preset apply | `devsecops preset apply strict --render` |
-| Composer | `devsecops compose` |
+| Preset apply | `devsecops preset apply strict --generate` |
+| Advanced control editor | `devsecops compose` |
 | Environment table | `devsecops envs` |
 | Controls matrix | `devsecops controls` |
 | Controls JSON | `devsecops controls --format json` |
@@ -199,7 +216,7 @@ Human table layout can still be improved. Prefer JSON output for automation:
 
 ```bash
 devsecops config validate --format json
-devsecops readiness --format json
+devsecops status --format json
 devsecops doctor github --format json
 devsecops aws outputs --format json
 devsecops inventory --format json
@@ -216,7 +233,7 @@ command surface:
 
 ```bash
 devsecops config validate --strict --format json
-devsecops readiness --strict --format json
+devsecops status --strict --format json
 devsecops report --format json
 devsecops doctor github --format json
 devsecops doctor branch --branch main --format json
