@@ -39,6 +39,11 @@ that recommendation after their primary output; machine-readable output
 remains clean. Use
 `devsecops menu` when you prefer the interactive path.
 
+For the full resumable wizard, use `devsecops setup` interactively. Demo mode
+(`--mode demo`) completes the local no-credentials path in one command;
+`--mode standard` and `--mode production` keep cloud connection stages in
+scope.
+
 ## Preferred Terminology
 
 | Preferred product term | Compatibility names | Use it for |
@@ -59,7 +64,7 @@ but they are hidden from primary help and shell completion.
 | --- | --- | --- | --- |
 | `devsecops` | Stable | First success | Prints compact project status and the shared next action without prompting. |
 | `devsecops menu` | Stable | Interactive CLI | Opens six product sections: Continue setup, Status, Deploy, Diagnose problems, Configuration, and Advanced. Technical tools remain nested under their relevant section. |
-| `devsecops setup` | Stable | First success | The single guided onboarding entry point. Creates config only after confirmation or `--yes`; `--generate` also creates deployment files. Never mutates GitHub or AWS. |
+| `devsecops setup` | Stable | First success | Resumable nine-stage onboarding for mode, dependencies, config, image, backend, AWS identity, GitHub/OIDC, dry-run, and summary. AWS checks are read-only. GitHub changes require confirmation or explicit `--apply-github`; `--yes` alone never authorizes them. |
 | `devsecops status` | Stable | First success | Shows one overall score, status by area, blockers, and one next action. Supports `--deep`, `--strict`, `--watch`, and `--format human\|compact\|json`. |
 | `devsecops dry-run` | Stable | First success | Previews the first-success path without writing files or requiring AWS credentials. |
 | `devsecops image validate` | Stable | First success | Checks Lambda image URI shape, immutability, and region before production deploy. |
@@ -135,7 +140,10 @@ but they are hidden from primary help and shell completion.
 | Workflow | Example |
 | --- | --- |
 | Interactive menu | `devsecops menu` |
-| Project setup | `devsecops setup --preset balanced` |
+| Local guided demo | `devsecops setup --mode demo --yes --strict` |
+| Project setup or resume | `devsecops setup --mode standard` |
+| Non-interactive local inputs | `devsecops setup --mode standard --yes --image-uri <uri> --backend-bucket <bucket>` |
+| Explicit GitHub/OIDC setup | `devsecops setup --apply-github --deploy-role-arn <arn> --plan-role-arn <arn>` |
 | Project status and next action | `devsecops status` |
 | Deep project status | `devsecops status --deep` |
 | Shell completion | `devsecops completion bash` |

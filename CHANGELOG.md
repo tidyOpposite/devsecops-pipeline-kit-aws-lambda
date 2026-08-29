@@ -10,6 +10,13 @@ semantic versioning.
 * Preferred `setup`, `status`, `image validate`, and `generate` commands with
   matching help, shell completion, documentation, and machine-readable
   contracts.
+* A resumable nine-stage guided setup with `demo`, `standard`, and `production`
+  modes, dependency and identity checks, image/backend configuration,
+  GitHub/OIDC connection, current-input dry-run tracking, and a final next
+  command.
+* Atomic, ignored `.devsecops/setup-state.json` progress with fail-closed schema
+  validation and tests for resume, drift invalidation, mode boundaries, and
+  secret non-persistence.
 
 ### Changed
 
@@ -19,6 +26,8 @@ semantic versioning.
   legacy readiness percentage from human status output.
 * Kept `start`, `next`, `readiness`, `dashboard`, `preflight`, `render`, and
   `--render` callable as compatibility aliases with their existing JSON kinds.
+* Made `--yes` a local-defaults-only setup authorization; GitHub repository
+  changes now require interactive confirmation or explicit `--apply-github`.
 
 ## v0.13.1 - 2026-08-24
 

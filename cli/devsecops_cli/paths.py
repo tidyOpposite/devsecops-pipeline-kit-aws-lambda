@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 CONFIG_FILE = ".devsecops-pipeline.toml"
+SETUP_STATE_FILE = Path(".devsecops/setup-state.json")
 DIST_DIR = Path("dist/devsecops")
 GENERATED_TFVARS = Path("terraform/generated.auto.tfvars")
 AUDIT_REPORT = DIST_DIR / "audit-report.json"
@@ -44,4 +45,5 @@ __all__ = [
     "SNAPSHOT_DIR",
     "SNAPSHOT_FILES",
     "SNAPSHOT_FILE_PATHS",
+    "SETUP_STATE_FILE",
 ]

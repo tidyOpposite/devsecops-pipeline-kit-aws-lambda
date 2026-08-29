@@ -8,7 +8,7 @@ interactive terminal UI; reusable behavior lives outside it.
 flowchart TD
   entry["__main__.py"] --> app["main.py: commands and UI"]
   app --> parser["parser.py: CLI contract"]
-  app --> workflows["context.py / doctor.py"]
+  app --> workflows["context.py / doctor.py / setup.py"]
   app --> output["readiness.py / reports.py / views.py"]
   app --> state["config.py / render.py / snapshots.py"]
   app --> providers["aws.py / github.py"]
@@ -30,6 +30,7 @@ flowchart TD
 | `snapshots.py` | Snapshot manifests, safe local restore, and rollback boundaries. |
 | `aws.py`, `github.py` | Provider adapters and provider-specific response normalization. |
 | `doctor.py`, `context.py` | Diagnostic and next-action workflows composed from injected adapters. |
+| `setup.py` | Guided-setup modes, atomic resume state, input fingerprints, stage reconciliation, and non-secret state validation. |
 | `readiness.py` | Pure scoring, grouping, gap detection, and JSON serialization. |
 | `reports.py`, `views.py` | Human-readable reports and presentation rows. |
 | `contracts.py`, `completion.py` | Stable command/artifact metadata and shell completion generation. |
@@ -49,8 +50,9 @@ flowchart TD
    does not read provider state implicitly.
 
 The architecture tests reject dependency cycles and reverse imports back into
-`main.py`. Behavioral compatibility is covered by the CLI unit, golden-output,
-snapshot-safety, provider-adapter, and end-to-end tests.
+`main.py`. Behavioral compatibility is covered by the CLI unit, guided-setup
+resume/safety, golden-output, snapshot-safety, provider-adapter, and end-to-end
+tests.
 
 ## Adding functionality
 

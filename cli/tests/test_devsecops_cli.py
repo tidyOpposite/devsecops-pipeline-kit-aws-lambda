@@ -588,6 +588,9 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertEqual(by_command["devsecops terraform bootstrap"]["status"], "stable")
         self.assertEqual(by_command["devsecops status"]["status"], "stable")
         self.assertEqual(by_command["devsecops setup"]["status"], "stable")
+        self.assertIn("--mode", by_command["devsecops setup"]["stable_flags"])
+        self.assertIn("--apply-github", by_command["devsecops setup"]["stable_flags"])
+        self.assertIn("--strict", by_command["devsecops setup"]["stable_flags"])
         self.assertEqual(by_command["devsecops next"]["alias_for"], "devsecops status")
         self.assertEqual(by_command["devsecops start"]["alias_for"], "devsecops setup")
         self.assertEqual(by_command["devsecops criteria"]["status"], "stable")
@@ -633,6 +636,24 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
                     cli.main(command)
             self.assertEqual(raised.exception.code, 0)
             self.assertIn("usage:", buffer.getvalue())
+
+        setup_buffer = io.StringIO()
+        with redirect_stdout(setup_buffer), self.assertRaises(SystemExit):
+            cli.main(["setup", "--help"])
+        setup_help = setup_buffer.getvalue()
+        for flag in [
+            "--mode",
+            "--image-uri",
+            "--backend-bucket",
+            "--apply-github",
+            "--deploy-role-arn",
+            "--plan-role-arn",
+            "--yes",
+            "--strict",
+        ]:
+            self.assertIn(flag, setup_help)
+        self.assertIn("does not", setup_help)
+        self.assertIn("imply --apply-github", setup_help)
 
     def test_next_action_decision_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -802,6 +823,350 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             self.assertIn("Next Action", buffer.getvalue())
 
         self.assertEqual(result, cli.EXIT_OK)
+
+    def test_demo_setup_completes_locally_and_persists_resumable_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_required_project_files(root)
+            with patch.object(cli, "repo_root", return_value=root), patch.object(cli, "command_exists", return_value=False):
+                buffer = io.StringIO()
+                with redirect_stdout(buffer):
+                    result = cli.main(["setup", "--mode", "demo", "--yes", "--strict"])
+
+            cfg = cli.load_config(root)
+            state_path = root / cli.SETUP_STATE_FILE
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state_mode = state_path.stat().st_mode & 0o777
+
+        self.assertEqual(result, cli.EXIT_OK)
+        self.assertFalse(cfg["use_prod_approval_environment"])
+        self.assertEqual(state["mode"], "demo")
+        self.assertTrue(state["dry_run_fingerprint"])
+        self.assertEqual(state["steps"]["summary"]["status"], "complete")
+        self.assertEqual(state_mode, 0o600)
+        self.assertIn("Guided setup complete", buffer.getvalue())
+        self.assertIn("not required in demo mode", buffer.getvalue())
+
+    def test_setup_resumes_at_saved_step_after_interactive_pause(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_required_project_files(root)
+            with patch.object(cli, "repo_root", return_value=root), patch.object(cli, "command_exists", return_value=False):
+                first = io.StringIO()
+                with patch("builtins.input", side_effect=["1", "", "0"]), redirect_stdout(first):
+                    first_result = cli.main(["setup"])
+
+                saved = json.loads((root / cli.SETUP_STATE_FILE).read_text(encoding="utf-8"))
+                second = io.StringIO()
+                with patch("builtins.input") as prompt, redirect_stdout(second):
+                    second_result = cli.main(["setup", "--yes", "--strict"])
+
+            final_state = json.loads((root / cli.SETUP_STATE_FILE).read_text(encoding="utf-8"))
+
+        self.assertEqual(first_result, cli.EXIT_OK)
+        self.assertEqual(saved["mode"], "demo")
+        self.assertEqual(saved["last_step"], "config")
+        self.assertFalse("lambda_image_uri" in saved)
+        self.assertIn("Setup paused at step `config`", first.getvalue())
+        self.assertEqual(second_result, cli.EXIT_OK)
+        prompt.assert_not_called()
+        self.assertIn("Resuming saved demo setup from step `config`", second.getvalue())
+        self.assertEqual(final_state["steps"]["summary"]["status"], "complete")
+
+    def test_standard_setup_can_defer_config_without_crashing_cloud_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_required_project_files(root)
+            with patch.object(cli, "repo_root", return_value=root), patch.object(cli, "command_exists", return_value=False), patch(
+                "builtins.input",
+                side_effect=["2", "n"],
+            ):
+                buffer = io.StringIO()
+                with redirect_stdout(buffer):
+                    result = cli.main(["setup"])
+
+        self.assertEqual(result, cli.EXIT_OK)
+        self.assertIn("Config creation deferred", buffer.getvalue())
+        self.assertIn("AWS identity: waiting for a valid local config", buffer.getvalue())
+        self.assertIn("Guided Setup Summary", buffer.getvalue())
+
+    def test_strict_standard_setup_uses_missing_tool_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_required_project_files(root)
+            with patch.object(cli, "repo_root", return_value=root), patch.object(cli, "command_exists", return_value=False):
+                with redirect_stdout(io.StringIO()):
+                    result = cli.main(["setup", "--mode", "standard", "--yes", "--strict"])
+
+        self.assertEqual(result, cli.EXIT_MISSING_EXTERNAL_TOOL)
+
+    def test_setup_dry_run_progress_is_invalidated_when_config_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            cfg = cli.clean_config("student-demo")
+            cli.write_config(root, cfg)
+            state = cli.new_setup_state("demo")
+            state["dry_run_fingerprint"] = cli.setup_config_fingerprint(
+                cfg,
+                image_override=cli.demo_image_uri(cfg),
+            )
+            stages = cli.setup_stages(
+                root,
+                cfg,
+                state,
+                dependency_status={"git": False, "terraform": False, "aws": False, "gh": False},
+                backend_checks=[],
+                aws_identity=None,
+                github_checks=[],
+            )
+            self.assertEqual(next(stage for stage in stages if stage.id == "dry_run").status, "complete")
+
+            cfg["project_name"] = "changed-demo"
+            cli.write_config(root, cfg)
+            changed_stages = cli.setup_stages(
+                root,
+                cfg,
+                state,
+                dependency_status={"git": False, "terraform": False, "aws": False, "gh": False},
+                backend_checks=[],
+                aws_identity=None,
+                github_checks=[],
+            )
+
+        self.assertEqual(next(stage for stage in changed_stages if stage.id == "dry_run").status, "pending")
+
+    def test_setup_modes_enforce_their_config_posture_without_treating_image_as_config(self) -> None:
+        demo_cfg = cli.clean_config("student-demo")
+        balanced_cfg = cli.clean_config("balanced")
+        enterprise_cfg = cli.clean_config("enterprise")
+
+        self.assertEqual(cli.setup_config_blockers(demo_cfg, "demo"), [])
+        self.assertTrue(cli.setup_config_blockers(demo_cfg, "standard"))
+        self.assertEqual(cli.setup_config_blockers(balanced_cfg, "standard"), [])
+        self.assertTrue(cli.setup_config_blockers(balanced_cfg, "production"))
+        self.assertEqual(cli.setup_config_blockers(enterprise_cfg, "production"), [])
+
+    def test_explicit_noninteractive_mode_switch_applies_its_preset_safely(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_required_project_files(root)
+            cli.write_config(root, cli.clean_config("student-demo"))
+            cli.save_setup_state(root, cli.new_setup_state("demo"))
+            with patch.object(cli, "repo_root", return_value=root), patch.object(cli, "command_exists", return_value=False):
+                with redirect_stdout(io.StringIO()):
+                    result = cli.main(["setup", "--mode", "standard", "--yes"])
+            cfg = cli.load_config(root)
+            snapshots = cli.list_snapshots(root)
+
+        self.assertEqual(result, cli.EXIT_OK)
+        self.assertEqual(cfg["api_authorization_type"], "AWS_IAM")
+        self.assertTrue(cfg["use_prod_approval_environment"])
+        self.assertTrue(cfg["use_separate_aws_plan_role"])
+        self.assertTrue(snapshots)
+
+    def test_setup_requires_backend_resources_not_only_configured_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            cfg = cli.clean_config("balanced")
+            cfg["lambda_image_uri"] = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123"
+            cfg["backend"]["bucket"] = "devsecops-test-state"
+            cli.write_config(root, cfg)
+            state = cli.new_setup_state("standard")
+            state["dry_run_fingerprint"] = cli.setup_config_fingerprint(cfg)
+            github_ready = [
+                cli.Check("GitHub CLI", "OK", "Installed."),
+                cli.Check("GitHub auth", "OK", "Authenticated."),
+                cli.Check("GitHub repository", "OK", "owner/repo"),
+            ]
+            stages = cli.setup_stages(
+                root,
+                cfg,
+                state,
+                dependency_status={"git": True, "terraform": True, "aws": True, "gh": True},
+                backend_checks=[
+                    cli.Check("State bucket", "WARN", "Bucket not found."),
+                    cli.Check("Lock table", "WARN", "Table not found."),
+                ],
+                aws_identity=cli.Check("AWS identity", "OK", "123456789012"),
+                github_checks=github_ready,
+            )
+
+        backend = next(stage for stage in stages if stage.id == "backend")
+        self.assertEqual(backend.status, "pending")
+        self.assertEqual(cli.setup_next_command(backend, "standard"), "devsecops terraform bootstrap")
+        self.assertEqual(next(stage for stage in stages if stage.id == "summary").status, "pending")
+
+    def test_setup_state_corruption_fails_closed_without_overwriting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_required_project_files(root)
+            state_path = root / cli.SETUP_STATE_FILE
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text("not-json\n", encoding="utf-8")
+            with patch.object(cli, "repo_root", return_value=root):
+                buffer = io.StringIO()
+                with redirect_stdout(buffer):
+                    result = cli.main(["setup", "--yes"])
+            preserved = state_path.read_text(encoding="utf-8")
+
+        self.assertEqual(result, cli.EXIT_VALIDATION_FAILED)
+        self.assertEqual(preserved, "not-json\n")
+        self.assertIn("Setup state error", buffer.getvalue())
+
+    def test_setup_rejects_cloud_options_in_demo_and_github_values_without_apply(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_required_project_files(root)
+            with patch.object(cli, "repo_root", return_value=root):
+                demo_buffer = io.StringIO()
+                with redirect_stdout(demo_buffer):
+                    demo_result = cli.main(
+                        ["setup", "--mode", "demo", "--yes", "--backend-bucket", "demo-state"]
+                    )
+                role_buffer = io.StringIO()
+                with redirect_stdout(role_buffer):
+                    role_result = cli.main(
+                        [
+                            "setup",
+                            "--mode",
+                            "standard",
+                            "--yes",
+                            "--deploy-role-arn",
+                            "arn:aws:iam::123456789012:role/deploy",
+                        ]
+                    )
+
+        self.assertEqual(demo_result, cli.EXIT_VALIDATION_FAILED)
+        self.assertIn("require --mode standard", demo_buffer.getvalue())
+        self.assertEqual(role_result, cli.EXIT_VALIDATION_FAILED)
+        self.assertIn("require --apply-github", role_buffer.getvalue())
+
+    def test_backend_overrides_update_region_and_lock_table_without_reentering_bucket(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            cfg = cli.clean_config("balanced")
+            cfg["backend"]["bucket"] = "existing-state-bucket"
+            cli.write_config(root, cfg)
+            args = argparse.Namespace(
+                backend_bucket=None,
+                backend_region="eu-central-1",
+                backend_lock_table="new-lock-table",
+            )
+            with redirect_stdout(io.StringIO()):
+                updated, had_error = cli.configure_setup_backend(root, cfg, args, interactive=False)
+
+        self.assertFalse(had_error)
+        self.assertEqual(updated["backend"]["bucket"], "existing-state-bucket")
+        self.assertEqual(updated["backend"]["region"], "eu-central-1")
+        self.assertEqual(updated["backend"]["lock_table"], "new-lock-table")
+
+    def test_standard_setup_never_applies_github_without_explicit_authorization(self) -> None:
+        backend_ready = [
+            cli.Check("State bucket", "OK", "devsecops-test-state"),
+            cli.Check("Lock table", "OK", "devsecops-pipeline-terraform-locks"),
+        ]
+        github_ready = [
+            cli.Check("GitHub CLI", "OK", "Installed."),
+            cli.Check("GitHub auth", "OK", "Authenticated."),
+            cli.Check("GitHub repository", "OK", "owner/repo"),
+            cli.Check("GitHub variable PROJECT_NAME", "OK", "ready"),
+            cli.Check("GitHub secret AWS_ROLE_TO_ASSUME_ARN", "OK", "present"),
+            cli.Check("GitHub secret AWS_PLAN_ROLE_TO_ASSUME_ARN", "OK", "present"),
+        ]
+        image_uri = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_required_project_files(root)
+            with patch.object(cli, "repo_root", return_value=root), patch.object(cli, "command_exists", return_value=True), patch.object(
+                cli,
+                "setup_aws_identity",
+                return_value=cli.Check("AWS identity", "OK", "arn:aws:iam::123456789012:user/test"),
+            ), patch.object(cli, "setup_backend_resource_checks", return_value=backend_ready), patch.object(
+                cli,
+                "collect_github_checks",
+                return_value=github_ready,
+            ), patch.object(
+                cli,
+                "apply_github_setup",
+            ) as apply_setup:
+                with redirect_stdout(io.StringIO()):
+                    result = cli.main(
+                        [
+                            "setup",
+                            "--mode",
+                            "standard",
+                            "--yes",
+                            "--strict",
+                            "--image-uri",
+                            image_uri,
+                            "--backend-bucket",
+                            "devsecops-test-state",
+                        ]
+                    )
+
+        self.assertEqual(result, cli.EXIT_OK)
+        apply_setup.assert_not_called()
+
+    def test_setup_explicit_github_apply_does_not_persist_secret_values(self) -> None:
+        backend_ready = [
+            cli.Check("State bucket", "OK", "devsecops-test-state"),
+            cli.Check("Lock table", "OK", "devsecops-pipeline-terraform-locks"),
+        ]
+        github_incomplete = [
+            cli.Check("GitHub CLI", "OK", "Installed."),
+            cli.Check("GitHub auth", "OK", "Authenticated."),
+            cli.Check("GitHub repository", "OK", "owner/repo"),
+            cli.Check("GitHub variables", "WARN", "missing"),
+        ]
+        github_ready = [
+            cli.Check("GitHub CLI", "OK", "Installed."),
+            cli.Check("GitHub auth", "OK", "Authenticated."),
+            cli.Check("GitHub repository", "OK", "owner/repo"),
+        ]
+        image_uri = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123"
+        secret_value = "never-write-this-token"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_required_project_files(root)
+            with patch.object(cli, "repo_root", return_value=root), patch.object(cli, "command_exists", return_value=True), patch.object(
+                cli,
+                "setup_aws_identity",
+                return_value=cli.Check("AWS identity", "OK", "123456789012"),
+            ), patch.object(cli, "setup_backend_resource_checks", return_value=backend_ready), patch.object(
+                cli,
+                "collect_github_checks",
+                side_effect=[github_incomplete, github_ready, github_ready],
+            ), patch.object(cli, "github_setup_precheck", return_value=github_ready), patch.object(
+                cli,
+                "apply_github_setup",
+                return_value=cli.EXIT_OK,
+            ) as apply_setup:
+                with redirect_stdout(io.StringIO()):
+                    result = cli.main(
+                        [
+                            "setup",
+                            "--mode",
+                            "standard",
+                            "--yes",
+                            "--strict",
+                            "--image-uri",
+                            image_uri,
+                            "--backend-bucket",
+                            "devsecops-test-state",
+                            "--apply-github",
+                            "--deploy-role-arn",
+                            "arn:aws:iam::123456789012:role/deploy",
+                            "--plan-role-arn",
+                            "arn:aws:iam::123456789012:role/plan",
+                            "--snyk-token",
+                            secret_value,
+                        ]
+                    )
+            saved_text = (root / cli.SETUP_STATE_FILE).read_text(encoding="utf-8")
+
+        self.assertEqual(result, cli.EXIT_OK)
+        apply_setup.assert_called_once()
+        self.assertNotIn(secret_value, saved_text)
 
     def test_evidence_collect_rc_writes_release_candidate_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

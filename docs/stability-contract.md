@@ -26,7 +26,7 @@ devsecops inventory --status stable --format markdown
 
 | Workflow | Stable commands and flags |
 | --- | --- |
-| First success | `devsecops`, `devsecops setup --preset --generate --yes`, `devsecops status --deep --strict --format --watch --interval`, `devsecops dry-run --preset --image-uri --environment`, `devsecops image validate --image-uri --environment --format` |
+| First success | `devsecops`, `devsecops setup --mode --preset --image-uri --backend-bucket --backend-region --backend-lock-table --apply-github --deploy-role-arn --plan-role-arn --snyk-token --generate --yes --strict`, `devsecops status --deep --strict --format --watch --interval`, `devsecops dry-run --preset --image-uri --environment`, `devsecops image validate --image-uri --environment --format` |
 | Troubleshooting | `devsecops doctor local --deep --strict --format`, `devsecops doctor github --strict --format`, `devsecops doctor aws --environment --strict --format`, `devsecops doctor branch --branch --strict --format`, `devsecops doctor actions --limit --strict --format`, `devsecops doctor all --deep --branch --environment --strict --format` |
 | Configuration and generation | `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops generate --dry-run`, `devsecops report --deep --format --output --print` |
 | Advanced release maintenance | `devsecops inventory --format --status`, `devsecops evidence collect --rc --output`, `devsecops criteria --format --evidence-dir --strict` |
@@ -38,6 +38,16 @@ devsecops inventory --status stable --format markdown
 The documented first-success workflow does not depend on experimental
 commands. `devsecops compose` and `devsecops tui` are intentionally outside the
 first-success scripting path.
+
+`devsecops setup` stores resumable workflow state in
+`.devsecops/setup-state.json`. This local schema is fail-closed: unreadable,
+unknown-mode, or future-version state is rejected rather than silently reset.
+Observable stages are always recalculated, and a config change invalidates a
+saved dry-run fingerprint. The state file may contain mode, timestamps, step
+status, and non-secret check details; credentials, role secret values, GitHub
+tokens, and Snyk tokens are forbidden. `--yes` authorizes safe local defaults
+only. Repository mutation requires an interactive confirmation or the explicit
+`--apply-github` flag.
 
 ## JSON Output Contract
 

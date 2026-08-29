@@ -7,18 +7,16 @@ Actions, AWS, and scanners stay visible execution layers.
 Every `devsecops` command used in this guide is part of the stable command
 contract in [Stability contract](stability-contract.md).
 
-## 1. Install And Run A No-Credentials Dry Run
+## 1. Install And Run The No-Credentials Guided Demo
 
 Install the latest published CLI release with the commands in
-[Distribution and compatibility](distribution.md), then run a dry run. The dry
-run does not write files and does not require AWS credentials.
+[Distribution and compatibility](distribution.md), then run demo setup. Demo
+mode creates local config and runs a no-write dry-run with a clearly marked
+sample image URI. It neither queries nor changes AWS or GitHub.
 
 ```bash
 devsecops --version
-devsecops status
-devsecops dry-run \
-  --preset balanced \
-  --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
+devsecops setup --mode demo --yes --strict
 ```
 
 Expected output includes:
@@ -30,6 +28,17 @@ AWS credentials are not required for this dry run.
 Files that would be generated
 Lambda image shape          OK
 Lambda image immutability   OK
+Guided Setup Summary
+Guided setup complete. No deployment was started.
+```
+
+The equivalent standalone preview remains available when you do not want to
+create setup progress:
+
+```bash
+devsecops dry-run \
+  --preset balanced \
+  --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
 ```
 
 If you only want to preview generated files from an existing config:
@@ -47,19 +56,28 @@ terraform/generated.auto.tfvars
 dist/devsecops/github-setup.sh
 ```
 
-## 2. Create Local Source Config
+## 2. Start Or Resume Standard Setup
 
-Use the guided setup flow when you want the CLI to explain the current
-context and create missing local config after confirmation:
+Switch the saved workflow to standard mode when you have an AWS account,
+GitHub repository, and an existing immutable Lambda image. The interactive
+flow walks through dependency checks, local config, image, backend, AWS
+identity, GitHub/OIDC, dry-run, and summary:
 
 ```bash
-devsecops setup --preset balanced
+devsecops setup --mode standard
 ```
 
-For a non-interactive path:
+The selected mode and current step are saved in
+`.devsecops/setup-state.json`. Press `Ctrl-C`, `b`, `back`, or `0` at a prompt;
+the next `devsecops setup` run rechecks observable state and resumes. The state
+file is ignored by Git and never stores credentials or token/secret values.
+
+For a non-interactive local-input path:
 
 ```bash
-devsecops setup --preset balanced --yes
+devsecops setup --mode standard --yes \
+  --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123 \
+  --backend-bucket my-devsecops-pipeline-tfstate
 devsecops config validate
 devsecops config diff
 devsecops status
@@ -69,10 +87,14 @@ Expected output:
 
 ```text
 Created clean config .devsecops-pipeline.toml
-Config
-Config schema version   OK
-No config diff detected.
+Guided Setup Summary
+Next command: devsecops setup
 ```
+
+`--yes` uses safe local defaults and never authorizes GitHub changes. Add
+`--strict` when a partial setup should return a non-zero exit code. A configured
+backend name is not treated as ready by itself: setup verifies that the S3
+bucket and DynamoDB lock table exist in the active AWS account.
 
 ## 3. Bring Your Own Lambda Image
 
@@ -124,6 +146,20 @@ Copy or adapt the reviewed backend block from `dist/devsecops/backend.tf` into
 `terraform/backend.tf`, then open a pull request so CI can validate it.
 
 ## 5. Configure GitHub Repository Settings
+
+The guided equivalent is explicit about the repository mutation boundary:
+
+```bash
+devsecops setup --apply-github \
+  --deploy-role-arn arn:aws:iam::123456789012:role/devsecops-pipeline-deploy \
+  --plan-role-arn arn:aws:iam::123456789012:role/devsecops-pipeline-plan
+```
+
+This writes GitHub repository variables and encrypted secrets only. It does
+not run a workflow or change AWS. Role arguments and `--snyk-token`, when used,
+are passed directly to `gh` and are never written to setup progress.
+
+The lower-level equivalent remains available for automation and review:
 
 Generate the setup script:
 

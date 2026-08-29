@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import getpass
 import json
 import os
 import shutil
@@ -43,6 +44,7 @@ from .aws import (
     missing_or_error_detail,
 )
 from .config import (
+    AWS_REGION_RE,
     CONFIG_MIGRATION_CONTRACT,
     CONFIG_SCHEMA_VERSION,
     CONFIG_SET_PATHS,
@@ -53,6 +55,7 @@ from .config import (
     PRESET_ORDER,
     PRESET_POSTURES,
     PRESET_POSTURE_LABELS,
+    PROJECT_NAME_RE,
     SENSITIVITY_LABEL,
     apply_cors_policy,
     canonical_config_text,
@@ -210,6 +213,28 @@ from .snapshots import (
     snapshot_entry_relative_path,
     snapshot_id,
     snapshot_rows,
+)
+from .setup import (
+    SETUP_STATE_FILE,
+    SetupStage,
+    SetupStateError,
+    completed_stage_count,
+    demo_image_uri,
+    first_pending_stage,
+    github_setup_ready,
+    is_backend_bucket_configured,
+    is_iam_role_arn,
+    load_setup_state,
+    mark_setup_step,
+    mode_for_preset,
+    new_setup_state,
+    save_setup_state,
+    setup_config_blockers,
+    setup_config_fingerprint,
+    setup_next_command,
+    setup_profile,
+    setup_stages,
+    switch_setup_mode,
 )
 from .views import (
     compact_join,
@@ -1124,16 +1149,480 @@ def cmd_next(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def choose_setup_mode(args: argparse.Namespace, state: dict[str, Any] | None) -> tuple[str, str]:
+    requested_mode = getattr(args, "mode", None)
+    requested_preset = getattr(args, "preset", None)
+    if requested_mode:
+        return requested_mode, requested_preset or str(setup_profile(requested_mode)["preset"])
+    if requested_preset:
+        return mode_for_preset(requested_preset), requested_preset
+    if state is not None:
+        return str(state["mode"]), str(state.get("preset") or setup_profile(str(state["mode"]))["preset"])
+    if bool(getattr(args, "yes", False)):
+        return "standard", "balanced"
+
+    draw_box(
+        "Setup Mode",
+        [
+            "Choose how far this guided setup should take the project.",
+            "The mode controls required checks; it never grants permission for cloud changes.",
+        ],
+    )
+    print()
+    draw_table(
+        ["#", "Mode", "Use when"],
+        [
+            ["1", "Demo", str(setup_profile("demo")["description"])],
+            ["2", "Standard", str(setup_profile("standard")["description"])],
+            ["3", "Production", str(setup_profile("production")["description"])],
+        ],
+    )
+    choices = {
+        "1": "demo",
+        "demo": "demo",
+        "2": "standard",
+        "standard": "standard",
+        "3": "production",
+        "production": "production",
+    }
+    while True:
+        value = input("\nChoose mode [2, b/back/0 to pause]: ").strip().lower()
+        if not value:
+            value = "2"
+        if is_cancel_input(value):
+            raise InputCancelled
+        if value in choices:
+            mode = choices[value]
+            return mode, str(setup_profile(mode)["preset"])
+        print(warn("Choose 1, 2, or 3."))
+
+
+def begin_setup_step(root: Path, state: dict[str, Any], step: str, detail: str = "") -> None:
+    mark_setup_step(state, step, "pending", detail)
+    save_setup_state(root, state)
+
+
+def setup_argument_error(args: argparse.Namespace, mode: str) -> str | None:
+    github_values = [
+        getattr(args, "deploy_role_arn", None),
+        getattr(args, "plan_role_arn", None),
+        getattr(args, "snyk_token", None),
+    ]
+    if any(github_values) and not bool(getattr(args, "apply_github", False)):
+        return "Role ARN and Snyk token options require --apply-github."
+    cloud_options = [
+        getattr(args, "backend_bucket", None),
+        getattr(args, "backend_region", None),
+        getattr(args, "backend_lock_table", None),
+        bool(getattr(args, "apply_github", False)),
+    ]
+    if mode == "demo" and any(cloud_options):
+        return "Backend and GitHub apply options require --mode standard or --mode production."
+    return None
+
+
+def prompt_matching_text(label: str, default: str, pattern: Any, guidance: str) -> str:
+    while True:
+        value = prompt_text(label, default, allow_cancel=True)
+        if pattern.fullmatch(value):
+            return value
+        print(warn(guidance))
+
+
+def prompt_secret(label: str) -> str:
+    value = getpass.getpass(f"{label} [hidden, b/back/0 to pause]: ").strip()
+    if is_cancel_input(value):
+        raise InputCancelled
+    return value
+
+
+def setup_dependency_status() -> dict[str, bool]:
+    return {tool: command_exists(tool) for tool in ("git", "terraform", "aws", "gh")}
+
+
+def print_setup_dependencies(mode: str, statuses: dict[str, bool]) -> None:
+    profile = setup_profile(mode)
+    required = set(profile["required_tools"])
+    recommended = set(profile["recommended_tools"])
+    rows = []
+    for tool in ("git", "terraform", "aws", "gh"):
+        if tool in required:
+            need = "required"
+        elif tool in recommended:
+            need = "recommended"
+        else:
+            need = "later"
+        rows.append([tool, need, "available" if statuses[tool] else "missing"])
+    draw_table(["Tool", "For this mode", "Status"], rows, title="Step 2/9 - Dependencies")
+    missing = [tool for tool in required if not statuses[tool]]
+    if missing:
+        print()
+        print(
+            warn("Setup can prepare local inputs, but these stages remain incomplete: ")
+            + ", ".join(sorted(missing))
+        )
+        print("Install guidance: docs/distribution.md and docs/first-successful-pipeline.md")
+
+
+def write_setup_config_change(root: Path, cfg: dict[str, Any], description: str) -> None:
+    if config_path(root).exists():
+        snapshot_before_change(root, "setup", description)
+    write_config(root, cfg)
+    print(ok("Updated ") + str(config_path(root)))
+
+
+def create_setup_config(root: Path, state: dict[str, Any], interactive: bool) -> dict[str, Any] | None:
+    if config_path(root).exists():
+        return load_config(root)
+    preset_name = str(state["preset"])
+    should_create = True
+    if interactive:
+        should_create = prompt_bool(
+            f"Create {CONFIG_FILE} with the `{preset_name}` preset",
+            True,
+            allow_cancel=True,
+        )
+    if not should_create:
+        print(info("Config creation deferred. Rerun `devsecops setup` to continue."))
+        return None
+
+    cfg = clean_config(preset_name)
+    if interactive:
+        cfg["project_name"] = prompt_matching_text(
+            "Project name",
+            str(cfg["project_name"]),
+            PROJECT_NAME_RE,
+            "Use 3-32 lowercase letters, digits, or hyphens; start with a letter.",
+        )
+        cfg["aws_region"] = prompt_matching_text(
+            "AWS region",
+            str(cfg["aws_region"]),
+            AWS_REGION_RE,
+            "Use an AWS region such as us-east-1 or eu-central-1.",
+        )
+        cfg["backend"]["region"] = cfg["aws_region"]
+        cfg["backend"]["lock_table"] = f"{cfg['project_name']}-terraform-locks"
+    write_config(root, cfg)
+    print(ok("Created clean config ") + str(config_path(root)))
+    return cfg
+
+
+def validate_setup_image(cfg: dict[str, Any], image_uri: str) -> list[Check]:
+    return collect_image_preflight_checks(cfg, image_uri=image_uri, env_name="prod")
+
+
+def configure_setup_image(
+    root: Path,
+    cfg: dict[str, Any],
+    image_uri: str | None,
+    interactive: bool,
+) -> tuple[dict[str, Any], bool]:
+    current = str(cfg.get("lambda_image_uri", ""))
+    if current and is_immutable_image(current) and not image_uri:
+        print(ok("Immutable image already configured: ") + current)
+        return cfg, False
+
+    candidate = image_uri
+    while not candidate and interactive:
+        draw_box(
+            "Step 4/9 - Lambda Image",
+            [
+                "The CLI does not build or push the Lambda application image.",
+                "Use an existing ECR URI with an immutable release tag or sha256 digest.",
+            ],
+        )
+        print("[1] Enter an existing image URI")
+        print("[2] Show the image guide and continue later")
+        print("[0] Pause setup")
+        choice = input("\nChoose: ").strip().lower()
+        if is_cancel_input(choice):
+            raise InputCancelled
+        if choice == "2":
+            print(info("Image guide: docs/bring-your-own-image.md"))
+            print("Resume with `devsecops setup --image-uri <immutable-ecr-image-uri>`.")
+            return cfg, False
+        if choice == "1":
+            candidate = prompt_text("Immutable ECR image URI", allow_cancel=True)
+        else:
+            print(warn("Choose 1, 2, or 0."))
+
+    if not candidate:
+        print(warn("Lambda image is not configured."))
+        print("Guide: docs/bring-your-own-image.md")
+        return cfg, False
+
+    checks = validate_setup_image(cfg, candidate)
+    if any(check.status == "FAIL" for check in checks):
+        emit_check_output("Lambda Image", checks)
+        print(fail("The image URI was not saved. Fix it and rerun setup."))
+        return cfg, True
+    cfg["lambda_image_uri"] = candidate
+    write_setup_config_change(root, cfg, "Before configuring the guided-setup Lambda image.")
+    print(ok("Configured immutable Lambda image."))
+    return load_config(root), False
+
+
+def configure_setup_backend(
+    root: Path,
+    cfg: dict[str, Any],
+    args: argparse.Namespace,
+    interactive: bool,
+) -> tuple[dict[str, Any], bool]:
+    current_bucket = str(cfg["backend"]["bucket"])
+    requested_bucket = getattr(args, "backend_bucket", None)
+    requested_region = getattr(args, "backend_region", None)
+    requested_lock_table = getattr(args, "backend_lock_table", None)
+    if (
+        is_backend_bucket_configured(current_bucket)
+        and not requested_bucket
+        and not requested_region
+        and not requested_lock_table
+    ):
+        print(ok("Terraform backend configured: ") + current_bucket)
+        return cfg, False
+
+    bucket = requested_bucket or (
+        current_bucket if is_backend_bucket_configured(current_bucket) else None
+    )
+    if not bucket and interactive:
+        draw_box(
+            "Step 5/9 - Terraform Backend",
+            [
+                "Shared deployments need an S3 state bucket and DynamoDB lock table.",
+                "This step saves names in local config; it does not create AWS resources.",
+            ],
+        )
+        if not prompt_bool("Configure backend names now", True, allow_cancel=True):
+            print(info("Backend configuration deferred."))
+            return cfg, False
+        bucket = prompt_text("Existing or planned S3 state bucket", allow_cancel=True)
+
+    if not bucket:
+        print(warn("Terraform backend is not configured."))
+        return cfg, False
+    if not is_backend_bucket_configured(bucket):
+        print(fail("Invalid S3 bucket name; use 3-63 lowercase letters, digits, dots, or hyphens."))
+        return cfg, True
+
+    region = requested_region or str(cfg["backend"].get("region") or cfg["aws_region"])
+    lock_table = requested_lock_table or str(
+        cfg["backend"].get("lock_table") or f"{cfg['project_name']}-terraform-locks"
+    )
+    if interactive:
+        region = prompt_matching_text(
+            "Backend AWS region",
+            region,
+            AWS_REGION_RE,
+            "Use an AWS region such as us-east-1 or eu-central-1.",
+        )
+        lock_table = prompt_text("DynamoDB lock table", lock_table, allow_cancel=True)
+    if not AWS_REGION_RE.fullmatch(region):
+        print(fail("Invalid backend region; use an AWS region such as us-east-1."))
+        return cfg, True
+    if not lock_table.strip():
+        print(fail("DynamoDB lock table name cannot be empty."))
+        return cfg, True
+
+    cfg["backend"]["bucket"] = bucket
+    cfg["backend"]["region"] = region
+    cfg["backend"]["lock_table"] = lock_table
+    write_setup_config_change(root, cfg, "Before configuring the guided-setup Terraform backend.")
+    print("No AWS resources were created. Preview them with `devsecops terraform bootstrap`.")
+    return load_config(root), False
+
+
+def setup_aws_identity(root: Path, mode: str) -> Check | None:
+    if not setup_profile(mode)["cloud_required"]:
+        return None
+    if not command_exists("aws"):
+        return Check("AWS identity", "WARN", "`aws` is not available on PATH.")
+    payload, result = aws_json(root, ["sts", "get-caller-identity"])
+    if result.returncode != 0:
+        return Check("AWS identity", "WARN", compact_error(result))
+    detail = (
+        str(payload.get("Arn") or payload.get("Account") or "AWS credentials are usable.")
+        if isinstance(payload, dict)
+        else "AWS credentials are usable."
+    )
+    return Check("AWS identity", "OK", detail)
+
+
+def setup_backend_resource_checks(
+    root: Path,
+    cfg: dict[str, Any],
+    mode: str,
+    identity: Check | None,
+) -> list[Check]:
+    if not setup_profile(mode)["cloud_required"]:
+        return []
+    bucket = str(cfg["backend"]["bucket"])
+    lock_table = str(cfg["backend"]["lock_table"])
+    if not is_backend_bucket_configured(bucket):
+        return []
+    if identity is None or identity.status != "OK":
+        return [
+            Check("State bucket", "WARN", "Waiting for a valid AWS identity."),
+            Check("Lock table", "WARN", "Waiting for a valid AWS identity."),
+        ]
+
+    region = str(cfg["backend"]["region"])
+    bucket_result = aws_command(
+        root,
+        ["s3api", "head-bucket", "--bucket", bucket, "--region", region],
+    )
+    _, table_result = aws_json(
+        root,
+        ["dynamodb", "describe-table", "--table-name", lock_table, "--region", region],
+    )
+    return [
+        Check(
+            "State bucket",
+            "OK" if bucket_result.returncode == 0 else "WARN",
+            bucket
+            if bucket_result.returncode == 0
+            else missing_or_error_detail(bucket_result, "Bucket not found or not accessible."),
+        ),
+        Check(
+            "Lock table",
+            "OK" if table_result.returncode == 0 else "WARN",
+            lock_table
+            if table_result.returncode == 0
+            else missing_or_error_detail(table_result, "DynamoDB lock table not found or not accessible."),
+        ),
+    ]
+
+
+def print_setup_aws_identity(check: Check | None, mode: str) -> None:
+    if not setup_profile(mode)["cloud_required"]:
+        print(info("Step 6/9 - AWS identity: not required in demo mode."))
+        return
+    if check is None:
+        print(warn("Step 6/9 - AWS identity: waiting for a valid local config."))
+        return
+    label = ok(check.status) if check.status == "OK" else warn(check.status)
+    print(f"Step 6/9 - AWS identity: {label} {check.detail}")
+    if check.status != "OK":
+        print("Configure credentials, then verify with `aws sts get-caller-identity`.")
+
+
+def setup_github_connection(
+    root: Path,
+    cfg: dict[str, Any],
+    args: argparse.Namespace,
+    interactive: bool,
+    mode: str,
+) -> tuple[list[Check], bool]:
+    if not setup_profile(mode)["cloud_required"]:
+        print(info("Step 7/9 - GitHub repository / OIDC: not required in demo mode."))
+        return [], False
+
+    checks = collect_github_checks(root, cfg)
+    if github_setup_ready(checks):
+        print(ok("Step 7/9 - GitHub repository variables and OIDC role secrets are ready."))
+        return checks, False
+
+    emit_check_output("Step 7/9 - GitHub Repository / OIDC", checks, output_format="compact")
+    apply_requested = bool(getattr(args, "apply_github", False))
+    if interactive and not apply_requested:
+        print()
+        draw_box(
+            "GitHub Change Boundary",
+            [
+                "Applying setup writes variables and encrypted secrets to the current GitHub repository.",
+                "It does not run a workflow or change AWS resources.",
+            ],
+        )
+        apply_requested = prompt_bool("Apply GitHub repository setup now", False, allow_cancel=True)
+    if not apply_requested:
+        print(
+            "Resume here with `devsecops setup --apply-github "
+            "--deploy-role-arn <arn> --plan-role-arn <arn>`."
+        )
+        return checks, False
+
+    deploy_role_arn = getattr(args, "deploy_role_arn", None)
+    plan_role_arn = getattr(args, "plan_role_arn", None)
+    snyk_token = getattr(args, "snyk_token", None)
+    if interactive:
+        deploy_role_arn = deploy_role_arn or prompt_text("AWS deploy role ARN", allow_cancel=True)
+        plan_role_arn = plan_role_arn or prompt_text("AWS plan role ARN", allow_cancel=True)
+        if cfg["enable_snyk_scan"] and not snyk_token:
+            snyk_token = prompt_secret("Snyk token")
+    invalid_roles = [
+        label
+        for label, value in (("deploy", deploy_role_arn), ("plan", plan_role_arn))
+        if not value or not is_iam_role_arn(value)
+    ]
+    if invalid_roles:
+        print(fail("Valid IAM role ARNs are required for: ") + ", ".join(invalid_roles))
+        return checks, True
+    if cfg["enable_snyk_scan"] and not snyk_token:
+        print(fail("SNYK_TOKEN is required because this setup mode enables Snyk scanning."))
+        return checks, True
+
+    apply_args = argparse.Namespace(
+        deploy_role_arn=deploy_role_arn,
+        plan_role_arn=plan_role_arn,
+        snyk_token=snyk_token,
+    )
+    precheck = github_setup_precheck(root, cfg, apply_args)
+    emit_check_output("GitHub Setup Precheck", precheck)
+    print()
+    result = apply_github_setup(root, cfg, apply_args)
+    if result != EXIT_OK:
+        return checks, True
+    return collect_github_checks(root, cfg), False
+
+
+def save_reconciled_setup(root: Path, state: dict[str, Any], stages: list[SetupStage]) -> None:
+    for stage in stages:
+        mark_setup_step(state, stage.id, stage.status, stage.detail)
+    pending = first_pending_stage(stages)
+    state["last_step"] = pending.id if pending else "summary"
+    save_setup_state(root, state)
+
+
+def print_setup_summary(state: dict[str, Any], stages: list[SetupStage]) -> None:
+    labels = {"complete": "Complete", "pending": "Action needed", "not-required": "Not required"}
+    rows = [
+        [f"{index}/9", stage.title, labels[stage.status], stage.detail]
+        for index, stage in enumerate(stages, start=1)
+    ]
+    draw_table(["Step", "Stage", "Status", "Detail"], rows, title="Guided Setup Summary")
+    complete, required = completed_stage_count(stages)
+    pending = first_pending_stage(stages)
+    print()
+    print(f"Progress: {complete}/{required} required stages complete")
+    print(f"Saved progress: {SETUP_STATE_FILE}")
+    next_command = setup_next_command(pending, str(state["mode"]))
+    print(f"Next command: {next_command}")
+    if pending:
+        print(f"Resume point: {pending.title} - {pending.detail}")
+    else:
+        print(ok("Guided setup complete. No deployment was started."))
+    print()
+    draw_box(
+        "Next Action",
+        [
+            pending.title if pending else "Validate the resulting project status",
+            pending.detail if pending else "Guided setup is complete; review the unified status before deployment.",
+            "Rerunning setup rechecks observable state and resumes without repeating completed work.",
+        ],
+    )
+    print(f"Next command: {next_command}")
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     root = repo_root()
     cfg = load_config(root)
     context = project_context(root, cfg)
     draw_box(
-        "Project Setup",
+        "Guided Project Setup",
         [
-            "Safe onboarding flow for the first successful pipeline path.",
+            "Resumable onboarding for the first successful pipeline path.",
             f"Project context: {context['stage']}",
-            "No GitHub or AWS mutation is performed by this command.",
+            "AWS checks are read-only. GitHub changes require confirmation or --apply-github.",
+            f"Progress is stored locally in {SETUP_STATE_FILE}; secrets are never stored there.",
         ],
     )
     if context["missing_project_files"]:
@@ -1141,38 +1630,202 @@ def cmd_setup(args: argparse.Namespace) -> int:
         print_next = argparse.Namespace(format="human")
         return cmd_next(print_next)
 
-    if not context["config_exists"]:
-        preset_name = getattr(args, "preset", "balanced")
-        should_create = bool(getattr(args, "yes", False))
-        if not should_create:
-            try:
-                should_create = prompt_bool(f"Create {CONFIG_FILE} with `{preset_name}` preset", True, allow_cancel=True)
-            except InputCancelled:
-                print(info("Setup cancelled. No files changed."))
-                return EXIT_OK
-        if should_create:
-            write_config(root, clean_config(preset_name))
-            print(ok("Created clean config ") + str(config_path(root)))
-            cfg = load_config(root)
+    state = load_setup_state(root)
+    try:
+        mode, preset_name = choose_setup_mode(args, state)
+        if state is None:
+            state = new_setup_state(mode, preset=preset_name)
+            print(info(f"Starting {mode} setup with the `{preset_name}` preset."))
         else:
-            print(info("No config created."))
+            previous_mode = str(state["mode"])
+            previous_preset = str(state.get("preset", ""))
+            if previous_mode != mode or previous_preset != preset_name:
+                state = switch_setup_mode(state, mode, preset=preset_name)
+                print(info(f"Switched saved setup from {previous_mode} to {mode} mode."))
+            else:
+                print(
+                    info(
+                        f"Resuming saved {mode} setup from step "
+                        f"`{state.get('last_step', 'mode')}`."
+                    )
+                )
+        mark_setup_step(state, "mode", "complete", f"Mode: {mode}; preset: {preset_name}")
+        save_setup_state(root, state)
 
-    if getattr(args, "render", False) and config_path(root).exists():
-        render_result = run_render(root, snapshot=True)
-        if render_result != EXIT_OK:
-            return render_result
+        argument_error = setup_argument_error(args, mode)
+        if argument_error:
+            print(fail(argument_error))
+            return EXIT_VALIDATION_FAILED
 
-    print()
-    draw_box(
-        "Image Requirement",
-        [
-            "Production deploy requires a prebuilt Lambda-compatible ECR image.",
-            "Use an immutable tag or digest; latest/bootstrap are rejected.",
-            "Validate it with `devsecops image validate --image-uri <immutable-ecr-image-uri>`.",
-        ],
-    )
-    print()
-    return cmd_next(argparse.Namespace(format="human"))
+        interactive = not bool(getattr(args, "yes", False))
+        input_error = False
+
+        begin_setup_step(root, state, "dependencies")
+        dependency_status = setup_dependency_status()
+        print()
+        print_setup_dependencies(mode, dependency_status)
+
+        begin_setup_step(root, state, "config")
+        cfg = create_setup_config(root, state, interactive) or load_config(root)
+
+        config_exists = config_path(root).exists()
+        config_blockers = setup_config_blockers(cfg, mode) if config_exists else []
+        config_valid = config_exists and not config_blockers
+        repairable_mode_posture = (
+            config_exists
+            and config_blockers
+            and not any(check.status == "FAIL" for check in config_blockers)
+        )
+        should_apply_mode_preset = False
+        if repairable_mode_posture:
+            print()
+            emit_check_output("Step 3/9 - Mode Posture", config_blockers, output_format="compact")
+            if interactive:
+                should_apply_mode_preset = prompt_bool(
+                    f"Apply the `{preset_name}` mode preset while preserving "
+                    "project, region, image, and backend values",
+                    True,
+                    allow_cancel=True,
+                )
+            elif getattr(args, "mode", None) or getattr(args, "preset", None):
+                should_apply_mode_preset = True
+                print(info(f"Applying the explicitly selected `{preset_name}` mode preset."))
+            if should_apply_mode_preset:
+                apply_result = apply_preset(root, preset_name, render=False)
+                if apply_result != EXIT_OK:
+                    return apply_result
+                cfg = load_config(root)
+                config_blockers = setup_config_blockers(cfg, mode)
+                config_valid = not config_blockers
+        if config_exists and not config_valid:
+            print()
+            emit_check_output("Step 3/9 - Config", config_blockers, output_format="compact")
+
+        if config_valid:
+            begin_setup_step(root, state, "image")
+            if (
+                mode == "demo"
+                and not getattr(args, "image_uri", None)
+                and not is_immutable_image(str(cfg.get("lambda_image_uri", "")))
+            ):
+                print()
+                print(info("Step 4/9 - Lambda image: demo mode will use a sample URI only for dry-run."))
+                print("Bring-your-own-image guide: docs/bring-your-own-image.md")
+            else:
+                print()
+                cfg, image_error = configure_setup_image(
+                    root,
+                    cfg,
+                    getattr(args, "image_uri", None),
+                    interactive,
+                )
+                input_error = input_error or image_error
+
+            begin_setup_step(root, state, "backend")
+            if setup_profile(mode)["cloud_required"]:
+                print()
+                cfg, backend_error = configure_setup_backend(root, cfg, args, interactive)
+                input_error = input_error or backend_error
+            else:
+                print(info("Step 5/9 - Terraform backend: not required in demo mode."))
+
+        if bool(getattr(args, "render", False)) and config_exists:
+            print()
+            render_result = run_render(root, snapshot=True)
+            if render_result != EXIT_OK:
+                return render_result
+
+        begin_setup_step(root, state, "aws")
+        aws_identity = setup_aws_identity(root, mode) if config_exists else None
+        backend_checks = setup_backend_resource_checks(root, cfg, mode, aws_identity) if config_exists else []
+        print()
+        print_setup_aws_identity(aws_identity, mode)
+        for check in backend_checks:
+            label = ok(check.status) if check.status == "OK" else warn(check.status)
+            print(f"  Terraform backend {check.name}: {label} {check.detail}")
+        if any(check.status != "OK" for check in backend_checks):
+            print(
+                "  Next: preview with `devsecops terraform bootstrap`, then apply "
+                "after reviewing the AWS account and names."
+            )
+
+        begin_setup_step(root, state, "github")
+        github_checks: list[Check] = []
+        if config_valid:
+            print()
+            github_checks, github_error = setup_github_connection(root, cfg, args, interactive, mode)
+            input_error = input_error or github_error
+
+        begin_setup_step(root, state, "dry_run")
+        effective_image = None
+        if mode == "demo" and not is_immutable_image(str(cfg.get("lambda_image_uri", ""))):
+            effective_image = demo_image_uri(cfg)
+        dry_run_can_run = config_valid and bool(
+            effective_image or is_immutable_image(str(cfg.get("lambda_image_uri", "")))
+        )
+        current_fingerprint = setup_config_fingerprint(cfg, image_override=effective_image)
+        if dry_run_can_run and state.get("dry_run_fingerprint") != current_fingerprint:
+            print()
+            dry_run_result = cmd_dry_run(
+                argparse.Namespace(
+                    preset=preset_name,
+                    image_uri=effective_image,
+                    environment="prod",
+                )
+            )
+            if dry_run_result == EXIT_OK:
+                state["dry_run_fingerprint"] = current_fingerprint
+                save_setup_state(root, state)
+            else:
+                input_error = True
+        elif dry_run_can_run:
+            print(ok("Step 8/9 - Dry-run is already current; no need to repeat it."))
+        else:
+            print(warn("Step 8/9 - Dry-run is waiting for a valid config and immutable image."))
+
+        cfg = load_config(root)
+        dependency_status = setup_dependency_status()
+        stages = setup_stages(
+            root,
+            cfg,
+            state,
+            dependency_status=dependency_status,
+            backend_checks=backend_checks,
+            aws_identity=aws_identity,
+            github_checks=github_checks,
+        )
+        save_reconciled_setup(root, state, stages)
+        print()
+        print_setup_summary(state, stages)
+        pending = first_pending_stage(stages)
+        if input_error:
+            return EXIT_VALIDATION_FAILED
+        if bool(getattr(args, "strict", False)) and pending is not None:
+            required_tools = set(setup_profile(mode)["required_tools"])
+            if any(not dependency_status.get(tool, False) for tool in required_tools):
+                return EXIT_MISSING_EXTERNAL_TOOL
+            github_auth = next(
+                (check for check in github_checks if check.name == "GitHub auth"),
+                None,
+            )
+            if pending.id == "aws" and (aws_identity is None or aws_identity.status != "OK"):
+                return EXIT_AUTH_FAILED
+            if pending.id == "github" and (github_auth is None or github_auth.status != "OK"):
+                return EXIT_AUTH_FAILED
+            return EXIT_VALIDATION_FAILED
+        return EXIT_OK
+    except InputCancelled:
+        if state is not None:
+            save_setup_state(root, state)
+            print(
+                info(
+                    f"Setup paused at step `{state.get('last_step', 'mode')}`. "
+                    "Rerun `devsecops setup` to resume."
+                )
+            )
+        else:
+            print(info("Setup paused before progress was created."))
+        return EXIT_OK
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -3103,6 +3756,9 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print(warn("Interrupted."))
         return EXIT_INTERRUPTED
+    except SetupStateError as exc:
+        print(fail("Setup state error: ") + str(exc))
+        return EXIT_VALIDATION_FAILED
     except ConfigMigrationError as exc:
         print(fail("Config migration error: ") + str(exc))
         return EXIT_VALIDATION_FAILED

@@ -39,7 +39,22 @@ COMPLETION_SUBCOMMANDS = {
 }
 COMPLETION_OPTIONS = {
     "devsecops": ["--help", "--version"],
-    "setup": ["--help", "--preset", "--generate", "--yes"],
+    "setup": [
+        "--help",
+        "--mode",
+        "--preset",
+        "--image-uri",
+        "--backend-bucket",
+        "--backend-region",
+        "--backend-lock-table",
+        "--apply-github",
+        "--deploy-role-arn",
+        "--plan-role-arn",
+        "--snyk-token",
+        "--generate",
+        "--yes",
+        "--strict",
+    ],
     "status": ["--help", "--deep", "--strict", "--format", "--watch", "--interval"],
     "image": ["--help"],
     "image validate": ["--help", "--image-uri", "--environment", "--format"],

@@ -75,8 +75,9 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
 
 Expected result:
 
-- `setup` creates `.devsecops-pipeline.toml` and shows the next recommended
-  action; it does not change GitHub or AWS.
+- `setup` starts or resumes the standard nine-stage setup, checks dependencies,
+  creates `.devsecops-pipeline.toml`, and saves non-secret progress under
+  `.devsecops/`. With `--yes` it never changes GitHub or AWS.
 - `status` shows one overall score, the remaining blockers, and one next action.
 - `dry-run` validates the immutable image URI and previews the files that would
   be generated. It does not write files and does not require AWS credentials.
@@ -90,6 +91,57 @@ completion output remains unchanged for scripts.
 Continue with the step-by-step
 [First successful pipeline](docs/first-successful-pipeline.md) guide when you
 are ready to connect GitHub and AWS.
+
+## Guided Setup
+
+Run `devsecops setup` without flags for the interactive path. It is a resumable
+state machine rather than a one-shot config generator:
+
+```text
+1. Choose mode: demo, standard, or production
+2. Check dependencies
+3. Create local config
+4. Select an existing immutable Lambda image or open the image guide
+5. Configure Terraform backend names
+6. Verify the active AWS identity
+7. Connect the GitHub repository and OIDC role secrets
+8. Run a no-write dry-run
+9. Show saved progress and one next command
+```
+
+| Mode | Initial preset | Required outcome |
+| --- | --- | --- |
+| `demo` | `student-demo` | Creates local config and completes a dry-run with a clearly marked sample image URI. It does not query or change AWS or GitHub. |
+| `standard` | `balanced` | Requires Git, Terraform, AWS CLI, GitHub CLI, a real image/backend, AWS identity, and repository variables/OIDC role secrets. |
+| `production` | `enterprise` | Uses the production-oriented preset and keeps every standard cloud connection and strict control in scope. |
+
+Progress is atomically saved to `.devsecops/setup-state.json`, which is ignored
+by Git and never stores AWS credentials, GitHub tokens, Snyk tokens, or secret
+values. Press `Ctrl-C`, `b`, `back`, or `0` at a prompt and rerun
+`devsecops setup`; completed stages are rechecked against the real project and
+the first incomplete stage is shown. A config change invalidates the saved
+dry-run result so stale progress cannot be reported as complete.
+
+`--yes` accepts only safe local defaults and never implies permission to change
+GitHub. To apply repository variables and encrypted secrets non-interactively,
+authorization must be explicit:
+
+```bash
+devsecops setup --mode standard --yes \
+  --image-uri <immutable-ecr-image-uri> \
+  --backend-bucket <state-bucket> \
+  --apply-github \
+  --deploy-role-arn <deploy-role-arn> \
+  --plan-role-arn <plan-role-arn>
+```
+
+The command above checks AWS identity but does not create the backend, apply
+Terraform, start a workflow, or deploy AWS resources. Use `--strict` in CI or
+scripts when incomplete required stages should produce a non-zero exit code.
+In standard and production modes the backend stage becomes complete only after
+the configured S3 bucket and DynamoDB lock table are observable in the active
+AWS account. Until then the summary recommends `devsecops terraform bootstrap`
+for a safe plan before any explicit apply.
 
 ## Development Status
 
@@ -275,7 +327,9 @@ devsecops status --deep
 devsecops status --watch --interval 10
 devsecops tui           # optional Rich/Textual UI bridge
 
-devsecops setup --preset balanced --yes
+devsecops setup --mode demo --yes --strict
+devsecops setup --mode standard
+devsecops setup --mode production --strict
 devsecops config show --format toml
 devsecops config show --format json
 devsecops config validate

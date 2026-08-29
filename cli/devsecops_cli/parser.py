@@ -10,6 +10,7 @@ from . import VERSION
 from .config import ENVIRONMENTS, PRESET_ORDER
 from .github import DEFAULT_BRANCH
 from .paths import PRODUCTION_EVIDENCE_DIR, RC_EVIDENCE_DIR
+from .setup import SETUP_MODES
 
 COMPLETION_SHELLS = ("bash", "zsh", "fish")
 
@@ -102,14 +103,24 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     next_parser.add_argument("--format", choices=["human", "json"], default="human", help="Output mode.")
     next_parser.set_defaults(func=handlers.cmd_next)
 
-    setup_parser = subparsers.add_parser("setup", help="Set up the project through one safe guided flow.")
-    setup_parser.add_argument("--preset", choices=PRESET_ORDER, default="balanced", help="Preset to use when creating config.")
-    setup_parser.add_argument("--generate", dest="render", action="store_true", help="Generate deployment files after config exists.")
-    setup_parser.add_argument("--yes", action="store_true", help="Create missing config without prompting.")
+    setup_parser = subparsers.add_parser("setup", help="Start or resume the guided project setup state machine.")
+    setup_parser.add_argument("--mode", choices=SETUP_MODES, help="Setup depth: local demo, standard cloud connection, or production.")
+    setup_parser.add_argument("--preset", choices=PRESET_ORDER, help="Advanced preset override used only when creating config.")
+    setup_parser.add_argument("--image-uri", help="Existing immutable ECR Lambda image URI to save in local config.")
+    setup_parser.add_argument("--backend-bucket", help="Existing or planned S3 Terraform state bucket name.")
+    setup_parser.add_argument("--backend-region", help="AWS region for the Terraform state backend.")
+    setup_parser.add_argument("--backend-lock-table", help="DynamoDB table used for Terraform state locking.")
+    setup_parser.add_argument("--apply-github", action="store_true", help="Apply GitHub variables and encrypted secrets; changes the current repository.")
+    setup_parser.add_argument("--deploy-role-arn", help="AWS deploy role ARN used only with --apply-github.")
+    setup_parser.add_argument("--plan-role-arn", help="Separate AWS plan role ARN used only with --apply-github.")
+    setup_parser.add_argument("--snyk-token", help="Snyk token used only with --apply-github; never stored in setup progress.")
+    setup_parser.add_argument("--generate", dest="render", action="store_true", help="Generate local deployment files from the resulting config.")
+    setup_parser.add_argument("--yes", action="store_true", help="Use safe local defaults without prompts; does not imply --apply-github.")
+    setup_parser.add_argument("--strict", action="store_true", help="Exit non-zero while a required setup stage remains incomplete.")
     setup_parser.set_defaults(func=handlers.cmd_setup)
 
     start_parser = subparsers.add_parser("start", help=argparse.SUPPRESS)
-    start_parser.add_argument("--preset", choices=PRESET_ORDER, default="balanced", help="Preset to use when creating config.")
+    start_parser.add_argument("--preset", choices=PRESET_ORDER, help="Preset to use when creating config.")
     start_parser.add_argument("--render", action="store_true", help="Render artifacts after config exists.")
     start_parser.add_argument("--yes", action="store_true", help="Create missing config without prompting.")
     start_parser.set_defaults(func=handlers.cmd_start)

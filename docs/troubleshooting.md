@@ -80,6 +80,32 @@ PYTHONPATH=cli "${PYTHON}" -m devsecops_cli menu
 Input sections can be cancelled with `b`, `back`, `0`, or `cancel`. In the
 configuration wizard, cancellation returns to the main menu without saving.
 
+### Guided setup was interrupted or resumes at an unexpected step
+
+Rerun the same command without deleting config:
+
+```bash
+devsecops setup
+```
+
+Setup progress is stored in `.devsecops/setup-state.json`. The CLI rechecks
+dependencies, config, image, AWS identity, and GitHub on every run, so a stage
+can become incomplete again when real state changes. In particular, changing
+config invalidates the saved dry-run result. `b`, `back`, `0`, and `Ctrl-C`
+leave enough progress to resume.
+
+Inspect the file only for diagnosis; it must not contain credentials or token
+values. If the CLI reports `Setup state error`, preserve the invalid file for
+inspection and start with a new state file:
+
+```bash
+mv .devsecops/setup-state.json .devsecops/setup-state.invalid.json
+devsecops setup
+```
+
+Moving this file discards only the resume cursor. It does not remove local
+config, generated files, GitHub settings, Terraform state, or AWS resources.
+
 ### I changed local config and want to undo it
 
 Inspect snapshots:

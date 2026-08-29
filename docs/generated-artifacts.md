@@ -17,6 +17,7 @@ devsecops inventory --format json
 | File | Owner | Commit? | How to change it |
 | --- | --- | --- | --- |
 | `.devsecops-pipeline.toml` | CLI-managed local source config | No | Use `devsecops setup` initially; use Configuration commands or the Advanced control editor for later changes, then run `devsecops config validate`. |
+| `.devsecops/setup-state.json` | CLI-owned local workflow state | No | Rerun `devsecops setup`; the CLI atomically reconciles saved progress with config, tools, AWS identity, and GitHub. Move the file aside only when intentionally discarding setup history. |
 | `terraform/generated.auto.tfvars` | CLI-owned generated artifact | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
 | `dist/devsecops/backend.tf` | CLI-owned generated template | No | Update backend settings, then run `devsecops generate`. Copy or adapt into `terraform/backend.tf` only after review. |
 | `dist/devsecops/github-variables.env` | CLI-owned generated helper | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
@@ -47,6 +48,13 @@ same ownership signal. The ownership marker means:
 contain project settings, environment settings, feature flags, and backend
 names. It must not contain AWS credentials, GitHub tokens, Snyk tokens, private
 keys, or other secrets.
+
+`.devsecops/setup-state.json` is neither source config nor generated deployment
+output. It is an ignored, permission-restricted resume cursor containing mode,
+timestamps, stage statuses, non-secret check details, and a one-way dry-run
+fingerprint. It never stores credentials, GitHub or Snyk tokens, or values sent
+to encrypted GitHub secrets. Every setup run rechecks observable state rather
+than trusting a stale completion marker.
 
 Generated artifacts are outputs of that source config. They may contain
 non-secret values such as project names, regions, repository variable values,
