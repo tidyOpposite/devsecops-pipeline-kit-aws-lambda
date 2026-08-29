@@ -233,11 +233,11 @@ flowchart LR
 | Terraform state | Remote S3 backend with DynamoDB locking. `terraform/bootstrap` creates KMS-encrypted state, encrypted locks, access logging, lifecycle retention, and public access blocks. |
 | IaC structure | Root Terraform composes modules in `terraform/modules`: `kms`, `storage`, `ecr`, `lambda`, and `api-gateway`. |
 | PR workflow | Pull requests run Terraform formatting, validation, and Trivy IaC scanning. Same-repository PRs also run an AWS-backed Terraform plan with the plan role and publish a PR comment plus artifact. |
-| Production deploy | `terraform apply` runs only from manual `workflow_dispatch` with `mode=deploy`, `environment=prod`, and the workflow run started from `main`. Direct pushes do not start Actions. |
+| Production deploy | `devsecops deploy prod` performs readiness and overlap checks, confirms the exact immutable image, and delegates `terraform apply` to a manual protected workflow run from `main`. Direct pushes do not deploy. |
 | Image deployment | The deploy workflow and Terraform require an explicit immutable `LAMBDA_IMAGE_URI` and reject mutable `latest` or `bootstrap` tags. |
 | API authorization | API Gateway routes default to `AWS_IAM`; health checks use SigV4 signing for protected production endpoints. |
 | Container scanning | Snyk can scan the configured image when `SNYK_TOKEN` is present. |
-| Rollback | The deploy job captures the previous Lambda image URI and restores it automatically if apply or enabled validation fails. |
+| Rollback | The workflow restores the previous image automatically after failed validation; `devsecops deploy rollback` provides an explicit, confirmed rollback through the same protected environment and Terraform state. |
 | Optional validation | `/health` smoke test can validate IAM-protected APIs; OWASP ZAP baseline DAST runs only when the API is explicitly public. |
 
 ## Repository Layout
@@ -294,9 +294,9 @@ security reference, and local snapshots remain available under `Advanced`.
 `Continue setup` uses the shared status decision and opens the relevant
 Configuration, Deployment files, GitHub, Diagnostics, Deploy, or Reports
 section instead of forcing the user to find it manually.
-The `Deploy` section keeps deployment status, the protected workflow command, recent
-runs, AWS outputs, health validation, and rollback guidance together. Merely
-opening it never starts a deployment.
+The `Deploy` section keeps deployment status, the protected CLI command, logs,
+AWS outputs, health validation, and cloud rollback together. Merely opening it
+never starts a deployment.
 
 For development, install the local package in editable mode:
 
@@ -357,6 +357,13 @@ devsecops dry-run --image-uri <immutable-ecr-image-uri>
 devsecops image validate --image-uri <immutable-ecr-image-uri>
 devsecops health --url https://abc123.execute-api.us-east-1.amazonaws.com/health --aws-sigv4
 devsecops aws outputs --environment prod --format json
+
+devsecops deploy prod --dry-run
+devsecops deploy prod
+devsecops deploy status --watch
+devsecops deploy logs --failed
+devsecops deploy rollback --dry-run
+devsecops deploy rollback
 
 devsecops github setup  # prints gh commands for repo variables/secrets
 devsecops github setup --apply --deploy-role-arn arn:aws:iam::123456789012:role/deploy
@@ -419,6 +426,12 @@ dist/devsecops/setup-checklist.md
 `devsecops report --format json` writes `dist/devsecops/audit-report.json`
 for pull request, workflow artifact, or release evidence.
 
+Successful deployment and rollback dispatches prepend non-secret metadata to
+`.devsecops/deployments.json`: operation, environment, ref, requested and
+previous image URIs, run ID/URL, and timestamp. The ignored file is written
+with a schema version and private permissions; credentials and tokens are not
+stored. It lets status, logs, and rollback resolve the same run by default.
+
 Generated artifacts include CLI-owned headers and are ignored by Git. See
 [Generated artifacts](docs/generated-artifacts.md) for the source-versus-output
 contract.
@@ -440,14 +453,16 @@ Rollback restores only the local files managed by the CLI, such as
 files under `dist/devsecops/`. Before a rollback is applied, the CLI creates a
 new safety snapshot of the current state. It does not change AWS Lambda,
 Terraform state, GitHub Actions, or deployed traffic. Cloud deployment rollback
-is handled by the production GitHub Actions workflow when apply or validation
-fails.
+uses the separate `devsecops deploy rollback` command and the protected
+production workflow. It does not reuse the local snapshot mechanism.
 
 ## Operational Diagnostics
 
 After a deploy, inspect the live AWS surface without mutating resources:
 
 ```bash
+devsecops deploy status
+devsecops deploy logs --failed
 devsecops aws outputs --environment prod
 devsecops health --aws-sigv4
 devsecops health --url https://abc123.execute-api.us-east-1.amazonaws.com/health --aws-sigv4
@@ -624,6 +639,7 @@ and [Security controls and policy presets](docs/security-controls.md).
 | Push to `main` | n/a | none | No workflow run. Maintainer pushes do not consume Actions minutes. |
 | Manual `workflow_dispatch`, `mode=plan` | selected `dev/staging/prod` | `plan` only | No apply. |
 | Manual `workflow_dispatch`, `mode=deploy`, `environment=prod`, branch `main` | `prod` | `apply` | Scan configured image when enabled, deploy Lambda, optionally validate HTTP and DAST, rollback on failure. |
+| Manual `workflow_dispatch`, `mode=rollback`, `environment=prod`, branch `main` | `prod` | `apply` | Restore the explicit immutable image through the protected environment, then run the same enabled validation. |
 | Push tag `v*.*.*` | n/a | n/a | Publish GitHub Release from `docs/release-<tag>.md` or `CHANGELOG.md` with installer, wheel, source distribution, and `SHA256SUMS`. |
 
 ## Deployment Flow
@@ -646,7 +662,8 @@ production-proof release record, use
 7. Optionally scan the configured Lambda image with Snyk.
 8. Apply KMS and ECR bootstrap targets so supporting resources exist.
 9. Capture the previously deployed Lambda image URI.
-10. Start a manual `workflow_dispatch` run with `mode=deploy` and
+10. Run `devsecops deploy prod`; the CLI checks readiness, prevents overlapping
+    production runs, confirms the image, and starts `mode=deploy` with
     `environment=prod` from `main`.
 11. Apply the full Terraform workload with the configured image URI.
 12. Wait for the Lambda update to complete.
@@ -654,6 +671,9 @@ production-proof release record, use
     `API_AUTHORIZATION_TYPE=NONE`.
 14. If deployment validation fails, update Lambda back to the previous image
     and re-apply Terraform with the previous URI to remove state drift.
+15. Use `devsecops deploy status`, `devsecops deploy logs`, and, when an
+    explicit operator rollback is required, `devsecops deploy rollback` for the
+    rest of the deployment lifecycle without constructing `gh` commands.
 
 ## Workload Image Contract
 

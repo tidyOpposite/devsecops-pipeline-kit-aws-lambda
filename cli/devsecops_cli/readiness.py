@@ -52,7 +52,7 @@ def readiness_action_detail_for_check(check: Check) -> str:
     if check.name == "Lambda execution role":
         return "Run a Terraform apply path that creates the Lambda execution role, then re-run `devsecops aws-doctor`."
     if check.name == "Lambda function":
-        return "Run a manual production deploy after setting an immutable `lambda_image_uri`."
+        return "Run `devsecops deploy prod` after setting an immutable `lambda_image_uri`."
     if check.name == "API Gateway":
         return "Run a successful workload deploy, then inspect Terraform output `api_gateway_invoke_url`."
     if check.name == "CloudWatch log group":
@@ -97,6 +97,12 @@ def readiness_action_detail_for_check(check: Check) -> str:
         return "Pass `--url <health-url>` or deploy once so Terraform output `api_gateway_health_url` exists."
     if check.name == "Health response":
         return "Inspect Lambda logs and workload `/health` behavior, then rerun `devsecops health`."
+    if check.name == "Concurrent production run":
+        return "Run `devsecops deploy status --watch` and wait for the active production workflow to finish."
+    if check.name == "Rollback changes image":
+        return "Inspect `devsecops aws outputs --environment prod`; choose a different known-good immutable image only if a change is required."
+    if check.name == "Protected deployment workflow":
+        return "Restore `.github/workflows/deploy.yml` from the project template before dispatching a rollback."
     return check.detail
 
 
@@ -143,6 +149,10 @@ def troubleshooting_anchor_for_check(check: Check) -> str:
         return "#branch-protection-doctor-reports-missing-checks"
     if name in {"Terraform validate", "Bootstrap validate"}:
         return "#terraform-validation-fails"
+    if name == "Concurrent production run":
+        return "#deployment-command-reports-an-active-production-run"
+    if name in {"Rollback changes image", "Protected deployment workflow"}:
+        return "#deployment-command-cannot-find-a-run-or-rollback-target"
     return "#start-here"
 
 
@@ -199,6 +209,13 @@ def readiness_category_for_check(check: Check) -> str:
         "Configured ECR image",
         "Lambda function",
         "Prod approval environment",
+        "Concurrent production run",
+        "Rollback changes image",
+        "Protected deployment workflow",
+        "Production config policy",
+        "Generated deployment helpers",
+        "Project deployment files",
+        "Current Lambda image",
     }:
         return "Deployment"
     return "Local"

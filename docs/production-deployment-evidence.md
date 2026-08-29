@@ -120,29 +120,23 @@ continuing.
 
 ## 4. Dispatch Production
 
-Dispatch only from `main` with `mode=deploy` and `environment=prod`:
+Use the CLI to verify readiness, bind the exact immutable image, confirm the
+production boundary, and dispatch the protected workflow from `main`:
 
 ```bash
-gh workflow run "Secure Serverless DevSecOps Pipeline" \
-  --ref main \
-  -f mode=deploy \
-  -f environment=prod
-
-RUN_ID="$(
-  gh run list \
-    --workflow "Secure Serverless DevSecOps Pipeline" \
-    --branch main \
-    --limit 1 \
-    --json databaseId \
-    --jq '.[0].databaseId'
-)"
-
-gh run watch "${RUN_ID}" --exit-status
-gh run view "${RUN_ID}" --json databaseId,workflowName,headBranch,status,conclusion,url,createdAt,updatedAt \
-  > "${EVIDENCE_DIR}/workflow-run.json"
-gh run download "${RUN_ID}" -D "${EVIDENCE_DIR}/workflow-artifacts" || true
+devsecops deploy prod --dry-run
+devsecops deploy prod --yes --watch
+devsecops deploy status --format json > "${EVIDENCE_DIR}/workflow-run.json"
+devsecops deploy logs > "${EVIDENCE_DIR}/workflow-log.txt"
 devsecops github status --format json > "${EVIDENCE_DIR}/github-status.json"
 ```
+
+The human dispatch output and JSON status include the GitHub run ID and URL.
+The CLI also saves the run ID, requested image, and previously active image in
+the ignored `.devsecops/deployments.json` journal; it never stores tokens or
+credentials there. If workflow artifacts are part of the evidence policy,
+download them by the recorded run ID with `gh run download <run-id> -D
+"${EVIDENCE_DIR}/workflow-artifacts"`.
 
 The workflow run must show `status=completed` and `conclusion=success`.
 Review the run log for these production steps:
@@ -157,6 +151,14 @@ Review the run log for these production steps:
   `API_AUTHORIZATION_TYPE=NONE`
 * `Roll back Lambda image on failed deployment validation`, present as the
   failure recovery path
+
+Also capture a no-write manual rollback rehearsal. This proves that the CLI
+can resolve the previous immutable image without changing AWS:
+
+```bash
+devsecops deploy rollback --dry-run \
+  > "${EVIDENCE_DIR}/rollback-dry-run.txt"
+```
 
 ## 5. Prove Terraform And AWS Outputs
 

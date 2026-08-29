@@ -18,6 +18,7 @@ devsecops inventory --format json
 | --- | --- | --- | --- |
 | `.devsecops-pipeline.toml` | CLI-managed local source config | No | Use `devsecops setup` initially; use Configuration commands or the Advanced control editor for later changes, then run `devsecops config validate`. |
 | `.devsecops/setup-state.json` | CLI-owned local workflow state | No | Rerun `devsecops setup`; the CLI atomically reconciles saved progress with config, tools, AWS identity, and GitHub. Move the file aside only when intentionally discarding setup history. |
+| `.devsecops/deployments.json` | CLI-owned local deployment journal | No | Created after successful `devsecops deploy prod` or `devsecops deploy rollback` dispatches. Keep it to let status, logs, and rollback select the same run; it contains no credentials or tokens. |
 | `terraform/generated.auto.tfvars` | CLI-owned generated artifact | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
 | `dist/devsecops/backend.tf` | CLI-owned generated template | No | Update backend settings, then run `devsecops generate`. Copy or adapt into `terraform/backend.tf` only after review. |
 | `dist/devsecops/github-variables.env` | CLI-owned generated helper | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
@@ -56,6 +57,12 @@ fingerprint. It never stores credentials, GitHub or Snyk tokens, or values sent
 to encrypted GitHub secrets. Every setup run rechecks observable state rather
 than trusting a stale completion marker.
 
+`.devsecops/deployments.json` is a bounded, schema-versioned journal of
+non-secret deployment metadata: operation, production environment/ref,
+requested and previously observed immutable image URIs, source/run IDs, URL,
+and dispatch timestamp. It is written with private permissions. Future schema
+versions fail closed instead of silently discarding rollback history.
+
 Generated artifacts are outputs of that source config. They may contain
 non-secret values such as project names, regions, repository variable values,
 and placeholder commands for secrets. They are ignored by Git because they are
@@ -76,6 +83,7 @@ release notes say the artifact contract changed.
 
 | File | Compatibility | Generate again when | Expected diffs |
 | --- | --- | --- | --- |
+| `.devsecops/deployments.json` | Schema-versioned local runtime state | A successful protected deploy or rollback is dispatched | One non-secret deployment record is prepended; history remains bounded. |
 | `terraform/generated.auto.tfvars` | Stable Terraform variables | Config values, schema migration output, or Terraform variable contract changes | HCL assignment values and `environment_config` entries. |
 | `dist/devsecops/backend.tf` | Stable review template | `backend.*` config values or backend template policy changes | S3 backend attributes such as bucket, key, region, lock table, or workspace prefix. |
 | `dist/devsecops/github-variables.env` | Stable helper | Repository variable source config changes | `PROJECT_NAME`, `LAMBDA_IMAGE_URI`, `API_AUTHORIZATION_TYPE`, `ENABLE_*`, or `PROD_APPROVAL_ENVIRONMENT` values. |
@@ -106,14 +114,17 @@ copy or adapt the backend block intentionally.
 CLI-owned files from snapshots. They do not roll back a deployed Lambda
 function in AWS, Terraform state, GitHub Actions, or live traffic.
 
-Cloud deployment rollback is handled by the GitHub Actions production workflow
-when a deployment or enabled validation step fails. Keep these two rollback
-paths separate:
+Cloud deployment rollback is handled automatically by the GitHub Actions
+production workflow when a deployment or enabled validation step fails, or
+explicitly through `devsecops deploy rollback`. Keep these paths separate:
 
 * Local rollback: restore CLI-managed config and generated files.
-* Cloud rollback: restore the previous Lambda image during a failed production
-  deployment workflow.
+* Automatic cloud rollback: restore the previous Lambda image during a failed
+  production workflow.
+* Operator cloud rollback: validate and restore the recorded previous image, or
+  an explicit immutable image, through the same protected GitHub Environment,
+  OIDC role, validation, and Terraform state.
 
-Use `devsecops aws outputs`, `devsecops health`, and
-`devsecops github status` to inspect cloud deployment state before deciding
-whether the GitHub Actions deployment rollback path needs investigation.
+Use `devsecops deploy status`, `devsecops deploy logs --failed`,
+`devsecops aws outputs`, and `devsecops health` to inspect deployment state
+before previewing `devsecops deploy rollback --dry-run`.

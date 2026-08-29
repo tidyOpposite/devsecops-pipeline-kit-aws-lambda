@@ -8,7 +8,7 @@ interactive terminal UI; reusable behavior lives outside it.
 flowchart TD
   entry["__main__.py"] --> app["main.py: commands and UI"]
   app --> parser["parser.py: CLI contract"]
-  app --> workflows["context.py / doctor.py / setup.py"]
+  app --> workflows["context.py / doctor.py / setup.py / deploy.py"]
   app --> output["readiness.py / reports.py / views.py"]
   app --> state["config.py / render.py / snapshots.py"]
   app --> providers["aws.py / github.py"]
@@ -31,6 +31,7 @@ flowchart TD
 | `aws.py`, `github.py` | Provider adapters and provider-specific response normalization. |
 | `doctor.py`, `context.py` | Diagnostic and next-action workflows composed from injected adapters. |
 | `setup.py` | Guided-setup modes, atomic resume state, input fingerprints, stage reconciliation, and non-secret state validation. |
+| `deploy.py` | Protected workflow vocabulary, exact dispatch arguments, deployment-run selection, and bounded non-secret deployment history. |
 | `readiness.py` | Pure scoring, grouping, gap detection, and JSON serialization. |
 | `reports.py`, `views.py` | Human-readable reports and presentation rows. |
 | `contracts.py`, `completion.py` | Stable command/artifact metadata and shell completion generation. |

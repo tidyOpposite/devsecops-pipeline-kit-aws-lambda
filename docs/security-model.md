@@ -50,7 +50,7 @@ flowchart LR
 | Security controls hidden in Terraform or workflows | `devsecops controls`, `devsecops explain <control>`, and `docs/security-controls.md` map CLI options to generated Terraform, GitHub, AWS, and scanner behavior. |
 | Static cloud credentials leaked from CI | GitHub Actions uses OIDC and short-lived STS credentials; no AWS access keys are stored in the repo. |
 | Overprivileged PR planning | Terraform plan workflows require `AWS_PLAN_ROLE_TO_ASSUME_ARN`, skip forked PRs, and do not fall back to the deploy role. |
-| Unauthorized Terraform apply | Workflow applies only on manual `workflow_dispatch` deploy runs from `main`; PRs and direct pushes do not apply. Protect `main` with required checks. |
+| Unauthorized Terraform apply | Workflow applies only on manual `workflow_dispatch` deploy/rollback runs from `main`, inside the protected production environment; PRs and direct pushes do not apply. The CLI confirms the exact immutable image and serializes the production lane. Protect `main` with required checks. |
 | Concurrent Terraform state writes | S3 backend uses DynamoDB state locking. Bootstrap stack creates the lock table. |
 | Insecure Terraform configuration | Trivy scans Terraform modules for high and critical IaC findings. |
 | Vulnerable container image | Snyk can scan the configured Lambda image before deploy when `SNYK_TOKEN` is configured. |

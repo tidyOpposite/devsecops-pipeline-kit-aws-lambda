@@ -408,12 +408,12 @@ CONTROL_CATALOG = [
     Control(
         id="rollback",
         title="Deployment Rollback",
-        cli_options=("No local config option; tracked deploy workflow behavior.", "devsecops github status"),
+        cli_options=("devsecops deploy status", "devsecops deploy logs --failed", "devsecops deploy rollback"),
         terraform=("Re-applies Terraform with the previous Lambda image URI after rollback.",),
-        github=("Deploy job captures current image and restores it on failed apply, health validation, or DAST.",),
-        aws=("aws lambda update-function-code restores the previous image.",),
+        github=("Deploy job captures the current image for automatic failure recovery; operator rollback uses the same protected workflow and environment.",),
+        aws=("The protected workflow updates Lambda to the validated previous or explicitly selected immutable image.",),
         scanners=("Rollback is triggered by failed Snyk, health, or DAST gates when applicable.",),
-        audit_evidence=("Deploy workflow rollback step", "GitHub Actions run logs", "AWS Lambda image after rollback"),
+        audit_evidence=("Deployment journal run/image metadata", "Deploy workflow rollback step", "GitHub Actions run logs", "AWS Lambda image after rollback"),
         guidance="Treat workflow rollback as cloud deployment rollback; local snapshot restore is separate.",
     ),
     Control(

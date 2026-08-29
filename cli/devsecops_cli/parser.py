@@ -68,7 +68,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     subparsers = parser.add_subparsers(
         dest="command",
-        metavar="{menu,setup,status,dry-run,image,generate,doctor,health,config,github,aws,terraform,snapshot,report,explain,completion}",
+        metavar="{menu,setup,status,deploy,dry-run,image,generate,doctor,health,config,github,aws,terraform,snapshot,report,explain,completion}",
     )
     parser.set_defaults(func=handlers.cmd_overview)
 
@@ -238,6 +238,63 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     health_parser.add_argument("--aws-region", help="AWS region to use for SigV4 signing. Defaults to AWS_REGION or AWS_DEFAULT_REGION.")
     health_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     health_parser.set_defaults(func=handlers.cmd_health)
+
+    deploy_parser = subparsers.add_parser(
+        "deploy",
+        help="Start, inspect, troubleshoot, or roll back the protected production deployment.",
+    )
+    deploy_parser.set_defaults(
+        func=handlers.cmd_deploy,
+        deploy_command="status",
+        run_id=None,
+        watch=False,
+        interval=5,
+        format="human",
+    )
+    deploy_subparsers = deploy_parser.add_subparsers(
+        dest="deploy_command",
+        metavar="{prod,status,logs,rollback}",
+    )
+
+    deploy_prod_parser = deploy_subparsers.add_parser(
+        "prod",
+        help="Dispatch the protected production workflow after readiness checks and confirmation.",
+    )
+    deploy_prod_parser.add_argument("--dry-run", action="store_true", help="Run preflight and show the underlying command without dispatching it.")
+    deploy_prod_parser.add_argument("--yes", action="store_true", help="Skip the explicit production confirmation prompt.")
+    deploy_prod_parser.add_argument("--watch", action="store_true", help="Wait for the dispatched workflow and return its conclusion.")
+    deploy_prod_parser.add_argument("--interval", type=int, default=5, help="Status refresh interval in seconds; minimum 3.")
+    deploy_prod_parser.set_defaults(func=handlers.cmd_deploy)
+
+    deploy_status_parser = deploy_subparsers.add_parser(
+        "status",
+        help="Show the matching deployment run, jobs, images, and next recovery action.",
+    )
+    deploy_status_parser.add_argument("--run-id", help="Inspect a specific deployment workflow run ID.")
+    deploy_status_parser.add_argument("--watch", action="store_true", help="Wait for an active run and return its conclusion.")
+    deploy_status_parser.add_argument("--interval", type=int, default=5, help="Status refresh interval in seconds; minimum 3.")
+    deploy_status_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
+    deploy_status_parser.set_defaults(func=handlers.cmd_deploy)
+
+    deploy_logs_parser = deploy_subparsers.add_parser(
+        "logs",
+        help="Show full or failed-step logs for the matching deployment run.",
+    )
+    deploy_logs_parser.add_argument("--run-id", help="Read logs for a specific deployment workflow run ID.")
+    deploy_logs_parser.add_argument("--failed", action="store_true", help="Show failed-step logs instead of the full workflow log.")
+    deploy_logs_parser.set_defaults(func=handlers.cmd_deploy)
+
+    deploy_rollback_parser = deploy_subparsers.add_parser(
+        "rollback",
+        help="Dispatch a protected rollback to the previous recorded or explicitly supplied image.",
+    )
+    deploy_rollback_parser.add_argument("--run-id", help="Roll back the deployment recorded for this workflow run ID.")
+    deploy_rollback_parser.add_argument("--image-uri", help="Explicit immutable ECR image URI to restore.")
+    deploy_rollback_parser.add_argument("--dry-run", action="store_true", help="Run rollback preflight without dispatching a workflow.")
+    deploy_rollback_parser.add_argument("--yes", action="store_true", help="Skip the explicit rollback confirmation prompt.")
+    deploy_rollback_parser.add_argument("--watch", action="store_true", help="Wait for the rollback workflow and return its conclusion.")
+    deploy_rollback_parser.add_argument("--interval", type=int, default=5, help="Status refresh interval in seconds; minimum 3.")
+    deploy_rollback_parser.set_defaults(func=handlers.cmd_deploy)
 
     generate_parser = subparsers.add_parser("generate", help="Generate CLI-owned Terraform and GitHub deployment files.")
     generate_parser.add_argument("--dry-run", action="store_true", help="Preview generated files without writing them.")

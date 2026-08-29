@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import prod_approval_environment
+from .deploy import DEPLOYMENT_WORKFLOW_NAME
 from .images import is_immutable_image
 from .models import ActionsStatus, Check
 
@@ -55,6 +56,16 @@ def _run_command(command: list[str], root: Path, timeout: int = 30) -> subproces
 
 def _gh_command(root: Path, args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
     return _run_command(["gh", *args], root, timeout=timeout)
+
+
+def _gh_stream_command(root: Path, args: list[str], timeout: int = 300) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # nosec B603
+        ["gh", *args],
+        cwd=root,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
 
 
 def compact_error(result: subprocess.CompletedProcess[str]) -> str:
@@ -249,6 +260,86 @@ def parse_gh_runs(stdout: str) -> list[dict[str, Any]]:
     return [entry for entry in decoded if isinstance(entry, dict)]
 
 
+def list_workflow_runs(
+    root: Path,
+    args: list[str],
+    *,
+    command_exists_fn: Callable[[str], bool] = _command_exists,
+    gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Run a pre-built ``gh run list`` query and normalize its JSON output."""
+
+    if not command_exists_fn("gh"):
+        return [], "`gh` not found on PATH."
+    result = gh_command_fn(root, args)
+    if result.returncode != 0:
+        return [], compact_error(result)
+    runs = parse_gh_runs(result.stdout)
+    if not runs and result.stdout.strip():
+        return [], "Could not parse `gh run list` output."
+    return runs, None
+
+
+def view_workflow_run(
+    root: Path,
+    args: list[str],
+    *,
+    command_exists_fn: Callable[[str], bool] = _command_exists,
+    gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
+) -> tuple[dict[str, Any], str | None]:
+    """Read one Actions run without allowing an interactive ``gh`` prompt."""
+
+    if not command_exists_fn("gh"):
+        return {}, "`gh` not found on PATH."
+    result = gh_command_fn(root, args)
+    if result.returncode != 0:
+        return {}, compact_error(result)
+    payload = parse_json_object(result.stdout)
+    if not payload:
+        return {}, "Could not parse `gh run view` output."
+    return payload, None
+
+
+def dispatch_workflow(
+    root: Path,
+    args: list[str],
+    *,
+    command_exists_fn: Callable[[str], bool] = _command_exists,
+    gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
+) -> subprocess.CompletedProcess[str]:
+    if not command_exists_fn("gh"):
+        return subprocess.CompletedProcess(["gh", *args], 127, "", "`gh` not found on PATH.")
+    return gh_command_fn(root, args)
+
+
+def read_workflow_logs(
+    root: Path,
+    args: list[str],
+    *,
+    command_exists_fn: Callable[[str], bool] = _command_exists,
+    gh_stream_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_stream_command,
+) -> subprocess.CompletedProcess[str]:
+    if not command_exists_fn("gh"):
+        return subprocess.CompletedProcess(["gh", *args], 127, "", "`gh` not found on PATH.")
+    return gh_stream_command_fn(root, args, timeout=300)
+
+
+def watch_workflow_run(
+    root: Path,
+    args: list[str],
+    *,
+    stream: bool = True,
+    command_exists_fn: Callable[[str], bool] = _command_exists,
+    gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
+    gh_stream_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_stream_command,
+) -> subprocess.CompletedProcess[str]:
+    if not command_exists_fn("gh"):
+        return subprocess.CompletedProcess(["gh", *args], 127, "", "`gh` not found on PATH.")
+    if stream:
+        return gh_stream_command_fn(root, args, timeout=3600)
+    return gh_command_fn(root, args, timeout=3600)
+
+
 def actions_run_rows(runs: list[dict[str, Any]]) -> list[list[str]]:
     rows: list[list[str]] = []
     for run in runs:
@@ -337,7 +428,15 @@ def failed_step_rows(workflow_name: str, stdout: str) -> list[list[str]]:
 def actions_next_actions(run: dict[str, Any], failed_steps: list[list[str]]) -> list[str]:
     run_id = str(run.get("databaseId") or "")
     run_url = str(run.get("url") or "")
-    log_command = f"gh run view {run_id} --log-failed" if run_id else "gh run view <run-id> --log-failed"
+    workflow_name = str(run.get("workflowName") or "")
+    if workflow_name == DEPLOYMENT_WORKFLOW_NAME:
+        log_command = (
+            f"devsecops deploy logs --run-id {run_id} --failed"
+            if run_id
+            else "devsecops deploy logs --run-id <run-id> --failed"
+        )
+    else:
+        log_command = f"gh run view {run_id} --log-failed" if run_id else "gh run view <run-id> --log-failed"
     actions = []
     for workflow, job, step, conclusion, runbook in failed_steps:
         location = f"{workflow} / {job}"
@@ -514,17 +613,23 @@ def collect_github_actions_status(
             continue
         job_result = gh_command_fn(root, ["run", "view", str(run_id), "--json", "jobs"])
         if job_result.returncode != 0:
-            failed_rows.append([str(run.get("workflowName", "")), "(jobs)", "unknown", compact_error(job_result)])
+            workflow_name = str(run.get("workflowName", ""))
+            failed_rows.append([workflow_name, "(jobs)", "unknown", compact_error(job_result)])
             run_id_text = str(run_id)
             run_url = str(run.get("url") or "")
+            log_command = (
+                f"devsecops deploy logs --run-id {run_id_text} --failed"
+                if workflow_name == DEPLOYMENT_WORKFLOW_NAME
+                else f"gh run view {run_id_text} --log-failed"
+            )
             next_actions_result.append(
-                f"Could not inspect failed jobs for run {run_id_text}. Run `gh run view {run_id_text} --log-failed` "
+                f"Could not inspect failed jobs for run {run_id_text}. Run `{log_command}` "
                 f"and see `docs/troubleshooting.md#actions-status-cannot-show-workflow-runs`."
                 + (f" Open {run_url}" if run_url else "")
             )
             failed_step_rows_result.append(
                 [
-                    str(run.get("workflowName", "")),
+                    workflow_name,
                     "(jobs)",
                     "(could not inspect failed steps)",
                     "unknown",
@@ -629,18 +734,23 @@ __all__ = [
     "collect_github_checks",
     "failed_job_rows",
     "failed_step_rows",
+    "dispatch_workflow",
     "github_actions_status",
     "github_expected_variables",
     "github_secret_checks",
     "github_setup_precheck",
     "github_status_rows",
     "github_variable_checks",
+    "list_workflow_runs",
     "optional_github_secrets",
     "parse_gh_items",
     "parse_gh_plain_table",
     "parse_gh_runs",
     "parse_json_object",
+    "read_workflow_logs",
     "required_github_secrets",
     "required_status_check_names",
     "runbook_for_failure",
+    "view_workflow_run",
+    "watch_workflow_run",
 ]

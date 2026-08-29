@@ -332,8 +332,8 @@ failed job names, failed step names, next actions, and runbook links. For a
 failed deployment, start with:
 
 ```bash
-devsecops github status --format compact --strict
-gh run view <run-id> --log-failed
+devsecops deploy status
+devsecops deploy logs --failed
 ```
 
 Common runbooks:
@@ -343,6 +343,39 @@ Common runbooks:
 * [Failed validation](runbooks/failed-validation.md)
 * [Missing Lambda image](runbooks/missing-image.md)
 * [Failed deployment rollback](runbooks/failed-rollback.md)
+
+### Deployment command cannot find a run or rollback target
+
+`devsecops deploy status`, `logs`, and `rollback` first use an explicit
+`--run-id`, then the ignored `.devsecops/deployments.json` journal. Status can
+also discover a newer workflow run whose title is `DevSecOps deploy prod` or
+`DevSecOps rollback prod`.
+
+If the journal came from another workstation or was intentionally removed:
+
+```bash
+devsecops deploy status --run-id <github-actions-run-id>
+devsecops deploy logs --run-id <github-actions-run-id> --failed
+devsecops deploy rollback --image-uri <known-good-immutable-ecr-image-uri> --dry-run
+```
+
+Do not reconstruct or guess an image URI from logs. Confirm the digest or
+immutable tag in ECR and review the current image shown by `devsecops aws
+outputs --environment prod`.
+
+### Deployment command reports an active production run
+
+Deploy and rollback share one non-cancelling production concurrency lane.
+Wait for the active run and inspect it before starting another state mutation:
+
+```bash
+devsecops deploy status --watch
+devsecops deploy logs --failed
+```
+
+If the run is genuinely stuck, cancel it in GitHub Actions after reviewing its
+current Terraform/Lambda step, then rerun deployment preflight. The CLI does
+not automatically cancel or replace protected production runs.
 
 ## AWS Diagnostics
 

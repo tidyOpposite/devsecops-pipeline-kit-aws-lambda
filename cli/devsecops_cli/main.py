@@ -43,6 +43,37 @@ from .aws import (
     is_resource_missing,
     missing_or_error_detail,
 )
+from .deploy import (
+    DEPLOYMENT_ENVIRONMENT,
+    DEPLOYMENT_REF,
+    DEPLOYMENT_STATE_SCHEMA_VERSION,
+    DEPLOYMENT_WORKFLOW,
+    DEPLOYMENT_WORKFLOW_NAME,
+    DEPLOYMENT_WORKFLOW_PATH,
+    DeploymentStateError,
+    active_deployment_runs,
+    deployment_exit_code,
+    deployment_job_rows,
+    deployment_state_path,
+    deployment_status_payload,
+    display_gh_command,
+    empty_deployment_state,
+    is_deployment_run,
+    latest_deployment,
+    load_deployment_state,
+    newest_deployment_run,
+    parse_run_url,
+    record_deployment,
+    rollback_target,
+    save_deployment_state,
+    select_dispatched_run,
+    utc_now,
+    workflow_dispatch_args,
+    workflow_run_list_args,
+    workflow_run_log_args,
+    workflow_run_view_args,
+    workflow_run_watch_args,
+)
 from .config import (
     AWS_REGION_RE,
     CONFIG_MIGRATION_CONTRACT,
@@ -150,6 +181,7 @@ from .models import ActionsStatus, Check, ConfigMigrationError, Control, EcrImag
 from .paths import (
     AUDIT_REPORT,
     CONFIG_FILE,
+    DEPLOYMENT_STATE_FILE,
     DIST_DIR,
     GENERATED_ARTIFACT_DOC,
     GENERATED_TFVARS,
@@ -488,6 +520,16 @@ def gh_command(root: Path, args: list[str], timeout: int = 30) -> subprocess.Com
     return run_command(["gh", *args], root, timeout=timeout)
 
 
+def gh_stream_command(root: Path, args: list[str], timeout: int = 300) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # nosec B603
+        ["gh", *args],
+        cwd=root,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
 def aws_command(root: Path, args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
     return run_command(["aws", *args], root, timeout=timeout)
 
@@ -558,6 +600,20 @@ def inspect_aws_outputs(
     )
 
 
+def inspect_active_lambda_image(
+    root: Path,
+    cfg: dict[str, Any],
+    env_name: str = DEPLOYMENT_ENVIRONMENT,
+) -> tuple[str, str | None]:
+    return _aws_adapter.inspect_active_lambda_image(
+        root,
+        cfg,
+        env_name,
+        command_exists_fn=command_exists,
+        aws_json_fn=aws_json,
+    )
+
+
 
 def collect_github_checks(root: Path, cfg: dict[str, Any]) -> list[Check]:
     return _github_adapter.collect_github_checks(
@@ -597,6 +653,66 @@ def collect_github_actions_status(
         failed_jobs_limit,
         command_exists_fn=command_exists,
         gh_command_fn=gh_command,
+    )
+
+
+def list_deployment_runs(root: Path, limit: int = 20) -> tuple[list[dict[str, Any]], str | None]:
+    return _github_adapter.list_workflow_runs(
+        root,
+        workflow_run_list_args(limit),
+        command_exists_fn=command_exists,
+        gh_command_fn=gh_command,
+    )
+
+
+def view_deployment_run(root: Path, run_id: str) -> tuple[dict[str, Any], str | None]:
+    return _github_adapter.view_workflow_run(
+        root,
+        workflow_run_view_args(run_id),
+        command_exists_fn=command_exists,
+        gh_command_fn=gh_command,
+    )
+
+
+def dispatch_deployment_workflow(
+    root: Path,
+    operation: str,
+    image_uri: str,
+) -> subprocess.CompletedProcess[str]:
+    return _github_adapter.dispatch_workflow(
+        root,
+        workflow_dispatch_args(operation, image_uri),
+        command_exists_fn=command_exists,
+        gh_command_fn=gh_command,
+    )
+
+
+def read_deployment_logs(
+    root: Path,
+    run_id: str,
+    failed_only: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    return _github_adapter.read_workflow_logs(
+        root,
+        workflow_run_log_args(run_id, failed_only=failed_only),
+        command_exists_fn=command_exists,
+        gh_stream_command_fn=gh_stream_command,
+    )
+
+
+def watch_deployment_run(
+    root: Path,
+    run_id: str,
+    interval: int = 5,
+    stream: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    return _github_adapter.watch_workflow_run(
+        root,
+        workflow_run_watch_args(run_id, interval),
+        stream=stream,
+        command_exists_fn=command_exists,
+        gh_command_fn=gh_command,
+        gh_stream_command_fn=gh_stream_command,
     )
 
 
@@ -2557,6 +2673,663 @@ def cmd_gh_status(args: argparse.Namespace) -> int:
     return EXIT_VALIDATION_FAILED if getattr(args, "strict", False) and status.failed_jobs else EXIT_OK
 
 
+PRODUCTION_DEPLOYMENT_POLICY_CHECKS = {
+    "Lambda image immutability policy",
+    "Production CORS policy",
+    "Production approval gate policy",
+    "Separate plan role policy",
+    "Deployment validation policy",
+}
+
+
+def deployment_error_exit_code(error: str) -> int:
+    lowered = error.lower()
+    if "not found on path" in lowered:
+        return EXIT_MISSING_EXTERNAL_TOOL
+    if any(marker in lowered for marker in ("auth", "login", "logged in", "credentials")):
+        return EXIT_AUTH_FAILED
+    return EXIT_VALIDATION_FAILED
+
+
+def deployment_preflight_exit_code(checks: list[Check]) -> int:
+    github_cli = next((check for check in checks if check.name == "GitHub CLI"), None)
+    if github_cli is not None and github_cli.status != "OK" and "not found" in github_cli.detail.lower():
+        return EXIT_MISSING_EXTERNAL_TOOL
+    github_auth = next((check for check in checks if check.name == "GitHub auth"), None)
+    if github_auth is not None and github_auth.status != "OK":
+        return EXIT_AUTH_FAILED
+    return EXIT_VALIDATION_FAILED
+
+
+def production_deployment_preflight_checks(
+    root: Path,
+    cfg: dict[str, Any],
+    runs: list[dict[str, Any]],
+    runs_error: str | None,
+    active_image_uri: str,
+    active_image_error: str | None,
+) -> list[Check]:
+    checks: list[Check] = []
+    config_exists = config_path(root).exists()
+    checks.append(
+        Check(
+            "Local config",
+            "OK" if config_exists else "FAIL",
+            str(config_path(root)) if config_exists else f"Create {CONFIG_FILE} with `devsecops setup`.",
+        )
+    )
+    missing_files = missing_project_files(root)
+    checks.append(
+        Check(
+            "Project deployment files",
+            "OK" if not missing_files else "FAIL",
+            "Terraform modules and protected workflow are present."
+            if not missing_files
+            else "Missing: " + ", ".join(missing_files),
+        )
+    )
+
+    validation = validate_config(cfg)
+    policy_blockers = [
+        check
+        for check in validation
+        if check.status == "FAIL"
+        or (check.name in PRODUCTION_DEPLOYMENT_POLICY_CHECKS and check.status == "WARN")
+    ]
+    checks.append(
+        Check(
+            "Production config policy",
+            "OK" if config_exists and not policy_blockers else "FAIL",
+            "Strict production controls are ready."
+            if config_exists and not policy_blockers
+            else "; ".join(f"{check.name}: {check.detail}" for check in policy_blockers)
+            or "Local config is missing.",
+        )
+    )
+    checks.extend(collect_image_preflight_checks(cfg, env_name=DEPLOYMENT_ENVIRONMENT))
+
+    generated = [GENERATED_TFVARS, DIST_DIR / "github-setup.sh"]
+    missing_generated = [str(path) for path in generated if not (root / path).exists()]
+    checks.append(
+        Check(
+            "Generated deployment helpers",
+            "OK" if not missing_generated else "FAIL",
+            "Current generated inputs are present."
+            if not missing_generated
+            else "Run `devsecops generate`; missing: " + ", ".join(missing_generated),
+        )
+    )
+    github_checks = exact_image_dispatch_github_checks(collect_github_checks(root, cfg))
+    checks.extend(github_checks)
+    github_check_names = {check.name for check in github_checks}
+    checks.extend(
+        check
+        for check in collect_branch_checks(root, DEPLOYMENT_REF)
+        if check.name not in github_check_names
+    )
+
+    if runs_error:
+        checks.append(Check("Concurrent production run", "FAIL", runs_error))
+    else:
+        active = active_deployment_runs(runs)
+        checks.append(
+            Check(
+                "Concurrent production run",
+                "FAIL" if active else "OK",
+                f"Run {active[0].get('databaseId')} is already {active[0].get('status')}."
+                if active
+                else "No queued or running manual workflow uses the production deployment lane.",
+            )
+        )
+    checks.append(
+        Check(
+            "Current Lambda image",
+            "INFO",
+            active_image_uri
+            or active_image_error
+            or "No deployed Lambda image found; this appears to be the first deployment.",
+            scored=False,
+        )
+    )
+    return checks
+
+
+def exact_image_dispatch_github_checks(checks: list[Check]) -> list[Check]:
+    """Ignore only the repository image fallback when dispatch binds an exact target."""
+
+    adjusted: list[Check] = []
+    for check in checks:
+        if check.name == "GitHub variable LAMBDA_IMAGE_URI":
+            adjusted.append(
+                Check(
+                    check.name,
+                    "INFO",
+                    check.detail + " The CLI supplies the reviewed image directly for this workflow run.",
+                    scored=False,
+                )
+            )
+        else:
+            adjusted.append(check)
+    return adjusted
+
+
+def rollback_github_checks(checks: list[Check]) -> list[Check]:
+    """Keep incident rollback available when only local desired-state values drift."""
+
+    adjusted: list[Check] = []
+    for check in exact_image_dispatch_github_checks(checks):
+        local_mismatch = check.name.startswith("GitHub variable ") and (
+            check.detail.startswith("Expected `") or "Local config has no expected" in check.detail
+        )
+        if local_mismatch:
+            adjusted.append(
+                Check(
+                    check.name,
+                    "INFO",
+                    check.detail + " Local desired-state drift does not block an explicit rollback target.",
+                    scored=False,
+                )
+            )
+        else:
+            adjusted.append(check)
+    return adjusted
+
+
+def rollback_deployment_preflight_checks(
+    root: Path,
+    cfg: dict[str, Any],
+    target_image_uri: str,
+    runs: list[dict[str, Any]],
+    runs_error: str | None,
+    active_image_uri: str,
+    active_image_error: str | None,
+) -> list[Check]:
+    workflow_exists = (root / DEPLOYMENT_WORKFLOW_PATH).exists()
+    checks = [
+        Check(
+            "Protected deployment workflow",
+            "OK" if workflow_exists else "FAIL",
+            DEPLOYMENT_WORKFLOW_PATH if workflow_exists else f"Missing {DEPLOYMENT_WORKFLOW_PATH}.",
+        )
+    ]
+    image_checks = collect_image_preflight_checks(cfg, image_uri=target_image_uri, env_name=DEPLOYMENT_ENVIRONMENT)
+    if not config_path(root).exists():
+        image_checks = [
+            Check(check.name, "INFO", check.detail, scored=False)
+            if check.name in {"Lambda image region", "Lambda image repository"}
+            else check
+            for check in image_checks
+        ]
+    checks.extend(image_checks)
+    checks.extend(rollback_github_checks(collect_github_checks(root, cfg)))
+    if runs_error:
+        checks.append(Check("Concurrent production run", "FAIL", runs_error))
+    else:
+        active = active_deployment_runs(runs)
+        checks.append(
+            Check(
+                "Concurrent production run",
+                "FAIL" if active else "OK",
+                f"Run {active[0].get('databaseId')} is already {active[0].get('status')}."
+                if active
+                else "No queued or running manual workflow uses the production deployment lane.",
+            )
+        )
+    if active_image_uri and active_image_uri == target_image_uri:
+        checks.append(Check("Rollback changes image", "FAIL", "The requested rollback image is already active."))
+    else:
+        checks.append(
+            Check(
+                "Current Lambda image",
+                "INFO",
+                active_image_uri or active_image_error or "Could not observe the current image locally.",
+                scored=False,
+            )
+        )
+    return checks
+
+
+def resolve_deployment_run(
+    root: Path,
+    run_id: str | None = None,
+) -> tuple[dict[str, Any], dict[str, str] | None, str | None]:
+    record = latest_deployment(root, run_id) if run_id else latest_deployment(root)
+    selected_run_id = str(run_id or (record or {}).get("run_id") or "")
+    if selected_run_id:
+        run, error = view_deployment_run(root, selected_run_id)
+        if error:
+            return {}, record, error
+        workflow_name = str(run.get("workflowName") or "")
+        event = str(run.get("event") or "")
+        branch = str(run.get("headBranch") or "")
+        if workflow_name and workflow_name != DEPLOYMENT_WORKFLOW_NAME:
+            return {}, record, f"Run {selected_run_id} belongs to `{workflow_name}`, not the deployment workflow."
+        if event and event != "workflow_dispatch":
+            return {}, record, f"Run {selected_run_id} was triggered by `{event}`, not a manual deployment."
+        if branch and branch != DEPLOYMENT_REF:
+            return {}, record, f"Run {selected_run_id} uses `{branch}`, not protected ref `{DEPLOYMENT_REF}`."
+        return run, record, None
+
+    runs, error = list_deployment_runs(root)
+    if error:
+        return {}, record, error
+    run = newest_deployment_run(runs)
+    if run is None:
+        return {}, record, "No CLI deployment run was found. Start one with `devsecops deploy prod`."
+    discovered_id = str(run.get("databaseId") or "")
+    matched_record = latest_deployment(root, discovered_id) if discovered_id else None
+    return run, matched_record or record, None
+
+
+def resolve_dispatched_run(
+    root: Path,
+    before_run_ids: set[str],
+    output: str,
+    operation: str,
+    attempts: int = 8,
+) -> tuple[str, str]:
+    run_id, run_url = parse_run_url(output)
+    if run_id:
+        return run_id, run_url
+    for attempt in range(max(1, attempts)):
+        runs, error = list_deployment_runs(root)
+        if not error:
+            run = select_dispatched_run(before_run_ids, runs, operation)
+            if run is not None:
+                return str(run.get("databaseId") or ""), str(run.get("url") or "")
+        if attempt + 1 < attempts:
+            time.sleep(1)
+    return "", ""
+
+
+def confirm_cloud_deployment(operation: str) -> bool:
+    expected = DEPLOYMENT_ENVIRONMENT if operation == "deploy" else "rollback"
+    try:
+        answer = input(f"Type {expected} to dispatch this {operation} workflow: ").strip().lower()
+    except EOFError:
+        return False
+    return answer == expected
+
+
+def print_deployment_intent(
+    operation: str,
+    image_uri: str,
+    previous_image_uri: str,
+    source_run_id: str = "",
+) -> None:
+    title = "Production Deployment" if operation == "deploy" else "Production Rollback"
+    lines = [
+        f"Operation: {operation}",
+        f"Environment: {DEPLOYMENT_ENVIRONMENT}",
+        f"Protected ref: {DEPLOYMENT_REF}",
+        f"Target image: {image_uri}",
+        f"Current image: {previous_image_uri or '(not observed locally)'}",
+        "Execution: protected GitHub Actions environment with OIDC and Terraform state",
+    ]
+    if source_run_id:
+        lines.insert(1, f"Deployment being reversed: run {source_run_id}")
+    draw_box(title, lines)
+    print("Underlying GitHub command:")
+    print("  " + display_gh_command(workflow_dispatch_args(operation, image_uri)))
+
+
+def dispatch_cloud_deployment(
+    root: Path,
+    operation: str,
+    image_uri: str,
+    previous_image_uri: str,
+    source_run_id: str,
+    *,
+    watch: bool,
+    interval: int,
+) -> int:
+    current_runs, current_runs_error = list_deployment_runs(root)
+    if current_runs_error:
+        print(fail("Could not recheck the production deployment lane: ") + current_runs_error)
+        return deployment_error_exit_code(current_runs_error)
+    active = active_deployment_runs(current_runs)
+    if active:
+        print(
+            fail("Deployment was not dispatched: ")
+            + f"run {active[0].get('databaseId')} became {active[0].get('status')} during confirmation."
+        )
+        return EXIT_VALIDATION_FAILED
+    before_runs = current_runs
+    result = dispatch_deployment_workflow(root, operation, image_uri)
+    if result.returncode != 0:
+        print(fail("GitHub workflow dispatch failed: ") + compact_error(result))
+        return deployment_error_exit_code(compact_error(result))
+
+    before_ids = {str(run.get("databaseId") or "") for run in before_runs if run.get("databaseId")}
+    run_id, run_url = resolve_dispatched_run(
+        root,
+        before_ids,
+        (result.stdout or "") + "\n" + (result.stderr or ""),
+        operation,
+    )
+    record = {
+        "operation": operation,
+        "environment": DEPLOYMENT_ENVIRONMENT,
+        "ref": DEPLOYMENT_REF,
+        "requested_image_uri": image_uri,
+        "previous_image_uri": previous_image_uri,
+        "source_run_id": source_run_id,
+        "run_id": run_id,
+        "run_url": run_url,
+        "dispatched_at": utc_now(),
+    }
+    try:
+        record_deployment(root, record)
+    except (DeploymentStateError, OSError) as exc:
+        print(warn(f"Workflow started, but local deployment metadata could not be saved: {exc}"))
+
+    print(ok("Protected production workflow dispatched."))
+    if run_id:
+        print(f"Run: {run_id}")
+    if run_url:
+        print(f"URL: {run_url}")
+    if not run_id:
+        print(warn("GitHub did not return the run ID yet; `devsecops deploy status` will discover it by run name."))
+    print("Next command: devsecops deploy status --watch")
+
+    if watch and run_id:
+        print()
+        print(info("Watching deployment run through GitHub CLI..."))
+        watch_result = watch_deployment_run(root, run_id, interval, stream=True)
+        if (watch_result.stdout or "").strip():
+            print((watch_result.stdout or "").rstrip())
+        if watch_result.returncode != 0 and (watch_result.stderr or "").strip():
+            print(warn(compact_error(watch_result)))
+        refreshed, error = view_deployment_run(root, run_id)
+        if error:
+            return deployment_error_exit_code(error)
+        if watch_result.returncode != 0 and str(refreshed.get("status") or "") != "completed":
+            return EXIT_VALIDATION_FAILED
+        return deployment_exit_code(refreshed)
+    return EXIT_OK
+
+
+def cmd_deploy_prod(args: argparse.Namespace) -> int:
+    root = repo_root()
+    cfg = load_config(root)
+    if getattr(args, "interval", 5) < 3:
+        print(fail("--interval must be at least 3 seconds."))
+        return EXIT_VALIDATION_FAILED
+    runs, runs_error = list_deployment_runs(root)
+    active_image_uri, active_image_error = inspect_active_lambda_image(root, cfg)
+    checks = production_deployment_preflight_checks(
+        root,
+        cfg,
+        runs,
+        runs_error,
+        active_image_uri,
+        active_image_error,
+    )
+    image_uri = str(cfg.get("lambda_image_uri") or "")
+    print_deployment_intent("deploy", image_uri or "(not configured)", active_image_uri)
+    print()
+    emit_check_output("Production Deployment Preflight", checks)
+    blockers = [check for check in checks if check.scored and check.status != "OK"]
+    if blockers:
+        print()
+        print(fail(f"Deployment blocked by {len(blockers)} preflight check(s)."))
+        return deployment_preflight_exit_code(checks)
+    if getattr(args, "dry_run", False):
+        print()
+        print(info("Dry run only. No workflow was dispatched and AWS was not changed."))
+        return EXIT_OK
+    if not getattr(args, "yes", False) and not confirm_cloud_deployment("deploy"):
+        print(info("Production deployment cancelled. No workflow was dispatched."))
+        return EXIT_OK
+    return dispatch_cloud_deployment(
+        root,
+        "deploy",
+        image_uri,
+        active_image_uri,
+        "",
+        watch=getattr(args, "watch", False),
+        interval=getattr(args, "interval", 5),
+    )
+
+
+def cmd_deploy_rollback(args: argparse.Namespace) -> int:
+    root = repo_root()
+    cfg = load_config(root)
+    if getattr(args, "interval", 5) < 3:
+        print(fail("--interval must be at least 3 seconds."))
+        return EXIT_VALIDATION_FAILED
+    source_run_id = str(getattr(args, "run_id", None) or "")
+    explicit_image = str(getattr(args, "image_uri", None) or "").strip()
+    inferred_image, source_record = rollback_target(root, source_run_id or None)
+    target_image_uri = explicit_image or inferred_image
+    if not target_image_uri:
+        print(fail("No rollback target is available."))
+        print("Pass `--image-uri <immutable-ecr-image-uri>` or run a deployment from this CLI first.")
+        return EXIT_VALIDATION_FAILED
+    if not source_run_id and source_record:
+        source_run_id = source_record.get("run_id", "")
+
+    runs, runs_error = list_deployment_runs(root)
+    active_image_uri, active_image_error = inspect_active_lambda_image(root, cfg)
+    checks = rollback_deployment_preflight_checks(
+        root,
+        cfg,
+        target_image_uri,
+        runs,
+        runs_error,
+        active_image_uri,
+        active_image_error,
+    )
+    print_deployment_intent("rollback", target_image_uri, active_image_uri, source_run_id)
+    print()
+    emit_check_output("Production Rollback Preflight", checks)
+    blockers = [check for check in checks if check.scored and check.status != "OK"]
+    if blockers:
+        print()
+        print(fail(f"Rollback blocked by {len(blockers)} preflight check(s)."))
+        return deployment_preflight_exit_code(checks)
+    if getattr(args, "dry_run", False):
+        print()
+        print(info("Dry run only. No rollback workflow was dispatched and AWS was not changed."))
+        return EXIT_OK
+    if not getattr(args, "yes", False) and not confirm_cloud_deployment("rollback"):
+        print(info("Production rollback cancelled. No workflow was dispatched."))
+        return EXIT_OK
+    return dispatch_cloud_deployment(
+        root,
+        "rollback",
+        target_image_uri,
+        active_image_uri,
+        source_run_id,
+        watch=getattr(args, "watch", False),
+        interval=getattr(args, "interval", 5),
+    )
+
+
+def deployment_operation_from_run(run: dict[str, Any], record: dict[str, str] | None) -> str:
+    if record and record.get("operation"):
+        return record["operation"]
+    title = str(run.get("displayTitle") or "").lower()
+    if title == "devsecops rollback prod":
+        return "rollback"
+    if title == "devsecops deploy prod":
+        return "deploy"
+    return "unknown"
+
+
+def emit_deployment_status(
+    run: dict[str, Any],
+    record: dict[str, str] | None,
+    active_image_uri: str,
+    active_image_error: str | None,
+    output_format: str,
+) -> None:
+    payload = deployment_status_payload(run, record, active_image_uri)
+    if output_format == "json":
+        if active_image_error:
+            payload["active_image_warning"] = active_image_error
+        emit_json(payload)
+        return
+
+    operation = deployment_operation_from_run(run, record)
+    run_id = str(run.get("databaseId") or "")
+    status = str(run.get("status") or "unknown")
+    conclusion = str(run.get("conclusion") or "")
+    if output_format == "compact":
+        result = conclusion or status
+        print(f"prod {operation} | run {run_id or '?'} | {status} | {result}")
+        if run.get("url"):
+            print(str(run["url"]))
+        return
+
+    draw_box(
+        "Production Deployment Status",
+        [
+            f"Run: {run_id or '(unknown)'}",
+            f"Operation: {operation}",
+            f"Status: {status}",
+            f"Conclusion: {conclusion or '(pending)'}",
+            f"Ref: {run.get('headBranch') or DEPLOYMENT_REF} ({str(run.get('headSha') or '')[:12] or 'unknown SHA'})",
+            f"Requested image: {(record or {}).get('requested_image_uri') or '(not recorded locally)'}",
+            f"Previous image: {(record or {}).get('previous_image_uri') or '(not recorded locally)'}",
+            f"Active AWS image: {active_image_uri or '(not observed locally)'}",
+            f"URL: {run.get('url') or '(not available)'}",
+        ],
+    )
+    print("Underlying GitHub command:")
+    print("  " + display_gh_command(workflow_run_view_args(run_id or "<run-id>")))
+    rows = deployment_job_rows(run)
+    if rows:
+        print()
+        draw_table(["Job", "Status", "Conclusion", "Started", "Completed"], rows, title="Deployment Jobs")
+    if active_image_error:
+        print()
+        print(warn("AWS image inspection: ") + active_image_error)
+    print()
+    if status != "completed":
+        print("Next command: devsecops deploy status --watch")
+    elif conclusion == "success":
+        print("Next command: devsecops health --aws-sigv4")
+    else:
+        print("Next command: devsecops deploy logs --failed")
+        if record and record.get("previous_image_uri"):
+            print("Recovery command: devsecops deploy rollback")
+
+
+def cmd_deploy_status(args: argparse.Namespace) -> int:
+    root = repo_root()
+    interval = getattr(args, "interval", 5)
+    output_format = getattr(args, "format", "human")
+    if interval < 3:
+        if output_format == "json":
+            emit_json(
+                {
+                    "kind": "deployment-status",
+                    "schema_version": CONTRACT_SCHEMA_VERSION,
+                    "error": "--interval must be at least 3 seconds.",
+                }
+            )
+        else:
+            print(fail("--interval must be at least 3 seconds."))
+        return EXIT_VALIDATION_FAILED
+    watch_incomplete = False
+    run, record, error = resolve_deployment_run(root, getattr(args, "run_id", None))
+    if error:
+        if output_format == "json":
+            emit_json(
+                {
+                    "kind": "deployment-status",
+                    "schema_version": CONTRACT_SCHEMA_VERSION,
+                    "error": error,
+                    "run": None,
+                    "jobs": [],
+                }
+            )
+        else:
+            print(fail(error))
+        return deployment_error_exit_code(error)
+
+    run_id = str(run.get("databaseId") or "")
+    if getattr(args, "watch", False) and str(run.get("status") or "") != "completed":
+        if output_format != "json":
+            print(info("Underlying GitHub command: ") + display_gh_command(workflow_run_watch_args(run_id, interval)))
+        watched = watch_deployment_run(root, run_id, interval, stream=output_format != "json")
+        if output_format != "json" and (watched.stdout or "").strip():
+            print((watched.stdout or "").rstrip())
+        refreshed, refresh_error = view_deployment_run(root, run_id)
+        if refresh_error:
+            if output_format == "json":
+                emit_json(
+                    {
+                        "kind": "deployment-status",
+                        "schema_version": CONTRACT_SCHEMA_VERSION,
+                        "error": refresh_error,
+                        "run": None,
+                        "jobs": [],
+                    }
+                )
+            else:
+                print(fail(refresh_error))
+            return deployment_error_exit_code(refresh_error)
+        run = refreshed
+        if watched.returncode != 0 and str(run.get("status") or "") != "completed":
+            watch_incomplete = True
+            if output_format != "json":
+                print(warn("GitHub stopped watching before the deployment reached a conclusion."))
+
+    cfg = load_config(root)
+    active_image_uri, active_image_error = inspect_active_lambda_image(root, cfg)
+    emit_deployment_status(run, record, active_image_uri, active_image_error, output_format)
+    return EXIT_VALIDATION_FAILED if watch_incomplete else deployment_exit_code(run)
+
+
+def cmd_deploy_logs(args: argparse.Namespace) -> int:
+    root = repo_root()
+    run, _record, error = resolve_deployment_run(root, getattr(args, "run_id", None))
+    if error:
+        print(fail(error))
+        return deployment_error_exit_code(error)
+    run_id = str(run.get("databaseId") or "")
+    failed_only = bool(getattr(args, "failed", False))
+    command = workflow_run_log_args(run_id, failed_only=failed_only)
+    draw_box(
+        "Production Deployment Logs",
+        [
+            f"Run: {run_id}",
+            f"Scope: {'failed steps only' if failed_only else 'full workflow log'}",
+            "Logs are streamed from GitHub Actions; no repository or cloud state is changed.",
+        ],
+    )
+    print("Underlying GitHub command:")
+    print("  " + display_gh_command(command))
+    print()
+    result = read_deployment_logs(root, run_id, failed_only=failed_only)
+    if result.returncode != 0:
+        print(fail(compact_error(result)))
+        return deployment_error_exit_code(compact_error(result))
+    if result.stdout is not None:
+        if result.stdout:
+            print(result.stdout.rstrip())
+        else:
+            print(warn("GitHub returned no log lines for this scope."))
+    return EXIT_OK
+
+
+def cmd_deploy(args: argparse.Namespace) -> int:
+    command = getattr(args, "deploy_command", None) or "status"
+    if command == "prod":
+        return cmd_deploy_prod(args)
+    if command == "status":
+        return cmd_deploy_status(args)
+    if command == "logs":
+        return cmd_deploy_logs(args)
+    if command == "rollback":
+        return cmd_deploy_rollback(args)
+    print(fail("Unknown deploy command: ") + str(command))
+    print("Usage: devsecops deploy [prod|status|logs|rollback]")
+    return EXIT_VALIDATION_FAILED
+
+
 def cmd_branch_doctor(args: argparse.Namespace) -> int:
     checks = collect_branch_checks(repo_root(), branch=args.branch)
     emit_check_output(
@@ -3278,14 +4051,31 @@ def show_production_deploy_command() -> None:
     draw_box(
         "Start Production Deployment",
         [
-            "Production deployment is delegated to the protected GitHub Actions workflow.",
-            "Running the command below may apply Terraform changes to the prod AWS environment.",
-            "This menu displays the command but does not execute it automatically.",
+            "The CLI runs readiness checks, prevents overlapping production runs, and asks for confirmation.",
+            "It then delegates deployment to the protected GitHub Actions environment.",
+            "This menu does not execute it automatically.",
         ],
     )
+    print("Preview first:")
+    print(f"  {PRODUCTION_DEPLOY_COMMAND} --dry-run")
     print("Deploy command:")
     print(f"  {PRODUCTION_DEPLOY_COMMAND}")
     print("Docs: docs/first-successful-pipeline.md#7-run-the-production-workflow-dispatch")
+
+
+def show_production_rollback_command() -> None:
+    draw_box(
+        "Roll Back Production Deployment",
+        [
+            "Cloud rollback restores the previous image recorded when the CLI dispatched a deployment.",
+            "It uses the same protected GitHub environment, OIDC role, Terraform state, and validation steps.",
+            "This is separate from `devsecops snapshot restore`, which changes local CLI-owned files only.",
+        ],
+    )
+    print("Preview first:")
+    print("  devsecops deploy rollback --dry-run")
+    print("Rollback command:")
+    print("  devsecops deploy rollback")
 
 
 def menu_deploy_hub() -> None:
@@ -3298,12 +4088,12 @@ def menu_deploy_hub() -> None:
         ],
     )
     print()
-    print("[1] Check deployment status")
+    print("[1] Current deployment status")
     print("[2] Show production deploy command")
-    print("[3] Recent deployment runs")
+    print("[3] Deployment logs")
     print("[4] Deployed AWS resources")
     print("[5] Validate production health endpoint")
-    print("[6] Deployment rollback guidance")
+    print("[6] Show production rollback command")
     print("[0] Back")
     choice = input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
@@ -3311,11 +4101,11 @@ def menu_deploy_hub() -> None:
         return
     print()
     if choice == "1":
-        cmd_status(argparse.Namespace(deep=True, strict=False, format="human", watch=False, interval=5))
+        cmd_deploy_status(argparse.Namespace(run_id=None, format="human", watch=False, interval=5))
     elif choice == "2":
         show_production_deploy_command()
     elif choice == "3":
-        cmd_gh_status(argparse.Namespace(strict=False, limit=8, format="human"))
+        cmd_deploy_logs(argparse.Namespace(run_id=None, failed=False))
     elif choice == "4":
         cmd_aws_outputs(argparse.Namespace(environment="prod", strict=False, format="human"))
     elif choice == "5":
@@ -3329,7 +4119,7 @@ def menu_deploy_hub() -> None:
             )
         )
     elif choice == "6":
-        cmd_explain(argparse.Namespace(topic="rollback"))
+        show_production_rollback_command()
     else:
         print(warn("Unknown option."))
     pause_for_menu()
@@ -3723,7 +4513,7 @@ def should_print_next_postlude(args: argparse.Namespace) -> bool:
     """Keep machine-readable output clean while guiding every human flow."""
 
     command = getattr(args, "command", None)
-    if command is None or command in {"menu", "setup", "status", "next", "start", "dashboard", "tui", "completion"}:
+    if command is None or command in {"menu", "setup", "status", "deploy", "next", "start", "dashboard", "tui", "completion"}:
         return False
     if getattr(args, "format", None) in {"json", "markdown", "toml"}:
         return False
@@ -3758,6 +4548,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_INTERRUPTED
     except SetupStateError as exc:
         print(fail("Setup state error: ") + str(exc))
+        return EXIT_VALIDATION_FAILED
+    except DeploymentStateError as exc:
+        print(fail("Deployment state error: ") + str(exc))
         return EXIT_VALIDATION_FAILED
     except ConfigMigrationError as exc:
         print(fail("Config migration error: ") + str(exc))

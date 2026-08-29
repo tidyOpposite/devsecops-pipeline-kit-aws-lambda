@@ -556,6 +556,40 @@ def inspect_aws_outputs(
     return outputs, checks
 
 
+def inspect_active_lambda_image(
+    root: Path,
+    cfg: dict[str, Any],
+    env_name: str = "prod",
+    *,
+    command_exists_fn: Callable[[str], bool] = _command_exists,
+    aws_json_fn: Callable[..., tuple[Any, subprocess.CompletedProcess[str]]] = _aws_json,
+) -> tuple[str, str | None]:
+    """Return the deployed Lambda image without making AWS credentials mandatory.
+
+    The GitHub workflow is the deployment authority.  Local AWS inspection is
+    best-effort metadata used to make a later manual rollback ergonomic.
+    """
+
+    if not command_exists_fn("aws"):
+        return "", "`aws` not found on PATH; previous image cannot be recorded locally."
+    function_name = expected_lambda_function_name(cfg, env_name)
+    payload, result = aws_json_fn(
+        root,
+        ["lambda", "get-function", "--function-name", function_name, "--region", str(cfg["aws_region"])],
+    )
+    if result.returncode != 0:
+        if is_resource_missing(result):
+            return "", None
+        return "", compact_error(result)
+    if not isinstance(payload, dict):
+        return "", "Could not parse the deployed Lambda image from AWS."
+    code = payload.get("Code")
+    image_uri = str(code.get("ImageUri") or "") if isinstance(code, dict) else ""
+    if not image_uri:
+        return "", "The deployed Lambda function did not report a container image URI."
+    return image_uri, None
+
+
 
 __all__ = [
     "aws_sigv4_headers",
@@ -571,6 +605,7 @@ __all__ = [
     "expected_name_prefix",
     "fetch_health_url",
     "inspect_aws_outputs",
+    "inspect_active_lambda_image",
     "is_resource_missing",
     "missing_or_error_detail",
     "parse_ecr_image_uri",

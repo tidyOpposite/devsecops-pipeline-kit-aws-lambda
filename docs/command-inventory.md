@@ -50,6 +50,7 @@ scope.
 | --- | --- | --- |
 | `setup` | `start`, `config new`; `compose` remains an Advanced editor | Starting or resuming initial project setup. |
 | `status` | `dashboard`, `readiness`, `next` | One score, status areas, blockers, and the next action. |
+| `deploy prod/status/logs/rollback` | raw `gh workflow run`, generic Actions status | The complete protected production deployment lifecycle. |
 | `image validate` | `preflight` | Validating the Lambda image before deployment. |
 | `generate` / “Generate deployment files” | `render`, `--render` | Creating CLI-owned Terraform and GitHub helper files. |
 | `doctor` / “Diagnose problems” | — | Technical troubleshooting after status identifies a problem. |
@@ -69,6 +70,10 @@ but they are hidden from primary help and shell completion.
 | `devsecops dry-run` | Stable | First success | Previews the first-success path without writing files or requiring AWS credentials. |
 | `devsecops image validate` | Stable | First success | Checks Lambda image URI shape, immutability, and region before production deploy. |
 | `devsecops health` | Stable | Operations | Validates the deployed `/health` endpoint outside GitHub Actions. Uses Terraform output unless `--url` is provided; use `--aws-sigv4` for IAM-protected API Gateway routes. |
+| `devsecops deploy prod` | Stable | Deployment | Runs production preflight, prevents an overlapping manual run, confirms the exact immutable image, and dispatches the protected workflow. Supports `--dry-run`, `--yes`, and `--watch`. |
+| `devsecops deploy status` | Stable | Deployment | Resolves an explicit run, the locally recorded run, or the newest deployment-named run. Shows jobs, requested/previous/active images, URL, and recovery action. Supports human, compact, and JSON output. |
+| `devsecops deploy logs` | Stable | Deployment | Reads full or failed-step Actions logs for the same selected deployment run. |
+| `devsecops deploy rollback` | Stable | Deployment recovery | Restores the recorded previous image or an explicit immutable image through the protected workflow. It does not directly mutate Lambda and is distinct from local snapshot restore. |
 | `devsecops generate` | Stable | Generation | Writes CLI-owned Terraform and GitHub helper artifacts. Use `--dry-run` to preview file changes. |
 | `devsecops report` | Stable | Reporting | Writes a CLI-owned Markdown readiness report or JSON audit evidence with `--format json`. |
 | `devsecops evidence collect` | Stable | Advanced / release | Collects local release-candidate evidence artifacts with `--rc`. |

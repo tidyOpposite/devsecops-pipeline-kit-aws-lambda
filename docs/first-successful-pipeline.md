@@ -206,28 +206,57 @@ Set `LAMBDA_IMAGE_URI` ... See `docs/troubleshooting.md#lambda-image-uri-is-miss
 
 ## 7. Run The Production Workflow Dispatch
 
-After CI has passed on `main`, start the production workflow from GitHub:
+After CI has passed on `main`, preview the exact production operation. This
+runs local, GitHub, branch-protection, image, and concurrent-run checks but
+does not dispatch a workflow:
 
 ```bash
-gh workflow run "Secure Serverless DevSecOps Pipeline" \
-  --ref main \
-  -f mode=deploy \
-  -f environment=prod
+devsecops deploy prod --dry-run
 ```
 
-Watch it:
+Then let the CLI confirm the target image and dispatch the protected workflow:
 
 ```bash
-devsecops github status --format compact
+devsecops deploy prod
+devsecops deploy status --watch
 ```
+
+`devsecops deploy prod` shows the underlying `gh` command for transparency,
+but users do not need to assemble it. It binds the exact immutable image from
+local config into the dispatch, refuses to overlap an active production run,
+and records only non-secret run metadata in the ignored
+`.devsecops/deployments.json` journal. Use `--yes` only for already reviewed
+non-interactive execution.
 
 Expected successful outcome:
 
 ```text
-Deploy
-completed
-success
+Production Deployment Status
+Operation: deploy
+Status: completed
+Conclusion: success
 ```
+
+Inspect a failure without finding the Actions run ID manually:
+
+```bash
+devsecops deploy logs --failed
+```
+
+If a successful deployment must be reversed, preview and dispatch the previous
+image through the same protected GitHub Environment, OIDC role, validation,
+and Terraform state:
+
+```bash
+devsecops deploy rollback --dry-run
+devsecops deploy rollback
+devsecops deploy status --watch
+```
+
+The cloud command above is deliberately separate from `devsecops snapshot
+restore`, which only restores local CLI-owned files. If the local deployment
+journal is unavailable, pass a reviewed immutable target explicitly with
+`devsecops deploy rollback --image-uri <immutable-ecr-image-uri>`.
 
 After success, inspect AWS resources:
 

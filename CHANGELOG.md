@@ -17,6 +17,13 @@ semantic versioning.
 * Atomic, ignored `.devsecops/setup-state.json` progress with fail-closed schema
   validation and tests for resume, drift invalidation, mode boundaries, and
   secret non-persistence.
+* A complete protected deployment journey through `devsecops deploy prod`,
+  `deploy status`, `deploy logs`, and `deploy rollback`, including exact-image
+  dispatch, concurrent-run protection, watch/JSON status, and failed-log
+  routing.
+* A bounded, schema-versioned `.devsecops/deployments.json` journal containing
+  only non-secret run and image metadata so status, logs, and rollback share
+  one deployment context.
 
 ### Changed
 
@@ -28,6 +35,16 @@ semantic versioning.
   `--render` callable as compatibility aliases with their existing JSON kinds.
 * Made `--yes` a local-defaults-only setup authorization; GitHub repository
   changes now require interactive confirmation or explicit `--apply-github`.
+* Serialized deploy and rollback in one production workflow concurrency lane,
+  added deployment-specific run names, and routed explicit rollback through
+  the same protected GitHub Environment, OIDC role, Terraform state, scanners,
+  and validation as normal deployment.
+
+### Fixed
+
+* Capture the active Lambda image with `aws lambda get-function` so automatic
+  workflow rollback and the CLI rollback journal receive the real
+  `Code.ImageUri` value.
 
 ## v0.13.1 - 2026-08-24
 

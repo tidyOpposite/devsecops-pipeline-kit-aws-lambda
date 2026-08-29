@@ -18,6 +18,7 @@ stay explicit in docs and release notes, but they do not block `v1.0.0`.
 | DAST is an OWASP ZAP passive baseline scan. | Authenticated flows and business-logic testing are workload-specific. | Add application-specific DAST, API tests, and auth-aware security tests in the workload repository. |
 | Snyk container scanning is optional. | Some users do not have Snyk accounts or tokens during early pipeline setup. | Enable `ENABLE_SNYK_SCAN=true` and configure `SNYK_TOKEN` for stricter production candidates. |
 | Scanner plugin support is not implemented. | Extensible scanner plugins are a post-1.0 backlog item. | Use the documented Trivy, Snyk, and OWASP ZAP hooks, or add custom workflow steps intentionally. |
+| Deployment run and previous-image history is local to one checkout. | The ignored journal intentionally avoids a shared mutable control plane and stores no credentials. Named runs remain discoverable, but another workstation does not inherit the previous-image value. | Use `--run-id` for status/logs and pass a reviewed immutable `--image-uri` when rolling back without the originating journal. |
 
 ## Blockers Before v1.0.0 Stable
 

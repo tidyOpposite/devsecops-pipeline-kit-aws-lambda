@@ -11,6 +11,7 @@ COMPLETION_COMMANDS = [
     "menu",
     "setup",
     "status",
+    "deploy",
     "dry-run",
     "image",
     "generate",
@@ -26,6 +27,7 @@ COMPLETION_COMMANDS = [
     "completion",
 ]
 COMPLETION_SUBCOMMANDS = {
+    "deploy": ["prod", "status", "logs", "rollback"],
     "config": ["show", "validate", "diff", "reset", "set", "schema"],
     "doctor": ["local", "github", "aws", "branch", "actions", "all"],
     "aws": ["outputs", "doctor"],
@@ -56,6 +58,11 @@ COMPLETION_OPTIONS = {
         "--strict",
     ],
     "status": ["--help", "--deep", "--strict", "--format", "--watch", "--interval"],
+    "deploy": ["--help"],
+    "deploy prod": ["--help", "--dry-run", "--yes", "--watch", "--interval"],
+    "deploy status": ["--help", "--run-id", "--watch", "--interval", "--format"],
+    "deploy logs": ["--help", "--run-id", "--failed"],
+    "deploy rollback": ["--help", "--run-id", "--image-uri", "--dry-run", "--yes", "--watch", "--interval"],
     "image": ["--help"],
     "image validate": ["--help", "--image-uri", "--environment", "--format"],
     "generate": ["--help", "--dry-run"],

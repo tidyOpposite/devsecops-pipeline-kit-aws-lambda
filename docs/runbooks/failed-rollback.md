@@ -6,15 +6,16 @@ image but the deployed function still looks wrong.
 ## Boundary
 
 `devsecops rollback` and `devsecops snapshot restore` only restore local
-CLI-owned files. They do not roll back AWS Lambda. Cloud rollback happens in
-the GitHub Actions production deploy workflow.
+CLI-owned files. They do not roll back AWS Lambda. Operator cloud rollback is
+`devsecops deploy rollback`; it dispatches the protected GitHub Actions
+workflow and never updates Lambda directly from the local machine.
 
 ## Diagnose
 
 ```bash
-devsecops github status --format compact --strict
+devsecops deploy status
+devsecops deploy logs --failed
 devsecops aws outputs --environment prod
-gh run view <run-id> --log-failed
 ```
 
 ## Common Causes
@@ -29,6 +30,7 @@ gh run view <run-id> --log-failed
 1. Confirm whether the failed run captured `previous_image_uri`.
 2. Confirm the previous image still exists and can be pulled.
 3. Fix deploy role permissions for Lambda update and ECR pull actions.
-4. Rerun the production workflow with a known-good immutable image URI.
-5. Use `devsecops aws outputs --environment prod` to verify the resulting
+4. Preview `devsecops deploy rollback --image-uri <known-good-immutable-image-uri> --dry-run`.
+5. Dispatch `devsecops deploy rollback --image-uri <known-good-immutable-image-uri>` and follow it with `devsecops deploy status --watch`.
+6. Use `devsecops aws outputs --environment prod` to verify the resulting
    Lambda image and API Gateway endpoint.

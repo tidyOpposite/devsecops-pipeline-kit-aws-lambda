@@ -13,10 +13,7 @@ from .images import is_immutable_image
 from .models import Check
 from .paths import CONFIG_FILE, DIST_DIR, GENERATED_TFVARS, REQUIRED_PROJECT_FILES
 
-PRODUCTION_DEPLOY_COMMAND = (
-    'gh workflow run "Secure Serverless DevSecOps Pipeline" '
-    "--ref main -f mode=deploy -f environment=prod"
-)
+PRODUCTION_DEPLOY_COMMAND = "devsecops deploy prod"
 
 
 def _command_exists(name: str) -> bool:

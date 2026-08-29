@@ -533,9 +533,10 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
     def test_top_level_help_is_grouped_and_legacy_aliases_are_not_primary_choices(self) -> None:
         help_text = cli.build_parser().format_help()
         self.assertIn(
-            "{menu,setup,status,dry-run,image,generate,doctor,health,config,github,aws,terraform,snapshot,report,explain,completion}",
+            "{menu,setup,status,deploy,dry-run,image,generate,doctor,health,config,github,aws,terraform,snapshot,report,explain,completion}",
             help_text,
         )
+        self.assertIn("protected production deployment", help_text)
         self.assertIn("Legacy aliases still work", help_text)
         self.assertIn("Stable exit codes", help_text)
         self.assertNotIn("==SUPPRESS==", help_text)
@@ -558,7 +559,8 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         fish = cli.completion_script("fish")
 
         self.assertIn("complete -F _devsecops_completion devsecops", bash)
-        self.assertIn("menu setup status dry-run image generate", bash)
+        self.assertIn("menu setup status deploy dry-run image generate", bash)
+        self.assertIn("prod status logs rollback", bash)
         self.assertIn("show validate diff reset set schema", bash)
         self.assertIn("#compdef devsecops", zsh)
         self.assertIn("compadd 'menu' 'setup' 'status'", zsh)
@@ -588,6 +590,9 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertEqual(by_command["devsecops terraform bootstrap"]["status"], "stable")
         self.assertEqual(by_command["devsecops status"]["status"], "stable")
         self.assertEqual(by_command["devsecops setup"]["status"], "stable")
+        self.assertEqual(by_command["devsecops deploy prod"]["status"], "stable")
+        self.assertEqual(by_command["devsecops deploy status"]["json_kind"], "deployment-status")
+        self.assertIn("--image-uri", by_command["devsecops deploy rollback"]["stable_flags"])
         self.assertIn("--mode", by_command["devsecops setup"]["stable_flags"])
         self.assertIn("--apply-github", by_command["devsecops setup"]["stable_flags"])
         self.assertIn("--strict", by_command["devsecops setup"]["stable_flags"])
@@ -1247,7 +1252,10 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             "devsecops doctor github",
             "devsecops doctor branch",
             "devsecops report",
-            "devsecops github status",
+            "devsecops deploy prod",
+            "devsecops deploy status",
+            "devsecops deploy logs",
+            "devsecops deploy rollback",
             "devsecops doctor aws",
             "devsecops evidence collect",
         ]
@@ -2058,7 +2066,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         payload = json.loads(buffer.getvalue())
         self.assertEqual(result, cli.EXIT_VALIDATION_FAILED)
         self.assertEqual(payload["failed_steps"][0][4], cli.RUNBOOK_FAILED_APPLY)
-        self.assertIn("gh run view 10 --log-failed", payload["next_actions"][0])
+        self.assertIn("devsecops deploy logs --run-id 10 --failed", payload["next_actions"][0])
 
     def test_health_command_validates_explicit_url_without_terraform(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

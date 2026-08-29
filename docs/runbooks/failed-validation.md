@@ -5,10 +5,10 @@ Use this when Terraform validation, Trivy, Snyk, `/health`, or OWASP ZAP fails.
 ## Diagnose
 
 ```bash
-devsecops github status --format compact
+devsecops deploy status
+devsecops deploy logs --failed
 devsecops status --strict --format compact
 devsecops health --aws-sigv4
-gh run view <run-id> --log-failed
 ```
 
 ## Common Causes

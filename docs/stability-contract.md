@@ -27,6 +27,7 @@ devsecops inventory --status stable --format markdown
 | Workflow | Stable commands and flags |
 | --- | --- |
 | First success | `devsecops`, `devsecops setup --mode --preset --image-uri --backend-bucket --backend-region --backend-lock-table --apply-github --deploy-role-arn --plan-role-arn --snyk-token --generate --yes --strict`, `devsecops status --deep --strict --format --watch --interval`, `devsecops dry-run --preset --image-uri --environment`, `devsecops image validate --image-uri --environment --format` |
+| Deployment | `devsecops deploy prod --dry-run --yes --watch --interval`, `devsecops deploy status --run-id --watch --interval --format`, `devsecops deploy logs --run-id --failed`, `devsecops deploy rollback --run-id --image-uri --dry-run --yes --watch --interval` |
 | Troubleshooting | `devsecops doctor local --deep --strict --format`, `devsecops doctor github --strict --format`, `devsecops doctor aws --environment --strict --format`, `devsecops doctor branch --branch --strict --format`, `devsecops doctor actions --limit --strict --format`, `devsecops doctor all --deep --branch --environment --strict --format` |
 | Configuration and generation | `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops generate --dry-run`, `devsecops report --deep --format --output --print` |
 | Advanced release maintenance | `devsecops inventory --format --status`, `devsecops evidence collect --rc --output`, `devsecops criteria --format --evidence-dir --strict` |
@@ -49,6 +50,13 @@ tokens, and Snyk tokens are forbidden. `--yes` authorizes safe local defaults
 only. Repository mutation requires an interactive confirmation or the explicit
 `--apply-github` flag.
 
+`devsecops deploy prod` and `devsecops deploy rollback` store only non-secret
+run metadata in `.devsecops/deployments.json`. Its schema is fail-closed and
+history is bounded. Status and logs are read-only; deploy and cloud rollback
+show the underlying GitHub CLI command, reject concurrent production runs, and
+require confirmation unless `--yes` is explicit. The rollback command always
+uses the protected workflow and never performs a direct local Lambda update.
+
 ## JSON Output Contract
 
 JSON output is stable by `kind`. Fields may be added within the same
@@ -60,6 +68,7 @@ without a deprecation window.
 | `config` | `devsecops config validate --format json` | `kind`, `schema_version`, `score`, `overall_breakdown_score`, `breakdown`, `gaps`, `checks` |
 | `status` | `devsecops status --format json` | `kind`, `schema_version`, `score`, `breakdown`, `gaps`, `checks`, `context`, `next_action` |
 | `image-validation` | `devsecops image validate --format json` | `kind`, `schema_version`, `score`, `breakdown`, `gaps`, `checks`, `context` |
+| `deployment-status` | `devsecops deploy status --format json` | `kind`, `schema_version`, `environment`, `operation`, `requested_image_uri`, `previous_image_uri`, `active_image_uri`, `run`, `jobs` |
 | `readiness` | `devsecops readiness --format json` (compatibility alias) | Existing legacy keys remain stable. |
 | `preflight` | `devsecops preflight --format json` (compatibility alias) | Existing legacy keys remain stable. |
 | `health` | `devsecops health --format json` | `kind`, `schema_version`, `score`, `overall_breakdown_score`, `breakdown`, `gaps`, `checks`, `context` |
@@ -128,6 +137,7 @@ release note that explicitly changes the artifact contract.
 
 | File | Compatibility | Re-render required when | Expected diffs |
 | --- | --- | --- | --- |
+| `.devsecops/deployments.json` | Schema-versioned local runtime state | A protected deploy or rollback dispatch succeeds | One non-secret run/image record is prepended; bounded history only |
 | `terraform/generated.auto.tfvars` | Stable Terraform variables | Config values, schema migration output, or Terraform variable contract changes | HCL assignment values and `environment_config` values |
 | `dist/devsecops/backend.tf` | Stable review template | `backend.*` values or backend template policy changes | S3 backend attribute values |
 | `dist/devsecops/github-variables.env` | Stable helper | Repository variable source config changes | `PROJECT_NAME`, `LAMBDA_IMAGE_URI`, `ENABLE_*`, or `PROD_APPROVAL_ENVIRONMENT` values |

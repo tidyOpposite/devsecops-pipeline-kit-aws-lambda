@@ -7,7 +7,7 @@ from typing import Any
 from . import VERSION
 from .config import CONFIG_MIGRATION_CONTRACT
 from .formatting import markdown_table
-from .paths import AUDIT_REPORT, DIST_DIR, GENERATED_TFVARS, RC_EVIDENCE_DIR
+from .paths import AUDIT_REPORT, DEPLOYMENT_STATE_FILE, DIST_DIR, GENERATED_TFVARS, RC_EVIDENCE_DIR
 
 CONTRACT_SCHEMA_VERSION = 1
 COMMAND_CONTRACTS: list[dict[str, Any]] = [
@@ -150,6 +150,39 @@ COMMAND_CONTRACTS: list[dict[str, Any]] = [
         "formats": ["human", "compact", "json"],
         "json_kind": "health",
         "notes": "Read-only deployed /health validation.",
+    },
+    {
+        "command": "devsecops deploy prod",
+        "status": "stable",
+        "scope": "deployment",
+        "stable_flags": ["--dry-run", "--yes", "--watch", "--interval"],
+        "formats": ["human"],
+        "notes": "Checks production readiness, confirms the target, and dispatches the protected workflow with an exact image URI.",
+    },
+    {
+        "command": "devsecops deploy status",
+        "status": "stable",
+        "scope": "deployment",
+        "stable_flags": ["--run-id", "--watch", "--interval", "--format"],
+        "formats": ["human", "compact", "json"],
+        "json_kind": "deployment-status",
+        "notes": "Follows the explicit, locally recorded, or newest named production deployment run.",
+    },
+    {
+        "command": "devsecops deploy logs",
+        "status": "stable",
+        "scope": "deployment",
+        "stable_flags": ["--run-id", "--failed"],
+        "formats": ["human", "github-actions-log"],
+        "notes": "Reads full or failed-step logs for the same deployment run selected by deploy status.",
+    },
+    {
+        "command": "devsecops deploy rollback",
+        "status": "stable",
+        "scope": "deployment",
+        "stable_flags": ["--run-id", "--image-uri", "--dry-run", "--yes", "--watch", "--interval"],
+        "formats": ["human"],
+        "notes": "Restores a validated immutable image through the protected workflow; it never performs a direct local Lambda update.",
     },
     {
         "command": "devsecops generate",
@@ -624,6 +657,21 @@ JSON_OUTPUT_CONTRACTS = [
         "stable_keys": ["kind", "schema_version", "score", "breakdown", "gaps", "checks", "context"],
     },
     {
+        "kind": "deployment-status",
+        "commands": ["devsecops deploy status --format json"],
+        "stable_keys": [
+            "kind",
+            "schema_version",
+            "environment",
+            "operation",
+            "requested_image_uri",
+            "previous_image_uri",
+            "active_image_uri",
+            "run",
+            "jobs",
+        ],
+    },
+    {
         "kind": "config",
         "commands": ["devsecops config validate", "devsecops validate-config"],
         "stable_keys": ["kind", "schema_version", "score", "overall_breakdown_score", "breakdown", "gaps", "checks"],
@@ -695,6 +743,13 @@ JSON_OUTPUT_CONTRACTS = [
     },
 ]
 GENERATED_ARTIFACT_CONTRACTS = [
+    {
+        "path": str(DEPLOYMENT_STATE_FILE),
+        "producer": "devsecops deploy prod or devsecops deploy rollback",
+        "compatibility": "schema-versioned-local-runtime",
+        "rerender_required_when": ["deployment journal schema changes require a documented migration or reset"],
+        "expected_diffs": ["A new non-secret deployment record is prepended after a successful workflow dispatch."],
+    },
     {
         "path": str(GENERATED_TFVARS),
         "producer": "devsecops generate",
