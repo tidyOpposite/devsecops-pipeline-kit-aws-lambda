@@ -27,16 +27,20 @@ devsecops inventory --format json
 The README quick start and `devsecops --help` use the same first-run path:
 
 ```bash
-devsecops
 devsecops setup --preset balanced --yes
 devsecops status
 devsecops dry-run --image-uri <immutable-ecr-image-uri>
 ```
 
-`devsecops` without arguments and `devsecops status` use the same status and
-next-action algorithm as the interactive menu. Human-readable commands repeat
-that recommendation after their primary output; machine-readable output
-remains clean. Use
+The primary help intentionally shows only eight entry points: `menu`, `setup`,
+`status`, `deploy`, `dry-run`, `generate`, `doctor`, and `config`. Stable
+operational and support commands remain callable and are listed below without
+competing with the first-success route.
+
+`devsecops` without arguments is an optional shortcut and uses the same status
+and next-action algorithm as `devsecops status` and the interactive menu.
+Human-readable commands repeat that recommendation after their primary output;
+machine-readable output remains clean. Use
 `devsecops menu` when you prefer the interactive path.
 
 For the full resumable wizard, use `devsecops setup` interactively. Demo mode

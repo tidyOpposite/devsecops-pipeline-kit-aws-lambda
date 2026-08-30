@@ -35,18 +35,16 @@ Strengths:
 
 Gaps that make the project feel raw:
 
-* The CLI has many useful commands, but the product workflow is still spread
-  across top-level commands and aliases.
-* Configuration lifecycle commands exist partially, but there is no explicit
-  clean-config workflow with schema versioning, diffing, reset, or migration.
-* Tests cover important helpers, but there is limited end-to-end verification
-  of install, command output, generated artifacts, and Terraform/GitHub files.
-* Generated file ownership needs a stronger contract so users know what is
-  safe to edit and what should be regenerated.
-* Documentation explains the pieces, but the first-success path should be more
-  direct and measurable.
+* The primary CLI route is consolidated, but the broad compatibility surface
+  remains until the documented deprecation windows can be completed.
+* Standard and production setup still depend on users installing and
+  authenticating Terraform, AWS CLI, and GitHub CLI themselves.
+* Deployment run and previous-image history is intentionally local to one
+  checkout; cross-workstation rollback requires an explicit reviewed image.
 * The product has not yet proven a full happy path in a documented real AWS
   account walkthrough.
+* WSL2 install and first-success evidence is still required before a stable
+  release can be declared production-proven.
 
 ## Roadmap Themes
 

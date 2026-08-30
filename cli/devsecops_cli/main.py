@@ -908,9 +908,9 @@ def print_readiness_details(root: Path, deep: bool = False) -> None:
         print(ok("All scored readiness checks are OK."))
 
 
-def print_checks(checks: list[Check]) -> None:
+def print_checks(checks: list[Check], title: str = "Readiness") -> None:
     score = readiness_score(checks)
-    print(info("Readiness: ") + progress_bar(score))
+    print(info(f"{title}: ") + progress_bar(score))
     print()
     name_width = max(len(check.name) for check in checks) + 2
     for check in checks:
@@ -3285,7 +3285,7 @@ def cmd_deploy_status(args: argparse.Namespace) -> int:
 
 def cmd_deploy_logs(args: argparse.Namespace) -> int:
     root = repo_root()
-    run, _record, error = resolve_deployment_run(root, getattr(args, "run_id", None))
+    run, record, error = resolve_deployment_run(root, getattr(args, "run_id", None))
     if error:
         print(fail(error))
         return deployment_error_exit_code(error)
@@ -3312,6 +3312,18 @@ def cmd_deploy_logs(args: argparse.Namespace) -> int:
             print(result.stdout.rstrip())
         else:
             print(warn("GitHub returned no log lines for this scope."))
+    print()
+    status = str(run.get("status") or "")
+    conclusion = str(run.get("conclusion") or "")
+    if status != "completed":
+        next_command = "devsecops deploy status --watch"
+    elif conclusion == "success":
+        next_command = "devsecops health --aws-sigv4"
+    elif record and record.get("previous_image_uri"):
+        next_command = "devsecops deploy rollback --dry-run"
+    else:
+        next_command = "devsecops deploy rollback --image-uri <known-good-immutable-ecr-image-uri> --dry-run"
+    print(f"Next command: {next_command}")
     return EXIT_OK
 
 
@@ -3535,7 +3547,7 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     )
     print_render_plan(root, outputs, title="Files that would be generated")
     print()
-    print_checks(image_checks)
+    print_checks(image_checks, title="Image validation")
     print()
     print_gap_summary(readiness_checks, limit=8)
     print()
@@ -4011,7 +4023,7 @@ def continue_setup_destination(action: dict[str, Any]) -> str:
         return "configuration"
     if action_id == "missing_github_setup" and command in {"devsecops generate", "devsecops render"}:
         return "deployment_files"
-    if action_id == "missing_github_setup":
+    if action_id in {"missing_github_cli", "missing_github_auth", "missing_github_setup"}:
         return "github"
     if action_id == "missing_aws_evidence":
         return "diagnostics"

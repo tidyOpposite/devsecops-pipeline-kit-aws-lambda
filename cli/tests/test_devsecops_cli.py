@@ -108,6 +108,16 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         )
         self.assertIn("Expected result:", readme)
 
+    def test_ux_consolidation_docs_do_not_reintroduce_stale_terms_or_gaps(self) -> None:
+        readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
+        roadmap = (ROOT_DIR / "ROADMAP.md").read_text(encoding="utf-8")
+        inventory = (ROOT_DIR / "docs/command-inventory.md").read_text(encoding="utf-8")
+
+        self.assertNotIn("Use `readiness --strict`", readme)
+        self.assertNotIn("there is no explicit\n  clean-config workflow", roadmap)
+        self.assertIn("schema versioning and migration behavior are implemented", roadmap)
+        self.assertIn("only eight entry points", inventory)
+
     def test_module_execution_does_not_emit_runtime_warning(self) -> None:
         env = os.environ.copy()
         env["PYTHONPATH"] = str(ROOT_DIR / "cli")
@@ -330,6 +340,8 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("No files changed", output)
         self.assertIn("AWS credentials are not required", output)
         self.assertIn("Files that would be generated", output)
+        self.assertIn("Image validation:", output)
+        self.assertNotIn("Readiness: [############################] 100%", output)
 
     def test_render_dry_run_previews_without_writing_generated_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -532,16 +544,21 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
 
     def test_top_level_help_is_grouped_and_legacy_aliases_are_not_primary_choices(self) -> None:
         help_text = cli.build_parser().format_help()
-        self.assertIn(
-            "{menu,setup,status,deploy,dry-run,image,generate,doctor,health,config,github,aws,terraform,snapshot,report,explain,completion}",
-            help_text,
-        )
+        self.assertIn("{menu,setup,status,deploy,dry-run,generate,doctor,config}", help_text)
         self.assertIn("protected production deployment", help_text)
         self.assertIn("Legacy aliases still work", help_text)
         self.assertIn("Stable exit codes", help_text)
         self.assertNotIn("==SUPPRESS==", help_text)
+        visible = next(action for action in cli.build_parser()._actions if action.dest == "command")
+        visible_names = [choice.dest for choice in visible._choices_actions]
+        self.assertEqual(
+            visible_names,
+            ["menu", "setup", "status", "deploy", "dry-run", "generate", "doctor", "config"],
+        )
         self.assertNotIn("gh-doctor           ", help_text)
         self.assertNotIn("aws-doctor          ", help_text)
+        for advanced in ["image               ", "health              ", "github              ", "aws                 ", "terraform           ", "snapshot            ", "report              ", "explain             ", "completion          "]:
+            self.assertNotIn(advanced, help_text)
         for legacy in ["next                ", "start               ", "readiness           ", "dashboard           ", "preflight           ", "render              "]:
             self.assertNotIn(legacy, help_text)
 
@@ -659,6 +676,17 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             self.assertIn(flag, setup_help)
         self.assertIn("does not", setup_help)
         self.assertIn("imply --apply-github", setup_help)
+        self.assertIn("Examples:", setup_help)
+        self.assertIn("Side effects:", setup_help)
+        self.assertIn("Never starts a workflow", setup_help)
+
+        deploy_buffer = io.StringIO()
+        with redirect_stdout(deploy_buffer), self.assertRaises(SystemExit):
+            cli.main(["deploy", "prod", "--help"])
+        deploy_help = deploy_buffer.getvalue()
+        self.assertIn("devsecops deploy prod --dry-run", deploy_help)
+        self.assertIn("Side effects:", deploy_help)
+        self.assertIn("never writes AWS directly", deploy_help)
 
     def test_next_action_decision_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -686,12 +714,22 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             setup = root / cli.DIST_DIR / "github-setup.sh"
             setup.parent.mkdir(parents=True, exist_ok=True)
             setup.write_text("# setup\n", encoding="utf-8")
+            with patch.object(cli, "command_exists", return_value=False), patch.object(
+                cli, "collect_github_checks"
+            ) as github_checks:
+                action = cli.next_action(root, cfg)
+                self.assertEqual(action["id"], "missing_github_cli")
+                self.assertIn("gh auth login", action["command"])
+                github_checks.assert_not_called()
+
             with patch.object(cli, "command_exists", side_effect=lambda name: name == "gh"), patch.object(
                 cli,
                 "collect_github_checks",
                 return_value=[cli.Check("GitHub auth", "WARN", "not authenticated")],
             ):
-                self.assertEqual(cli.next_action(root, cfg)["id"], "missing_github_setup")
+                action = cli.next_action(root, cfg)
+                self.assertEqual(action["id"], "missing_github_auth")
+                self.assertEqual(action["command"], "gh auth login")
 
             with patch.object(cli, "command_exists", side_effect=lambda name: name == "gh"), patch.object(
                 cli,
@@ -2539,6 +2577,8 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             ("missing_backend", "devsecops config set backend.bucket value", "configuration"),
             ("missing_github_setup", "devsecops generate", "deployment_files"),
             ("missing_github_setup", "devsecops render", "deployment_files"),
+            ("missing_github_cli", "gh auth login", "github"),
+            ("missing_github_auth", "gh auth login", "github"),
             ("missing_github_setup", "devsecops github setup --apply", "github"),
             ("missing_aws_evidence", "aws sts get-caller-identity", "diagnostics"),
             ("ready_for_deploy", cli.PRODUCTION_DEPLOY_COMMAND, "deploy"),

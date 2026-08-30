@@ -31,6 +31,10 @@ semantic versioning.
   that includes the shared next action.
 * Moved release-maintainer commands out of primary help and removed the second
   legacy readiness percentage from human status output.
+* Limited primary help to eight first-route commands while keeping stable
+  operational commands callable, documented, and available in completion.
+* Added examples and explicit side-effect boundaries to the primary setup,
+  status, deploy, dry-run, generation, diagnostics, and configuration help.
 * Kept `start`, `next`, `readiness`, `dashboard`, `preflight`, `render`, and
   `--render` callable as compatibility aliases with their existing JSON kinds.
 * Made `--yes` a local-defaults-only setup authorization; GitHub repository
@@ -45,6 +49,12 @@ semantic versioning.
 * Capture the active Lambda image with `aws lambda get-function` so automatic
   workflow rollback and the CLI rollback journal receive the real
   `Code.ImageUri` value.
+* Route the shared next action through GitHub CLI installation and
+  authentication before suggesting repository mutation commands.
+* Label dry-run image scoring separately from overall readiness gaps and add a
+  contextual follow-up command after deployment logs.
+* Replace stale Roadmap claims about config schema, migration, tests, and
+  generated-artifact ownership with the remaining evidence limitations.
 
 ## v0.13.1 - 2026-08-24
 

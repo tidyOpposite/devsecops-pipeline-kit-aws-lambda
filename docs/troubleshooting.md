@@ -269,7 +269,7 @@ placeholder values for role ARNs and optional secrets.
 
 ### GitHub doctor cannot inspect the repository
 
-Install and authenticate GitHub CLI:
+Install [GitHub CLI](https://cli.github.com/), then authenticate it:
 
 ```bash
 gh auth login

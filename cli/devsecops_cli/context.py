@@ -177,7 +177,29 @@ def next_action(
             docs="docs/first-successful-pipeline.md#5-configure-github-repository-settings",
             context=context,
         )
+    if not command_exists_fn("gh"):
+        return _next_action(
+            action_id="missing_github_cli",
+            title="GitHub CLI is not available",
+            why="The protected setup and deployment commands require GitHub CLI before repository state can be inspected or changed.",
+            changes="Install GitHub CLI locally, then authenticate it; no repository or AWS resources are changed by this check.",
+            command="gh auth login  # after installing https://cli.github.com/",
+            docs="docs/troubleshooting.md#github-doctor-cannot-inspect-the-repository",
+            context=context,
+        )
     github_checks = github_checks_fn(root, cfg)
+    github_by_name = {check.name: check for check in github_checks}
+    github_auth = github_by_name.get("GitHub auth")
+    if github_auth is not None and github_auth.status != "OK":
+        return _next_action(
+            action_id="missing_github_auth",
+            title="GitHub CLI is not authenticated",
+            why="The CLI must authenticate before it can inspect or apply repository variables, secrets, and workflow runs.",
+            changes="Authenticates GitHub CLI on this machine; the DevSecOps CLI does not write repository or AWS settings in this step.",
+            command="gh auth login",
+            docs="docs/troubleshooting.md#github-doctor-cannot-inspect-the-repository",
+            context=context,
+        )
     github_gaps = [check for check in github_checks if check.scored and check.status != "OK"]
     if github_gaps:
         return _next_action(

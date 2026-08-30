@@ -407,6 +407,22 @@ class DeploymentCommandTests(unittest.TestCase):
         read.assert_called_once_with(root, "42", failed_only=True)
         self.assertIn("gh run view 42 --log-failed", buffer.getvalue())
         self.assertIn("failed log", buffer.getvalue())
+        self.assertIn("Next command: devsecops health --aws-sigv4", buffer.getvalue())
+
+    def test_failed_deploy_logs_recommend_a_rollback_preview(self) -> None:
+        logs = subprocess.CompletedProcess(["gh"], 0, "failed log\n", "")
+        record = {"previous_image_uri": PREVIOUS_IMAGE}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            with patch.object(cli, "repo_root", return_value=root), patch.object(
+                cli,
+                "resolve_deployment_run",
+                return_value=(workflow_run(status="completed", conclusion="failure"), record, None),
+            ), patch.object(cli, "read_deployment_logs", return_value=logs), redirect_stdout(io.StringIO()) as buffer:
+                result = cli.main(["deploy", "logs", "--failed"])
+
+        self.assertEqual(result, cli.EXIT_OK)
+        self.assertIn("Next command: devsecops deploy rollback --dry-run", buffer.getvalue())
 
     def test_deploy_rollback_uses_previous_image_through_protected_workflow(self) -> None:
         url = "https://github.com/acme/pipeline/actions/runs/43"

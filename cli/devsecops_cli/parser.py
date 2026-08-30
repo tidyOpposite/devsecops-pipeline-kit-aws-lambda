@@ -15,10 +15,19 @@ from .setup import SETUP_MODES
 COMPLETION_SHELLS = ("bash", "zsh", "fish")
 
 
+def _help_epilog(examples: tuple[str, ...], side_effects: tuple[str, ...]) -> str:
+    example_lines = "\n".join(f"  {line}" for line in examples)
+    effect_lines = "\n".join(
+        textwrap.fill(line, width=78, initial_indent="  ", subsequent_indent="  ")
+        for line in side_effects
+    )
+    return f"Examples:\n{example_lines}\n\nSide effects:\n{effect_lines}"
+
+
 def build_parser(handlers: Any) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="devsecops",
-        description="CLI product for setting up, validating, generating, and diagnosing a secure AWS Lambda delivery pipeline.",
+        description="CLI product for setting up, validating, deploying, and operating a secure AWS Lambda delivery pipeline.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent(
             """\
@@ -26,8 +35,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
               The CLI owns local config and generated helper artifacts.
               Terraform, GitHub Actions, AWS, and scanners are transparent execution layers.
 
-            Recommended first run:
-              devsecops
+            Recommended three-command first run:
               devsecops setup --preset balanced --yes
               devsecops status
               devsecops dry-run --image-uri <immutable-ecr-image-uri>
@@ -55,6 +63,8 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
               preset, envs, controls, architecture, compose (experimental),
               tui (experimental)
 
+            Additional stable operations remain callable and documented in the command inventory.
+
             Stability contract:
               Stable command flags and JSON kinds are listed by `devsecops inventory`.
               Experimental commands are excluded from the first-success workflow.
@@ -68,14 +78,33 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     subparsers = parser.add_subparsers(
         dest="command",
-        metavar="{menu,setup,status,deploy,dry-run,image,generate,doctor,health,config,github,aws,terraform,snapshot,report,explain,completion}",
+        metavar="{menu,setup,status,deploy,dry-run,generate,doctor,config}",
     )
     parser.set_defaults(func=handlers.cmd_overview)
 
-    menu_parser = subparsers.add_parser("menu", help="Open the simplified interactive product menu.")
+    menu_parser = subparsers.add_parser(
+        "menu",
+        help="Open the simplified interactive product menu.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            ("devsecops menu",),
+            (
+                "Opening the menu changes nothing.",
+                "Any selected write or provider action shows its own boundary before execution.",
+            ),
+        ),
+    )
     menu_parser.set_defaults(func=handlers.cmd_menu)
 
-    status_parser = subparsers.add_parser("status", help="Show project status and the single recommended next action.")
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Show project status and the single recommended next action.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            ("devsecops status", "devsecops status --deep --strict"),
+            ("Read-only; deep mode may query Terraform, GitHub, and AWS but never changes them.",),
+        ),
+    )
     status_parser.add_argument("--deep", action="store_true", help="Include GitHub, AWS, and deep Terraform checks.")
     status_parser.add_argument("--strict", action="store_true", help="Exit non-zero when a scored status gap remains.")
     status_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
@@ -89,7 +118,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     dashboard_parser.add_argument("--mode", choices=["compact", "full"], default="full", help="Dashboard detail level.")
     dashboard_parser.set_defaults(func=handlers.cmd_dashboard)
 
-    completion_parser = subparsers.add_parser("completion", help="Print shell completion for bash, zsh, or fish.")
+    completion_parser = subparsers.add_parser("completion", help=argparse.SUPPRESS)
     completion_parser.add_argument("shell", choices=COMPLETION_SHELLS, help="Shell completion format to print.")
     completion_parser.add_argument("--program", default="devsecops", help="Program name to complete.")
     completion_parser.set_defaults(func=handlers.cmd_completion)
@@ -103,7 +132,22 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     next_parser.add_argument("--format", choices=["human", "json"], default="human", help="Output mode.")
     next_parser.set_defaults(func=handlers.cmd_next)
 
-    setup_parser = subparsers.add_parser("setup", help="Start or resume the guided project setup state machine.")
+    setup_parser = subparsers.add_parser(
+        "setup",
+        help="Start or resume the guided project setup state machine.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            (
+                "devsecops setup --mode demo --yes",
+                "devsecops setup --mode standard --image-uri <immutable-ecr-image-uri>",
+            ),
+            (
+                "May write local config and .devsecops/setup-state.json.",
+                "Only --apply-github changes repository variables or encrypted secrets.",
+                "Never starts a workflow or deploys AWS resources.",
+            ),
+        ),
+    )
     setup_parser.add_argument("--mode", choices=SETUP_MODES, help="Setup depth: local demo, standard cloud connection, or production.")
     setup_parser.add_argument("--preset", choices=PRESET_ORDER, help="Advanced preset override used only when creating config.")
     setup_parser.add_argument("--image-uri", help="Existing immutable ECR Lambda image URI to save in local config.")
@@ -160,7 +204,15 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     init_parser.add_argument("--defaults", action="store_true", help="Write default config without prompts.")
     init_parser.set_defaults(func=handlers.cmd_init)
 
-    doctor_parser = subparsers.add_parser("doctor", help="Run local, GitHub, AWS, branch, or Actions diagnostics.")
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Run local, GitHub, AWS, branch, or Actions diagnostics.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            ("devsecops doctor", "devsecops doctor all --deep --strict"),
+            ("Read-only; provider diagnostics inspect observable state without changing it.",),
+        ),
+    )
     doctor_parser.add_argument("--deep", action="store_true", help="Run Terraform validate and AWS resource checks.")
     doctor_parser.add_argument("--strict", action="store_true", help="Exit non-zero on failed scored checks.")
     doctor_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
@@ -210,13 +262,21 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     readiness_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     readiness_parser.set_defaults(func=handlers.cmd_readiness)
 
-    dry_run_parser = subparsers.add_parser("dry-run", help="Preview the first-success path without writing files or requiring AWS.")
+    dry_run_parser = subparsers.add_parser(
+        "dry-run",
+        help="Preview the first-success path without writing files or requiring AWS.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            ("devsecops dry-run --image-uri <immutable-ecr-image-uri>",),
+            ("No files, repository settings, Terraform state, or AWS resources are changed.",),
+        ),
+    )
     dry_run_parser.add_argument("--preset", choices=PRESET_ORDER, default="balanced", help="Preset to preview when no local config exists.")
     dry_run_parser.add_argument("--image-uri", help="Immutable ECR image URI to preview without writing it to config.")
     dry_run_parser.add_argument("--environment", choices=ENVIRONMENTS, default="prod", help="Environment target for image naming checks.")
     dry_run_parser.set_defaults(func=handlers.cmd_dry_run)
 
-    image_parser = subparsers.add_parser("image", help="Validate the Lambda image before deployment.")
+    image_parser = subparsers.add_parser("image", help=argparse.SUPPRESS)
     image_parser.set_defaults(func=handlers.cmd_preflight, image_command="validate", image_uri=None, environment="prod", format="human")
     image_subparsers = image_parser.add_subparsers(dest="image_command", metavar="{validate}")
     image_validate_parser = image_subparsers.add_parser("validate", help="Validate image URI, immutability, region, and repository naming.")
@@ -231,7 +291,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     preflight_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     preflight_parser.set_defaults(func=handlers.cmd_preflight)
 
-    health_parser = subparsers.add_parser("health", help="Validate the deployed /health endpoint outside GitHub Actions.")
+    health_parser = subparsers.add_parser("health", help=argparse.SUPPRESS)
     health_parser.add_argument("--url", help="Health URL to check. Defaults to Terraform output api_gateway_health_url.")
     health_parser.add_argument("--timeout", type=int, default=20, help="HTTP timeout in seconds.")
     health_parser.add_argument("--aws-sigv4", action="store_true", help="Sign the health request with AWS SigV4 for IAM-protected API Gateway routes.")
@@ -242,6 +302,19 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     deploy_parser = subparsers.add_parser(
         "deploy",
         help="Start, inspect, troubleshoot, or roll back the protected production deployment.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            (
+                "devsecops deploy prod --dry-run",
+                "devsecops deploy status --watch",
+                "devsecops deploy logs --failed",
+                "devsecops deploy rollback --dry-run",
+            ),
+            (
+                "status and logs are read-only.",
+                "prod and rollback dispatch the protected GitHub Actions workflow only after preflight and confirmation.",
+            ),
+        ),
     )
     deploy_parser.set_defaults(
         func=handlers.cmd_deploy,
@@ -259,6 +332,14 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     deploy_prod_parser = deploy_subparsers.add_parser(
         "prod",
         help="Dispatch the protected production workflow after readiness checks and confirmation.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            ("devsecops deploy prod --dry-run", "devsecops deploy prod --watch"),
+            (
+                "Preflight and --dry-run are read-only.",
+                "A confirmed run dispatches the protected workflow with the exact immutable image; the local CLI never writes AWS directly.",
+            ),
+        ),
     )
     deploy_prod_parser.add_argument("--dry-run", action="store_true", help="Run preflight and show the underlying command without dispatching it.")
     deploy_prod_parser.add_argument("--yes", action="store_true", help="Skip the explicit production confirmation prompt.")
@@ -269,6 +350,11 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     deploy_status_parser = deploy_subparsers.add_parser(
         "status",
         help="Show the matching deployment run, jobs, images, and next recovery action.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            ("devsecops deploy status", "devsecops deploy status --watch --format json"),
+            ("Read-only; may wait for and inspect GitHub Actions and the active Lambda image.",),
+        ),
     )
     deploy_status_parser.add_argument("--run-id", help="Inspect a specific deployment workflow run ID.")
     deploy_status_parser.add_argument("--watch", action="store_true", help="Wait for an active run and return its conclusion.")
@@ -279,6 +365,11 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     deploy_logs_parser = deploy_subparsers.add_parser(
         "logs",
         help="Show full or failed-step logs for the matching deployment run.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            ("devsecops deploy logs", "devsecops deploy logs --failed"),
+            ("Read-only; streams GitHub Actions logs without changing repository or cloud state.",),
+        ),
     )
     deploy_logs_parser.add_argument("--run-id", help="Read logs for a specific deployment workflow run ID.")
     deploy_logs_parser.add_argument("--failed", action="store_true", help="Show failed-step logs instead of the full workflow log.")
@@ -287,6 +378,17 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     deploy_rollback_parser = deploy_subparsers.add_parser(
         "rollback",
         help="Dispatch a protected rollback to the previous recorded or explicitly supplied image.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            (
+                "devsecops deploy rollback --dry-run",
+                "devsecops deploy rollback --image-uri <known-good-immutable-ecr-image-uri>",
+            ),
+            (
+                "Preflight and --dry-run are read-only.",
+                "A confirmed rollback dispatches the protected workflow; it never performs a direct local Lambda update.",
+            ),
+        ),
     )
     deploy_rollback_parser.add_argument("--run-id", help="Roll back the deployment recorded for this workflow run ID.")
     deploy_rollback_parser.add_argument("--image-uri", help="Explicit immutable ECR image URI to restore.")
@@ -296,7 +398,18 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     deploy_rollback_parser.add_argument("--interval", type=int, default=5, help="Status refresh interval in seconds; minimum 3.")
     deploy_rollback_parser.set_defaults(func=handlers.cmd_deploy)
 
-    generate_parser = subparsers.add_parser("generate", help="Generate CLI-owned Terraform and GitHub deployment files.")
+    generate_parser = subparsers.add_parser(
+        "generate",
+        help="Generate CLI-owned Terraform and GitHub deployment files.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            ("devsecops generate --dry-run", "devsecops generate"),
+            (
+                "Writes only documented CLI-owned files under terraform/ and dist/devsecops/.",
+                "Does not apply Terraform or change GitHub/AWS.",
+            ),
+        ),
+    )
     generate_parser.add_argument("--dry-run", action="store_true", help="Preview generated files without writing them.")
     generate_parser.set_defaults(func=handlers.cmd_render)
 
@@ -304,7 +417,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     render_parser.add_argument("--dry-run", action="store_true", help="Preview generated files without writing them.")
     render_parser.set_defaults(func=handlers.cmd_render)
 
-    report_parser = subparsers.add_parser("report", help="Export CLI-owned readiness or audit evidence reports.")
+    report_parser = subparsers.add_parser("report", help=argparse.SUPPRESS)
     report_parser.add_argument("--deep", action="store_true", help="Include Terraform/AWS deep checks.")
     report_parser.add_argument("--format", choices=["markdown", "json"], default="markdown", help="Report output format.")
     report_parser.add_argument("--output", help="Report output path. Defaults to dist/devsecops/readiness-report.md or audit-report.json.")
@@ -322,7 +435,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     rollback_parser.add_argument("--yes", action="store_true", help="Skip confirmation prompt.")
     rollback_parser.set_defaults(func=handlers.cmd_rollback)
 
-    github_parser = subparsers.add_parser("github", help="Manage GitHub setup, status, and repository diagnostics.")
+    github_parser = subparsers.add_parser("github", help=argparse.SUPPRESS)
     github_parser.set_defaults(func=handlers.cmd_github, github_command="status", strict=False, limit=8, format="human")
     github_subparsers = github_parser.add_subparsers(dest="github_command", metavar="{setup,doctor,status,branch}")
 
@@ -351,7 +464,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     github_group_branch_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     github_group_branch_parser.set_defaults(func=handlers.cmd_github)
 
-    aws_parser = subparsers.add_parser("aws", help="Inspect AWS deployed resources and AWS readiness.")
+    aws_parser = subparsers.add_parser("aws", help=argparse.SUPPRESS)
     aws_parser.set_defaults(func=handlers.cmd_aws, aws_command="outputs", environment="prod", strict=False, format="human")
     aws_subparsers = aws_parser.add_subparsers(dest="aws_command", metavar="{outputs,doctor}")
 
@@ -437,7 +550,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     compose_parser = subparsers.add_parser("compose", help=argparse.SUPPRESS)
     compose_parser.set_defaults(func=handlers.cmd_compose)
 
-    terraform_parser = subparsers.add_parser("terraform", help="Run Terraform plan and backend bootstrap helpers.")
+    terraform_parser = subparsers.add_parser("terraform", help=argparse.SUPPRESS)
     terraform_parser.set_defaults(func=handlers.cmd_terraform)
     terraform_subparsers = terraform_parser.add_subparsers(dest="terraform_command", metavar="{plan,bootstrap}")
 
@@ -451,7 +564,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     terraform_bootstrap_parser.add_argument("--apply", action="store_true", help="Apply backend bootstrap with auto-approve.")
     terraform_bootstrap_parser.set_defaults(func=handlers.cmd_terraform)
 
-    snapshot_parser = subparsers.add_parser("snapshot", help="List, inspect, or restore local CLI snapshots.")
+    snapshot_parser = subparsers.add_parser("snapshot", help=argparse.SUPPRESS)
     snapshot_parser.add_argument("--format", choices=["human", "json"], default="human", help="Output mode for default list.")
     snapshot_parser.set_defaults(func=handlers.cmd_snapshot, snapshot_command="list")
     snapshot_subparsers = snapshot_parser.add_subparsers(dest="snapshot_command", metavar="{list,show,restore}")
@@ -482,11 +595,26 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     bootstrap_parser.add_argument("--apply", action="store_true", help="Apply backend bootstrap with auto-approve.")
     bootstrap_parser.set_defaults(func=handlers.cmd_bootstrap)
 
-    explain_parser = subparsers.add_parser("explain", help="Explain a pipeline security control.")
+    explain_parser = subparsers.add_parser("explain", help=argparse.SUPPRESS)
     explain_parser.add_argument("topic", nargs="?", default="all")
     explain_parser.set_defaults(func=handlers.cmd_explain)
 
-    config_parser = subparsers.add_parser("config", help="Manage local source config.")
+    config_parser = subparsers.add_parser(
+        "config",
+        help="Manage local source config.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_help_epilog(
+            (
+                "devsecops config show",
+                "devsecops config set lambda_image_uri <immutable-ecr-image-uri>",
+                "devsecops config validate --strict",
+            ),
+            (
+                "show, validate, diff, and schema are read-only.",
+                "set and reset write only local config after taking a recoverable CLI snapshot.",
+            ),
+        ),
+    )
     config_parser.add_argument(
         "--format",
         choices=["toml", "json"],
@@ -552,19 +680,11 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
         "menu",
         "setup",
         "status",
+        "deploy",
         "dry-run",
-        "image",
         "generate",
         "doctor",
-        "health",
         "config",
-        "github",
-        "aws",
-        "terraform",
-        "snapshot",
-        "report",
-        "explain",
-        "completion",
     ]
     order_index = {name: index for index, name in enumerate(primary_order)}
     subparsers._choices_actions.sort(  # type: ignore[attr-defined]

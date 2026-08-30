@@ -166,10 +166,10 @@ yet considered stable.
 ## Product Contract
 
 The product boundary is intentionally narrow: `devsecops` is the user-facing
-CLI for setting up, validating, generating, and diagnosing a secure AWS Lambda
+CLI for setting up, validating, deploying, and operating a secure AWS Lambda
 delivery pipeline. Terraform modules, GitHub Actions workflows, AWS resources,
-and scanners remain transparent execution layers that the CLI configures and
-checks.
+and scanners remain transparent execution layers that the CLI configures,
+dispatches, and checks.
 
 `.devsecops-pipeline.toml` is local source configuration. Files written by
 `devsecops generate`, `devsecops report`, and `devsecops github-setup --write`
@@ -470,8 +470,8 @@ devsecops github status --format compact --strict
 ```
 
 `github status` and `doctor actions` show failed jobs, failed steps, concrete
-next actions, and runbook links. Use `readiness --strict` in CI when any scored
-gap should fail the command.
+next actions, and runbook links. Use `devsecops status --strict` in CI when any
+scored gap should fail the command.
 
 For release review or production proof, collect an attachable evidence bundle
 with the commands in
