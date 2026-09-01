@@ -2,7 +2,8 @@
 
 This module owns configuration defaults, schema migration, validation, presets,
 and security-control state.  It is independent from command parsing and
-terminal presentation.
+terminal presentation.  Configuration contains references and policy choices,
+never credentials; secret values remain in their provider-specific stores.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 fallback guard
     tomllib = None  # type: ignore[assignment]
 
 
+# Format constraints and schema metadata form the public configuration contract.
 CONFIG_SCHEMA_VERSION = 1
 PROJECT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{2,31}$")
 AWS_REGION_RE = re.compile(r"^[a-z]{2}-[a-z]+-\d$")
@@ -50,6 +52,8 @@ PRESET_POSTURE_LABELS = {
     "student-demo": "demo-only",
 }
 ENVIRONMENTS = ["dev", "staging", "prod"]
+# ``config set`` is deliberately allowlisted so arbitrary or secret-looking
+# keys cannot silently become part of the local source-of-truth file.
 CONFIG_SET_PATHS = {
     "project_name",
     "aws_region",
@@ -88,6 +92,8 @@ STRICT_CORS_ORIGINS = {
 }
 API_AUTHORIZATION_TYPES = {"AWS_IAM", "NONE"}
 
+# This machine-readable contract keeps migrations, generated artifacts, and
+# rollback expectations visible to both users and release tooling.
 CONFIG_MIGRATION_CONTRACT = {
     "current_schema_version": CONFIG_SCHEMA_VERSION,
     "legacy_without_schema_version": "Treat as schema_version 1 and normalize with current defaults.",
@@ -109,10 +115,14 @@ CONFIG_MIGRATION_CONTRACT = {
 
 
 def config_path(root: Path) -> Path:
+    """Return the canonical local source-configuration path."""
+
     return root / CONFIG_FILE
 
 
 def default_config() -> dict[str, Any]:
+    """Build a new baseline configuration with independent nested containers."""
+
     return {
         "schema_version": CONFIG_SCHEMA_VERSION,
         "project_name": "devsecops-pipeline",
@@ -162,6 +172,12 @@ def default_config() -> dict[str, Any]:
 
 
 def preset_config(name: str) -> dict[str, Any]:
+    """Build a complete configuration for a named operational posture.
+
+    Every preset starts from fresh defaults, then changes only the controls and
+    environment sizing that distinguish that posture.
+    """
+
     cfg = default_config()
     if name == "minimal":
         cfg["enable_http_validation"] = False
@@ -271,18 +287,26 @@ def preset_config(name: str) -> dict[str, Any]:
 
 
 def prod_approval_environment(cfg: dict[str, Any]) -> str:
+    """Resolve the workflow environment used to express the approval policy."""
+
     return PROD_APPROVAL_ENVIRONMENT if cfg["use_prod_approval_environment"] else NO_APPROVAL_ENVIRONMENT
 
 
 def apply_cors_policy(cfg: dict[str, Any], strict: bool) -> None:
+    """Apply explicit per-environment origins or wildcard demo origins in place."""
+
     for env_name, env_cfg in cfg["environments"].items():
         env_cfg["cors_allowed_origins"] = list(STRICT_CORS_ORIGINS[env_name]) if strict else ["*"]
 
 
 def uses_strict_cors(cfg: dict[str, Any]) -> bool:
+    """Return whether every environment matches the reference strict policy."""
+
     return all(cfg["environments"][env_name]["cors_allowed_origins"] == STRICT_CORS_ORIGINS[env_name] for env_name in ENVIRONMENTS)
 
 
+# Each catalog entry maps one control across CLI settings, Terraform, GitHub,
+# AWS, scanners, and the evidence an operator should retain.
 CONTROL_CATALOG = [
     Control(
         id="oidc",
@@ -452,24 +476,38 @@ CONTROL_ALIASES = {
 
 
 def control_catalog() -> list[Control]:
+    """Return a shallow copy so callers cannot reorder the shared catalog."""
+
     return list(CONTROL_CATALOG)
 
 
 def normalize_control_topic(topic: str) -> str:
+    """Normalize user-facing control aliases into canonical identifiers."""
+
     normalized = topic.strip().lower().replace("_", "-")
     return CONTROL_ALIASES.get(normalized, normalized)
 
 
 def control_by_id(topic: str) -> Control | None:
+    """Resolve a canonical or aliased topic to its control definition."""
+
     normalized = normalize_control_topic(topic)
     return next((control for control in CONTROL_CATALOG if control.id == normalized), None)
 
 
 def has_wildcard_cors(origins: Any) -> bool:
+    """Safely detect a wildcard in an otherwise untrusted origins value."""
+
     return isinstance(origins, list) and any(str(origin).strip() == "*" for origin in origins)
 
 
 def control_state(cfg: dict[str, Any], control_id: str) -> str:
+    """Summarize one control as ON, OFF, RISK, TODO, or AVAILABLE.
+
+    These labels describe configured posture, not live provider evidence;
+    readiness collectors perform the external verification separately.
+    """
+
     if control_id in {"oidc", "state-lock", "iac-scan", "rollback"}:
         return "ON"
     if control_id == "approval-gate":
@@ -497,6 +535,8 @@ def control_state(cfg: dict[str, Any], control_id: str) -> str:
 
 
 def control_to_dict(control: Control, cfg: dict[str, Any]) -> dict[str, Any]:
+    """Serialize a control definition with its configuration-derived state."""
+
     return {
         "id": control.id,
         "title": control.title,
@@ -512,6 +552,8 @@ def control_to_dict(control: Control, cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def compose_config(current: dict[str, Any], answers: dict[str, bool]) -> dict[str, Any]:
+    """Apply interactive security answers without discarding existing settings."""
+
     cfg = deep_merge(default_config(), current)
     cfg["enable_snyk_scan"] = bool(answers["enable_snyk_scan"])
     cfg["enable_dast"] = bool(answers["enable_dast"])
@@ -523,6 +565,12 @@ def compose_config(current: dict[str, Any], answers: dict[str, bool]) -> dict[st
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively overlay mappings and return a new merged configuration.
+
+    Dictionary branches are copied recursively; scalar and list values from
+    ``override`` replace the corresponding baseline value as one unit.
+    """
+
     merged = dict(base)
     for key, value in override.items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
@@ -533,6 +581,12 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 
 
 def migrate_config(raw_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade supported legacy config data or reject a future schema.
+
+    Refusing future versions protects newer fields from being normalized away
+    by an older CLI before it writes generated files.
+    """
+
     cfg = dict(raw_cfg)
     version = cfg.get("schema_version", 1)
     if not isinstance(version, int):
@@ -550,12 +604,16 @@ def migrate_config(raw_cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Migrate configuration and fill missing fields from current defaults."""
+
     normalized = deep_merge(default_config(), migrate_config(cfg))
     normalized["schema_version"] = normalized.get("schema_version", CONFIG_SCHEMA_VERSION)
     return normalized
 
 
 def load_config(root: Path) -> dict[str, Any]:
+    """Load and normalize TOML, or return fresh defaults when it is absent."""
+
     path = config_path(root)
     if not path.exists():
         return default_config()
@@ -567,6 +625,8 @@ def load_config(root: Path) -> dict[str, Any]:
 
 
 def toml_value(value: Any) -> str:
+    """Serialize the limited scalar/list value types used by this schema."""
+
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
@@ -577,6 +637,13 @@ def toml_value(value: Any) -> str:
 
 
 def dump_config_toml(cfg: dict[str, Any]) -> str:
+    """Serialize normalized configuration in a stable, human-readable order.
+
+    Deterministic ordering keeps diffs, snapshots, and generated-file tests
+    meaningful even though input dictionaries may have different insertion
+    histories.
+    """
+
     normalized = normalize_config(cfg)
     lines = [
         "# DevSecOps Pipeline Kit local source configuration",
@@ -614,16 +681,22 @@ def dump_config_toml(cfg: dict[str, Any]) -> str:
 
 
 def write_config(root: Path, cfg: dict[str, Any]) -> None:
+    """Write normalized configuration to its canonical local path."""
+
     config_path(root).write_text(dump_config_toml(cfg), encoding="utf-8")
 
 
 def clean_config(preset_name: str = "balanced") -> dict[str, Any]:
+    """Return a normalized config containing only a known preset's values."""
+
     if preset_name not in PRESETS:
         raise ValueError(f"Unknown preset: {preset_name}")
     return normalize_config(preset_config(preset_name))
 
 
 def config_schema() -> dict[str, Any]:
+    """Return the machine-readable schema and migration contract."""
+
     environment_fields = {
         "lambda_memory_size": {"type": "integer", "minimum": 128, "maximum": 10240},
         "lambda_timeout": {"type": "integer", "minimum": 1, "maximum": 900},
@@ -670,6 +743,8 @@ def config_schema() -> dict[str, Any]:
 
 
 def config_schema_markdown() -> str:
+    """Render the public configuration schema for human review."""
+
     rows = [
         ["schema_version", "integer", str(CONFIG_SCHEMA_VERSION)],
         ["project_name", "string", PROJECT_NAME_RE.pattern],
@@ -702,10 +777,14 @@ def config_schema_markdown() -> str:
 
 
 def canonical_config_text(cfg: dict[str, Any]) -> str:
+    """Return canonical TOML text used for comparisons and snapshots."""
+
     return dump_config_toml(cfg)
 
 
 def unified_text_diff(before: str, after: str, fromfile: str, tofile: str) -> str:
+    """Build a newline-terminated unified diff, or an empty string if equal."""
+
     diff_lines = list(
         difflib.unified_diff(
             before.splitlines(),
@@ -719,6 +798,8 @@ def unified_text_diff(before: str, after: str, fromfile: str, tofile: str) -> st
 
 
 def config_file_diff(root: Path) -> str:
+    """Compare the on-disk config with its normalized canonical form."""
+
     path = config_path(root)
     current_text = path.read_text(encoding="utf-8") if path.exists() else ""
     clean_text = canonical_config_text(load_config(root))
@@ -726,11 +807,16 @@ def config_file_diff(root: Path) -> str:
 
 
 def config_preset_diff(root: Path, preset_name: str) -> str:
+    """Compare current normalized configuration with a named clean preset."""
+
     current_text = canonical_config_text(load_config(root))
     preset_text = canonical_config_text(clean_config(preset_name))
     return unified_text_diff(current_text, preset_text, CONFIG_FILE, f"preset:{preset_name}")
 
+
 def parse_config_value(raw_value: str, current_value: Any) -> Any:
+    """Parse CLI text according to the existing setting's schema-like type."""
+
     if isinstance(current_value, bool):
         normalized = raw_value.strip().lower()
         if normalized in {"1", "true", "yes", "y", "on"}:
@@ -751,6 +837,8 @@ def parse_config_value(raw_value: str, current_value: Any) -> Any:
 
 
 def nested_get(cfg: dict[str, Any], dotted_path: str) -> Any:
+    """Read an existing nested setting addressed by a dotted path."""
+
     cursor: Any = cfg
     for part in dotted_path.split("."):
         if not isinstance(cursor, dict) or part not in cursor:
@@ -760,6 +848,8 @@ def nested_get(cfg: dict[str, Any], dotted_path: str) -> Any:
 
 
 def nested_set(cfg: dict[str, Any], dotted_path: str, value: Any) -> None:
+    """Replace an existing dotted-path setting without creating unknown keys."""
+
     cursor: Any = cfg
     parts = dotted_path.split(".")
     for part in parts[:-1]:
@@ -770,7 +860,15 @@ def nested_set(cfg: dict[str, Any], dotted_path: str, value: Any) -> None:
         raise KeyError(dotted_path)
     cursor[parts[-1]] = value
 
+
 def validate_config(cfg: dict[str, Any]) -> list[Check]:
+    """Validate schema values and production policy as structured checks.
+
+    Malformed or out-of-range values are failures.  Valid settings that weaken
+    the recommended production posture remain warnings so demo configurations
+    can still be represented and inspected explicitly.
+    """
+
     checks: list[Check] = []
     schema_version = cfg.get("schema_version")
     checks.append(

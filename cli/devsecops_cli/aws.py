@@ -1,4 +1,10 @@
-"""AWS provider adapter and SigV4 health-check implementation."""
+"""AWS provider adapter and SigV4 health-check implementation.
+
+The CLI deliberately shells out to the AWS CLI instead of requiring an AWS SDK
+during initial project setup.  Public collectors translate command results into
+domain-level :class:`~devsecops_cli.models.Check` objects, while injectable
+callables keep provider interaction deterministic in unit tests.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +25,9 @@ from . import VERSION
 from .images import parse_ecr_image_uri
 from .models import Check
 
+
+# Keep process execution behind small adapters so collectors can be exercised
+# without depending on an installed AWS CLI or live credentials.
 def _command_exists(name: str) -> bool:
     return shutil.which(name) is not None
 
@@ -44,6 +53,12 @@ def _aws_json(
     args: list[str],
     timeout: int = 30,
 ) -> tuple[Any, subprocess.CompletedProcess[str]]:
+    """Run an AWS CLI command and retain its process result beside parsed JSON.
+
+    Parse failures intentionally return an empty payload without hiding the
+    original result; callers can still classify and report the provider error.
+    """
+
     result = _aws_command(root, [*args, "--output", "json"], timeout=timeout)
     if result.returncode != 0:
         return {}, result
@@ -54,35 +69,53 @@ def _aws_json(
 
 
 def compact_error(result: subprocess.CompletedProcess[str]) -> str:
+    """Return the most useful final output line from a failed command."""
+
     output = (result.stderr or result.stdout or "").strip().splitlines()
     return output[-1] if output else f"Command exited with {result.returncode}."
 
 
+# Terraform and the CLI share this naming contract.  Centralizing it prevents
+# diagnostics from drifting away from the names used by the infrastructure.
 def expected_name_prefix(cfg: dict[str, Any], env_name: str) -> str:
+    """Return the common Terraform resource prefix for an environment."""
+
     return f"{cfg['project_name']}-{env_name}"
 
 
 def expected_ecr_repository_name(cfg: dict[str, Any], env_name: str) -> str:
+    """Return the ECR repository name produced by the Terraform stack."""
+
     return f"{expected_name_prefix(cfg, env_name)}-lambda-repo"
 
 
 def expected_lambda_function_name(cfg: dict[str, Any], env_name: str) -> str:
+    """Return the Lambda function name produced by the Terraform stack."""
+
     return f"{expected_name_prefix(cfg, env_name)}-lambda"
 
 
 def expected_lambda_execution_role_name(cfg: dict[str, Any], env_name: str) -> str:
+    """Return the Lambda execution-role name produced by Terraform."""
+
     return f"{expected_name_prefix(cfg, env_name)}-lambda-exec-role"
 
 
 def expected_api_gateway_name(cfg: dict[str, Any], env_name: str) -> str:
+    """Return the API Gateway name produced by the Terraform stack."""
+
     return f"{expected_name_prefix(cfg, env_name)}-http-api"
 
 
 def expected_lambda_log_group_name(cfg: dict[str, Any], env_name: str) -> str:
+    """Return the conventional CloudWatch log-group name for the Lambda."""
+
     return f"/aws/lambda/{expected_lambda_function_name(cfg, env_name)}"
 
 
 def is_resource_missing(result: subprocess.CompletedProcess[str]) -> bool:
+    """Distinguish an absent AWS resource from authentication or CLI errors."""
+
     text = f"{result.stderr}\n{result.stdout}"
     missing_markers = [
         "NotFound",
@@ -97,6 +130,8 @@ def is_resource_missing(result: subprocess.CompletedProcess[str]) -> bool:
 
 
 def missing_or_error_detail(result: subprocess.CompletedProcess[str], missing_detail: str) -> str:
+    """Use actionable absence guidance only for recognized not-found errors."""
+
     return missing_detail if is_resource_missing(result) else compact_error(result)
 
 
@@ -109,6 +144,14 @@ def collect_aws_checks(
     aws_json_fn: Callable[..., tuple[Any, subprocess.CompletedProcess[str]]] = _aws_json,
     aws_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _aws_command,
 ) -> list[Check]:
+    """Inspect the expected AWS deployment and return non-throwing diagnostics.
+
+    The checks follow deployment dependencies: tooling and identity first,
+    followed by backend, workload resources, observability, and the configured
+    image.  Provider failures are reported as warnings so ``doctor`` can still
+    show all locally available information.
+    """
+
     checks: list[Check] = []
     region = str(cfg["aws_region"])
     backend = cfg["backend"]
@@ -135,6 +178,8 @@ def collect_aws_checks(
 
     identity_payload, identity_result = aws_json_fn(root, ["sts", "get-caller-identity"])
     if identity_result.returncode != 0:
+        # Every remaining lookup needs the same credentials.  Emit explicit
+        # skipped checks instead of repeating an authentication error per API.
         checks.append(Check("AWS identity", "WARN", compact_error(identity_result)))
         checks.extend(
             [
@@ -239,6 +284,8 @@ def collect_aws_checks(
     if apis_result.returncode == 0 and isinstance(apis_payload, dict):
         items = apis_payload.get("Items", [])
         if isinstance(items, list):
+            # get-apis is a collection endpoint, so an exact name match is the
+            # only evidence that this project's environment is deployed.
             match = next((item for item in items if isinstance(item, dict) and item.get("Name") == api_name), None)
             if match:
                 api_status = "OK"
@@ -271,6 +318,8 @@ def collect_aws_checks(
     else:
         image_ref = parse_ecr_image_uri(image_uri)
         if image_ref is None:
+            # Non-ECR registries are valid inputs, but this adapter cannot
+            # prove their image existence through AWS APIs.
             checks.append(Check("Configured ECR image", "INFO", "Image URI is not an AWS ECR URI; existence check skipped.", scored=False))
         else:
             image_id = f"imageTag={image_ref.tag}" if image_ref.tag else f"imageDigest={image_ref.digest}"
@@ -314,6 +363,12 @@ def resolve_health_url(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     run_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _run_command,
 ) -> tuple[str, str]:
+    """Resolve a health URL from an explicit argument or Terraform output.
+
+    The second tuple item records either provenance or an actionable error so
+    callers can present the decision without reproducing resolution logic.
+    """
+
     if url:
         return url.strip(), "argument"
     if not command_exists_fn("terraform"):
@@ -325,6 +380,10 @@ def resolve_health_url(
 
 
 def aws_sigv4_signing_key(secret_key: str, date_stamp: str, region: str, service: str) -> bytes:
+    """Derive the scoped AWS Signature Version 4 signing key."""
+
+    # SigV4 deliberately narrows the secret through date, region, and service
+    # before producing the final request-signing key.
     key_date = hmac.new(("AWS4" + secret_key).encode("utf-8"), date_stamp.encode("utf-8"), hashlib.sha256).digest()
     key_region = hmac.new(key_date, region.encode("utf-8"), hashlib.sha256).digest()
     key_service = hmac.new(key_region, service.encode("utf-8"), hashlib.sha256).digest()
@@ -332,6 +391,8 @@ def aws_sigv4_signing_key(secret_key: str, date_stamp: str, region: str, service
 
 
 def canonical_query_string(query: str) -> str:
+    """Encode and sort query parameters according to SigV4 canonical rules."""
+
     pairs = urllib.parse.parse_qsl(query, keep_blank_values=True)
     encoded = [
         (
@@ -344,6 +405,13 @@ def canonical_query_string(query: str) -> str:
 
 
 def aws_sigv4_headers(url: str, region: str | None = None, now: dt.datetime | None = None) -> tuple[dict[str, str], str | None]:
+    """Build SigV4 headers for an API Gateway ``GET`` health request.
+
+    Credentials come only from the standard AWS environment variables.  This
+    avoids persisting secrets or introducing a separate credential-resolution
+    policy in the dependency-free CLI.
+    """
+
     access_key = os.environ.get("AWS_ACCESS_KEY_ID", "")
     secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
     session_token = os.environ.get("AWS_SESSION_TOKEN", "")
@@ -366,6 +434,8 @@ def aws_sigv4_headers(url: str, region: str | None = None, now: dt.datetime | No
     }
     if session_token:
         headers["x-amz-security-token"] = session_token
+    # Both header names and query parameters must be sorted before hashing;
+    # changing this ordering produces a signature AWS cannot verify.
     signed_headers = ";".join(sorted(headers))
     canonical_headers = "".join(f"{name}:{headers[name]}\n" for name in sorted(headers))
     canonical_request = "\n".join(
@@ -406,6 +476,12 @@ def aws_sigv4_headers(url: str, region: str | None = None, now: dt.datetime | No
 
 
 def fetch_health_url(url: str, timeout: int = 20, aws_sigv4: bool = False, aws_region: str | None = None) -> tuple[int | None, str]:
+    """Fetch a health endpoint and return its status plus a short detail.
+
+    Network failures use ``None`` for the status, whereas HTTP error responses
+    preserve their numeric status so readiness reporting can distinguish them.
+    """
+
     stripped_url = url.strip()
     parsed = urllib.parse.urlparse(stripped_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -419,6 +495,8 @@ def fetch_health_url(url: str, timeout: int = 20, aws_sigv4: bool = False, aws_r
     request = urllib.request.Request(stripped_url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
+            # The URL is restricted to HTTP(S) above; only a small response
+            # preview is retained to keep CLI output bounded.
             status = int(getattr(response, "status", response.getcode()))
             preview = response.read(200).decode("utf-8", errors="replace").strip()
             return status, preview or f"HTTP {status}"
@@ -441,6 +519,8 @@ def collect_health_checks(
     resolve_health_fn: Callable[..., tuple[str, str]] = resolve_health_url,
     fetch_health_fn: Callable[..., tuple[int | None, str]] = fetch_health_url,
 ) -> list[Check]:
+    """Resolve and probe the workload health endpoint as readiness checks."""
+
     health_url, source = resolve_health_fn(root, url)
     checks = [
         Check(
@@ -472,6 +552,13 @@ def inspect_aws_outputs(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     aws_json_fn: Callable[..., tuple[Any, subprocess.CompletedProcess[str]]] = _aws_json,
 ) -> tuple[dict[str, str], list[Check]]:
+    """Return deployed AWS values together with diagnostics for partial data.
+
+    The output mapping always has the same keys.  Values remain empty when a
+    resource cannot be inspected, allowing text and JSON presenters to consume
+    partial results without branching on payload shape.
+    """
+
     region = str(cfg["aws_region"])
     lambda_function = expected_lambda_function_name(cfg, env_name)
     api_name = expected_api_gateway_name(cfg, env_name)
@@ -508,6 +595,8 @@ def inspect_aws_outputs(
     if lambda_result.returncode == 0 and isinstance(lambda_payload, dict):
         configuration = lambda_payload.get("Configuration", {})
         if not isinstance(configuration, dict):
+            # Some test doubles and older response shapes expose configuration
+            # fields at the top level, so retain that compatible fallback.
             configuration = lambda_payload
         outputs["lambda_state"] = str(configuration.get("State") or "")
         outputs["lambda_last_update_status"] = str(configuration.get("LastUpdateStatus") or "")

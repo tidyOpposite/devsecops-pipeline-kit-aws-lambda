@@ -1,4 +1,9 @@
-"""Readiness and audit report generation."""
+"""Readiness and audit report generation.
+
+Reports assemble already-normalized configuration and checks into durable human
+or machine-readable evidence.  They describe secret requirements by name but
+never include credential values.
+"""
 
 from __future__ import annotations
 
@@ -38,6 +43,8 @@ DEPLOY_ROLE_ENV_NAME = "AWS_ROLE_TO_ASSUME_ARN"
 
 
 def markdown_report(cfg: dict[str, Any], checks: list[Check]) -> str:
+    """Render a timestamped readiness report with checks, controls, and actions."""
+
     score = readiness_score(checks)
     check_rows = [[check.name, check.status, check.detail] for check in checks]
     breakdown_rows = readiness_breakdown_rows(checks, compact=True)
@@ -64,6 +71,8 @@ def markdown_report(cfg: dict[str, Any], checks: list[Check]) -> str:
 
 
 def preset_dict(name: str) -> dict[str, Any]:
+    """Serialize one preset together with its strict production-policy gaps."""
+
     cfg = preset_config(name)
     return {
         "name": name,
@@ -93,6 +102,8 @@ def preset_dict(name: str) -> dict[str, Any]:
 
 
 def least_privilege_guidance() -> dict[str, Any]:
+    """Return auditable plan/deploy role boundaries without policy credentials."""
+
     return {
         "plan_role": {
             SENSITIVITY_LABEL: PLAN_ROLE_ENV_NAME,
@@ -129,6 +140,8 @@ def least_privilege_guidance() -> dict[str, Any]:
 
 
 def audit_report_payload(cfg: dict[str, Any], checks: list[Check], deep: bool = False) -> dict[str, Any]:
+    """Build the versioned audit-evidence payload for the observed project state."""
+
     validation_checks = validate_config(cfg)
     return {
         "kind": "audit-evidence",
@@ -158,10 +171,19 @@ def audit_report_payload(cfg: dict[str, Any], checks: list[Check], deep: bool = 
 
 
 def audit_report_json(cfg: dict[str, Any], checks: list[Check], deep: bool = False) -> str:
+    """Serialize audit evidence as stable, newline-terminated formatted JSON."""
+
     return json.dumps(audit_report_payload(cfg, checks, deep=deep), indent=2, sort_keys=True) + "\n"
 
 
 def next_actions(cfg: dict[str, Any], checks: list[Check]) -> list[str]:
+    """Return prioritized report actions for readiness or posture follow-up.
+
+    Scored readiness gaps take precedence and already contain focused runbook
+    guidance.  Configuration hardening suggestions are used only when no scored
+    gap remains, avoiding a second competing remediation list.
+    """
+
     actions: list[str] = []
     for check_name, status, _detail, action in readiness_gap_rows(checks):
         actions.append(f"- {check_name} ({status}): {action}")

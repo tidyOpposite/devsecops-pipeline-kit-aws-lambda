@@ -1,3 +1,10 @@
+"""End-to-end contract tests for CLI configuration, UX, and provider adapters.
+
+The suite uses temporary project roots and patched process boundaries so broad
+user journeys remain deterministic and never modify the developer's checkout,
+GitHub repository, Terraform state, or AWS account.
+"""
+
 import argparse
 import importlib
 import os
@@ -26,6 +33,8 @@ RENDERED_ARTIFACTS = [
 
 
 def golden_config() -> dict[str, object]:
+    """Return fixed inputs shared by deterministic generated-file fixtures."""
+
     cfg = cli.preset_config("strict")
     cfg["project_name"] = "golden-pipeline"
     cfg["aws_region"] = "eu-central-1"
@@ -42,14 +51,20 @@ def golden_config() -> dict[str, object]:
 
 
 def read_golden(name: str) -> str:
+    """Read an expected generated artifact from the fixture directory."""
+
     return (GOLDEN_DIR / name).read_text(encoding="utf-8")
 
 
 def rendered_artifact_contents(root: Path) -> dict[str, str]:
+    """Capture every generated artifact for idempotence comparisons."""
+
     return {str(path): (root / path).read_text(encoding="utf-8") for path in RENDERED_ARTIFACTS}
 
 
 def create_required_project_files(root: Path) -> None:
+    """Create minimal source-file signals for a complete temporary checkout."""
+
     for relative in cli.REQUIRED_PROJECT_FILES:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -57,14 +72,21 @@ def create_required_project_files(root: Path) -> None:
 
 
 def project_version(path: Path) -> str:
+    """Read package version metadata from a pyproject file."""
+
     return tomllib.loads(path.read_text(encoding="utf-8"))["project"]["version"]
 
 
 def project_requires_python(path: Path) -> str:
+    """Read the supported Python range from a pyproject file."""
+
     return tomllib.loads(path.read_text(encoding="utf-8"))["project"]["requires-python"]
 
 
 class DevSecOpsCliTests(unittest.TestCase):
+    """Exercise stable CLI contracts across local and mocked provider journeys."""
+
+    # Distribution metadata and first-success documentation stay synchronized.
     def test_version_metadata_is_consistent(self) -> None:
         self.assertEqual(cli.VERSION, "0.13.1")
         self.assertEqual(package.VERSION, cli.VERSION)
@@ -136,6 +158,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertEqual(result.stdout.strip(), f"devsecops {cli.VERSION}")
         self.assertNotIn("RuntimeWarning", result.stderr)
 
+    # Configuration schema, migration, mutation, and canonical serialization.
     def test_immutable_image_validation(self) -> None:
         self.assertTrue(cli.is_immutable_image("repo.example/app:sha-abc123"))
         self.assertTrue(cli.is_immutable_image("repo.example/app@sha256:" + "a" * 64))
@@ -259,6 +282,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("preset:balanced", preset_diff)
         self.assertIn("lambda_memory_size = 1024", preset_diff)
 
+    # Generated artifacts are deterministic, owned, and snapshot-compatible.
     def test_clean_config_and_render_are_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -528,6 +552,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("Status: release candidate shipped in `v0.11.0`.", roadmap)
         self.assertIn("docs/v1.0.0-release-candidate-checklist.md", roadmap)
 
+    # Parser help, completion, and inventory expose the supported CLI contract.
     def test_help_documents_product_contract_and_first_run(self) -> None:
         help_text = cli.build_parser().format_help()
         self.assertIn("CLI product", help_text)
@@ -688,6 +713,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("Side effects:", deploy_help)
         self.assertIn("never writes AWS directly", deploy_help)
 
+    # Unified next-action and guided setup flows share one ordered journey.
     def test_next_action_decision_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1211,6 +1237,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         apply_setup.assert_called_once()
         self.assertNotIn(secret_value, saved_text)
 
+    # Release evidence, readiness JSON, and grouped command compatibility.
     def test_evidence_collect_rc_writes_release_candidate_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1507,6 +1534,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("Fix:", output)
         self.assertIn("docs/troubleshooting.md#lambda-image-uri-is-missing-or-invalid", output)
 
+    # Strict configuration policy, presets, and interactive composition.
     def test_config_validation_catches_bad_values(self) -> None:
         cfg = cli.default_config()
         cfg["environments"]["dev"]["lambda_timeout"] = 901
@@ -1707,6 +1735,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             self.assertTrue(report.exists())
             self.assertIn("Snyk container scan", report.read_text(encoding="utf-8"))
 
+    # Control catalog and report outputs map configuration to audit evidence.
     def test_github_setup_script_contains_expected_commands(self) -> None:
         cfg = cli.default_config()
         cfg["lambda_image_uri"] = "123456789012.dkr.ecr.us-east-1.amazonaws.com/app:sha-abc123"
@@ -1841,6 +1870,8 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("Rich/Textual UI is optional", buffer.getvalue())
         render_dashboard.assert_called_once_with(root, mode="compact", clear=False)
 
+    # GitHub adapters normalize variables, name-only secrets, branch policy,
+    # Actions failures, and repository setup prechecks.
     def test_parse_gh_items_from_json(self) -> None:
         payload = json.dumps(
             [
@@ -1914,6 +1945,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("Deploy role ARN argument", buffer.getvalue())
         apply_setup.assert_called_once()
 
+    # Tracked workflow and Terraform source retain security-critical controls.
     def test_workflow_security_hardening_contract(self) -> None:
         deploy_workflow = (ROOT_DIR / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
         ci_workflow = (ROOT_DIR / ".github/workflows/ci.yml").read_text(encoding="utf-8")
@@ -2106,6 +2138,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertEqual(payload["failed_steps"][0][4], cli.RUNBOOK_FAILED_APPLY)
         self.assertIn("devsecops deploy logs --run-id 10 --failed", payload["next_actions"][0])
 
+    # Health, ECR, and AWS adapters are exercised entirely through test doubles.
     def test_health_command_validates_explicit_url_without_terraform(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -2313,6 +2346,8 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
 
         self.assertEqual(result, cli.EXIT_MISSING_EXTERNAL_TOOL)
 
+    # Snapshot restoration is allowlisted, then menu tests verify that the same
+    # command handlers remain nested behind the simplified product navigation.
     def test_snapshots_are_listed_newest_first_and_selectable_by_number(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

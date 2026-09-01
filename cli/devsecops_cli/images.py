@@ -1,4 +1,9 @@
-"""Container-image reference parsing and validation policies."""
+"""Container-image reference parsing and deployment validation policies.
+
+The module separates general immutability checks from AWS ECR-specific parsing.
+This lets the CLI recognize immutable bring-your-own images while applying
+region and repository checks only when an ECR reference can be decomposed.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,8 @@ from typing import Any
 from .models import Check, EcrImageRef
 
 
+# ECR references must identify exactly one tag or digest; accepting both would
+# make downstream ``describe-images`` lookup semantics ambiguous.
 ECR_IMAGE_RE = re.compile(
     r"^(?P<registry>\d{12}\.dkr\.ecr\.(?P<region>[^.]+)\.amazonaws\.com)/"
     r"(?P<repository>[^:@]+)(?::(?P<tag>[^@]+)|@(?P<digest>sha256:[A-Fa-f0-9]{64}))$"
@@ -15,7 +22,11 @@ ECR_IMAGE_RE = re.compile(
 
 
 def is_immutable_image(image_uri: str) -> bool:
-    """Return whether an image uses a digest or a non-moving tag."""
+    """Return whether an image uses a digest or a permitted release tag.
+
+    The kit reserves ``latest`` and ``bootstrap`` as moving tags.  Other tags
+    are treated as operator-managed immutable release identifiers.
+    """
 
     if not image_uri:
         return False
@@ -28,6 +39,8 @@ def is_immutable_image(image_uri: str) -> bool:
 
 
 def parse_ecr_image_uri(image_uri: str) -> EcrImageRef | None:
+    """Parse a complete private ECR image URI into its typed components."""
+
     match = ECR_IMAGE_RE.match(image_uri)
     if not match:
         return None
@@ -41,10 +54,18 @@ def parse_ecr_image_uri(image_uri: str) -> EcrImageRef | None:
 
 
 def expected_ecr_repository_name(cfg: dict[str, Any], env_name: str) -> str:
+    """Return the repository name created by the reference Terraform stack."""
+
     return f"{cfg['project_name']}-{env_name}-lambda-repo"
 
 
 def image_uri_from_config_or_override(cfg: dict[str, Any], image_uri: str | None = None) -> str:
+    """Resolve an explicit image override or fall back to local configuration.
+
+    An explicitly supplied empty string remains an empty override; only
+    ``None`` means that the caller did not provide a value.
+    """
+
     return str(image_uri if image_uri is not None else cfg["lambda_image_uri"]).strip()
 
 
@@ -53,6 +74,14 @@ def collect_image_preflight_checks(
     image_uri: str | None = None,
     env_name: str = "prod",
 ) -> list[Check]:
+    """Validate image presence, ECR shape, immutability, region, and repository.
+
+    Repository mismatch is informational for readiness scoring because
+    bring-your-own ECR repositories are supported when IAM permits access.
+    Region mismatch remains a failure because Lambda cannot pull a function
+    image from an ECR repository in another region.
+    """
+
     checks: list[Check] = []
     resolved_uri = image_uri_from_config_or_override(cfg, image_uri)
     image_ref = parse_ecr_image_uri(resolved_uri) if resolved_uri else None
@@ -99,6 +128,8 @@ def collect_image_preflight_checks(
                 else f"Image region `{image_ref.region}` does not match aws_region `{expected_region}`.",
             )
         )
+        # The reference repository is a convention rather than an ownership
+        # requirement, so a different valid ECR repository does not block.
         expected_repository = expected_ecr_repository_name(cfg, env_name)
         checks.append(
             Check(

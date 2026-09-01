@@ -1,4 +1,9 @@
-"""Project-context detection and next-action workflow."""
+"""Project-context detection and prioritized next-action workflow.
+
+This module converts filesystem, configuration, GitHub, and AWS observations
+into one shared action contract.  It does not perform the suggested mutation;
+CLI surfaces decide how and when to present or execute the returned command.
+"""
 
 from __future__ import annotations
 
@@ -21,15 +26,25 @@ def _command_exists(name: str) -> bool:
 
 
 def missing_project_files(root: Path) -> list[str]:
+    """Return required repository paths that are absent below ``root``."""
+
     return [path for path in REQUIRED_PROJECT_FILES if not (root / path).exists()]
 
 
 def project_context(root: Path, cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Classify local project maturity from source and generated-file signals.
+
+    Stages are descriptive rather than readiness decisions.  External GitHub
+    and AWS evidence is intentionally deferred to :func:`next_action`.
+    """
+
     cfg = cfg or load_config(root)
     config_exists = config_path(root).exists()
     missing_files = missing_project_files(root)
     generated_tfvars = (root / GENERATED_TFVARS).exists()
     generated_setup = (root / DIST_DIR / "github-setup.sh").exists()
+    # A partial repository must not be mistaken for a fresh empty directory;
+    # any owned source or generated artifact counts as a project signal.
     has_any_project_signal = config_exists or any((root / path).exists() for path in REQUIRED_PROJECT_FILES) or generated_tfvars or generated_setup
 
     if not has_any_project_signal and not any(root.iterdir()):
@@ -39,6 +54,8 @@ def project_context(root: Path, cfg: dict[str, Any] | None = None) -> dict[str, 
     elif not config_exists:
         stage = "project_repo_without_config"
     elif generated_tfvars and generated_setup:
+        # Generated files alone do not make a production candidate: warning
+        # policies and placeholder backend values still require remediation.
         validation_gaps = [check for check in validate_config(cfg) if check.status in {"WARN", "FAIL"}]
         stage = "production_candidate" if not validation_gaps and not cfg["backend"]["bucket"].startswith("replace-with") else "rendered_project"
     else:
@@ -87,6 +104,13 @@ def next_action(
     github_checks_fn: Callable[..., list[Check]] = collect_github_checks,
     aws_checks_fn: Callable[..., list[Check]] = collect_aws_checks,
 ) -> dict[str, Any]:
+    """Return the highest-priority action that advances project readiness.
+
+    Local prerequisites and security policy are evaluated before external
+    tools.  This ordering prevents noisy provider checks from obscuring an
+    earlier condition that the user can resolve locally.
+    """
+
     cfg = cfg or load_config(root)
     context = project_context(root, cfg)
     validation_checks = validate_config(cfg)
@@ -105,6 +129,8 @@ def next_action(
         and check.status in {"WARN", "FAIL"}
     ]
 
+    # The order below is part of the user journey: each returned action should
+    # unlock the checks that follow it, so only one recommendation is needed.
     if context["missing_project_files"]:
         return _next_action(
             action_id="missing_project_files",
@@ -200,6 +226,8 @@ def next_action(
             docs="docs/troubleshooting.md#github-doctor-cannot-inspect-the-repository",
             context=context,
         )
+    # Informational provider observations must not block progress; only checks
+    # explicitly included in readiness scoring become actionable gaps.
     github_gaps = [check for check in github_checks if check.scored and check.status != "OK"]
     if github_gaps:
         return _next_action(

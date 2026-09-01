@@ -2,6 +2,12 @@
 
 
 def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
+    """Render a compact GitHub-flavored Markdown table.
+
+    Literal pipes inside cells are escaped so user or provider text cannot
+    accidentally create additional columns.
+    """
+
     lines = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join("---" for _ in headers) + " |",

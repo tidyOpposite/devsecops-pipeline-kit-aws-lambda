@@ -1,4 +1,9 @@
-"""Pure readiness scoring, categorization, and serialization."""
+"""Pure readiness scoring, categorization, remediation, and serialization.
+
+This module has no filesystem or provider access.  It converts already-observed
+checks into scores, gates, actionable guidance, JSON contracts, and stable exit
+codes that can be shared by every CLI presentation.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +21,12 @@ READINESS_CATEGORIES = ["Local", "Terraform", "GitHub", "AWS", "Security", "Depl
 
 
 def readiness_score(checks: list[Check]) -> int:
+    """Return a weighted score over checks explicitly included in scoring.
+
+    ``OK`` earns full credit, ``WARN``/``INFO`` half credit, and ``FAIL`` no
+    credit.  An empty scored set is treated as complete rather than undefined.
+    """
+
     scored = [check for check in checks if check.scored]
     if not scored:
         return 100
@@ -29,6 +40,12 @@ def readiness_score(checks: list[Check]) -> int:
 
 
 def readiness_action_detail_for_check(check: Check) -> str:
+    """Map a known check name to its most direct remediation command.
+
+    The fallback preserves provider detail for new checks until a dedicated
+    action is added, so unknown observations still remain useful.
+    """
+
     if check.name == "Local config":
         return "Run `devsecops config new --preset balanced` or open `devsecops menu`."
     if check.name == "Project name":
@@ -107,6 +124,8 @@ def readiness_action_detail_for_check(check: Check) -> str:
 
 
 def troubleshooting_anchor_for_check(check: Check) -> str:
+    """Map a check to the closest troubleshooting section anchor."""
+
     name = check.name
     if name == "Local config":
         return "#local-config-is-missing"
@@ -157,12 +176,16 @@ def troubleshooting_anchor_for_check(check: Check) -> str:
 
 
 def readiness_action_for_check(check: Check) -> str:
+    """Combine direct remediation with its stable troubleshooting link."""
+
     action = readiness_action_detail_for_check(check)
     anchor = troubleshooting_anchor_for_check(check)
     return f"{action} See `docs/troubleshooting.md{anchor}`."
 
 
 def readiness_gap_rows(checks: list[Check]) -> list[list[str]]:
+    """Return actionable rows for non-OK checks that affect readiness."""
+
     return [
         [check.name, check.status, check.detail, readiness_action_for_check(check)]
         for check in checks
@@ -171,6 +194,11 @@ def readiness_gap_rows(checks: list[Check]) -> list[list[str]]:
 
 
 def readiness_category_for_check(check: Check) -> str:
+    """Assign a check to one stable dashboard category by its contract name.
+
+    New or purely local checks fall back to ``Local`` until explicitly mapped.
+    """
+
     name = check.name
     if name.startswith("GitHub") or name.startswith("Branch `") or name.startswith("Required check"):
         return "GitHub"
@@ -222,6 +250,8 @@ def readiness_category_for_check(check: Check) -> str:
 
 
 def grouped_readiness_checks(checks: list[Check]) -> dict[str, list[Check]]:
+    """Group checks while preserving category and input order."""
+
     grouped = {category: [] for category in READINESS_CATEGORIES}
     for check in checks:
         grouped[readiness_category_for_check(check)].append(check)
@@ -229,6 +259,12 @@ def grouped_readiness_checks(checks: list[Check]) -> dict[str, list[Check]]:
 
 
 def readiness_score_for_category(checks: list[Check]) -> int | None:
+    """Score all visible checks in one category, or return ``None`` if empty.
+
+    Category summaries intentionally include informational, unscored checks;
+    strict exits and the direct readiness score continue to honor ``scored``.
+    """
+
     if not checks:
         return None
     points = 0
@@ -241,6 +277,8 @@ def readiness_score_for_category(checks: list[Check]) -> int | None:
 
 
 def readiness_breakdown_rows(checks: list[Check], compact: bool = False) -> list[list[str]]:
+    """Build compact gap counts or full status counts for each category."""
+
     grouped = grouped_readiness_checks(checks)
     rows: list[list[str]] = []
     for category in READINESS_CATEGORIES:
@@ -271,12 +309,16 @@ def readiness_breakdown_rows(checks: list[Check], compact: bool = False) -> list
 
 
 def overall_breakdown_score(checks: list[Check]) -> int:
+    """Return the macro-average of non-empty category scores."""
+
     scores = [score for score in (readiness_score_for_category(group) for group in grouped_readiness_checks(checks).values()) if score is not None]
     return round(sum(scores) / len(scores)) if scores else 100
 
 
 
 def check_to_dict(check: Check) -> dict[str, Any]:
+    """Serialize one check without losing its scoring participation flag."""
+
     return {
         "name": check.name,
         "status": check.status,
@@ -286,6 +328,8 @@ def check_to_dict(check: Check) -> dict[str, Any]:
 
 
 def readiness_breakdown_dicts(checks: list[Check]) -> list[dict[str, Any]]:
+    """Serialize category breakdown rows with numeric values."""
+
     rows = readiness_breakdown_rows(checks, compact=False)
     return [
         {
@@ -301,6 +345,8 @@ def readiness_breakdown_dicts(checks: list[Check]) -> list[dict[str, Any]]:
 
 
 def readiness_gap_dicts(checks: list[Check]) -> list[dict[str, str]]:
+    """Serialize actionable readiness gaps for machine-readable output."""
+
     return [
         {"name": name, "status": status, "detail": detail, "action": action}
         for name, status, detail, action in readiness_gap_rows(checks)
@@ -308,6 +354,12 @@ def readiness_gap_dicts(checks: list[Check]) -> list[dict[str, str]]:
 
 
 def checks_payload(kind: str, checks: list[Check], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Build the shared versioned JSON envelope for check-based commands.
+
+    ``score`` is weighted across scored checks, whereas
+    ``overall_breakdown_score`` is the macro-average used by area dashboards.
+    """
+
     payload: dict[str, Any] = {
         "kind": kind,
         "schema_version": CONTRACT_SCHEMA_VERSION,
@@ -324,11 +376,15 @@ def checks_payload(kind: str, checks: list[Check], context: dict[str, Any] | Non
 
 
 def check_status_by_name(checks: list[Check], name: str) -> str | None:
+    """Return the first status for a named contract check, if present."""
+
     match = next((check for check in checks if check.name == name), None)
     return match.status if match else None
 
 
 def readiness_gate_rows(checks: list[Check]) -> list[list[str]]:
+    """Summarize local, source, production, and evidence readiness gates."""
+
     local_config_ok = check_status_by_name(checks, "Local config") == "OK" and check_status_by_name(checks, "Config schema") != "FAIL"
     project_files_ok = check_status_by_name(checks, "Project files") == "OK"
     production_gaps = [check for check in checks if check.scored and check.status != "OK"]
@@ -364,11 +420,19 @@ def readiness_gate_rows(checks: list[Check]) -> list[list[str]]:
 
 
 def readiness_gate_dicts(checks: list[Check]) -> list[dict[str, str]]:
+    """Serialize readiness gates without duplicating gate evaluation."""
+
     return [{"gate": gate, "status": status, "detail": detail} for gate, status, detail in readiness_gate_rows(checks)]
 
 
 
 def strict_exit_code(checks: list[Check], strict: bool = False, fail_on_warn: bool = False) -> int:
+    """Translate scored gaps into the stable strict-mode exit-code contract.
+
+    Missing tools and authentication receive dedicated codes so automation can
+    distinguish environmental prerequisites from configuration validation.
+    """
+
     if not strict:
         return EXIT_OK
     scored_gaps = [

@@ -1,4 +1,9 @@
-"""Machine-readable stability contracts for commands and artifacts."""
+"""Machine-readable compatibility contracts for commands and artifacts.
+
+These registries are the shared source for human inventory output, JSON
+inventory output, release review, and compatibility tests.  Entries describe
+what callers may rely on; they do not implement command behavior themselves.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +14,8 @@ from .config import CONFIG_MIGRATION_CONTRACT
 from .formatting import markdown_table
 from .paths import AUDIT_REPORT, DEPLOYMENT_STATE_FILE, DIST_DIR, GENERATED_TFVARS, RC_EVIDENCE_DIR
 
+# Increment this version only when the inventory payload itself changes in a
+# non-additive way.  Individual command status belongs in the entries below.
 CONTRACT_SCHEMA_VERSION = 1
 COMMAND_CONTRACTS: list[dict[str, Any]] = [
     {
@@ -639,12 +646,18 @@ COMMAND_CONTRACTS: list[dict[str, Any]] = [
         "notes": "Compatibility alias retained through at least v1.0.",
     },
 ]
+
+# Compatibility policy distinguishes retained aliases from experimental
+# surfaces and schema-versioned data formats.
 DEPRECATION_POLICY = {
     "aliases": "Aliases remain callable through at least v1.0. New scripts should use the documented grouped command.",
     "experimental_commands": "Experimental commands are excluded from first-success docs and may change or move in any 0.x minor release.",
     "output_formats": "JSON outputs are additive within a schema_version; fields may be added, but existing kind names and documented keys are not renamed without deprecation.",
     "config_fields": "Config fields require schema-versioned migration notes, tests, and upgrade-guide coverage before shipping.",
 }
+
+# Stable keys are minimum guarantees.  Producers may add fields within the
+# same schema version, but should not rename or remove the documented keys.
 JSON_OUTPUT_CONTRACTS = [
     {
         "kind": "status",
@@ -742,6 +755,9 @@ JSON_OUTPUT_CONTRACTS = [
         "stable_keys": ["kind", "schema_version", "cli_version", "stable_ready", "criteria", "stable_release_gates", "next_actions"],
     },
 ]
+
+# Generated artifacts declare both their producer and the changes that should
+# legitimately cause a re-render, making unexpected drift easier to review.
 GENERATED_ARTIFACT_CONTRACTS = [
     {
         "path": str(DEPLOYMENT_STATE_FILE),
@@ -815,13 +831,22 @@ GENERATED_ARTIFACT_CONTRACTS = [
     },
 ]
 
+
 def command_contracts(status: str = "all") -> list[dict[str, Any]]:
+    """Return command contracts, optionally filtered by lifecycle status.
+
+    Fresh top-level dictionaries prevent routine presentation code from
+    replacing fields on the canonical registry entries.
+    """
+
     if status == "all":
         return [dict(item) for item in COMMAND_CONTRACTS]
     return [dict(item) for item in COMMAND_CONTRACTS if item["status"] == status]
 
 
 def command_contract_rows(status: str = "all") -> list[list[str]]:
+    """Project command contracts into rows shared by text table renderers."""
+
     return [
         [
             str(item["command"]),
@@ -835,6 +860,8 @@ def command_contract_rows(status: str = "all") -> list[list[str]]:
 
 
 def command_inventory_markdown(status: str = "all") -> str:
+    """Render command, deprecation, JSON, and artifact contracts as Markdown."""
+
     return "\n\n".join(
         [
             "# DevSecOps Command Inventory",
@@ -874,6 +901,8 @@ def command_inventory_markdown(status: str = "all") -> str:
 
 
 def inventory_payload(status: str = "all") -> dict[str, Any]:
+    """Build the versioned machine-readable compatibility inventory."""
+
     return {
         "kind": "command-inventory",
         "schema_version": CONTRACT_SCHEMA_VERSION,

@@ -1,4 +1,9 @@
-"""Local, Terraform, AWS, and GitHub diagnostic orchestration."""
+"""Local, Terraform, AWS, and GitHub diagnostic orchestration.
+
+Collectors report structured checks instead of terminating on the first gap.
+Fast mode stays mostly local, while deep and dashboard modes opt into slower
+Terraform and provider inspection.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +20,8 @@ from .models import Check
 from .paths import CONFIG_FILE, GENERATED_TFVARS, REQUIRED_PROJECT_FILES
 
 
+# Process helpers are injectable at collector boundaries, keeping diagnostics
+# testable without requiring local tool installations or provider access.
 def _command_exists(name: str) -> bool:
     return shutil.which(name) is not None
 
@@ -32,6 +39,8 @@ def _run_command(command: list[str], root: Path, timeout: int = 30) -> subproces
 
 
 def compact_error(result: subprocess.CompletedProcess[str]) -> str:
+    """Return the final command-output line suitable for a compact check."""
+
     output = (result.stderr or result.stdout or "").strip().splitlines()
     return output[-1] if output else f"Command exited with {result.returncode}."
 
@@ -46,6 +55,13 @@ def collect_checks(
     image_preflight_fn: Callable[..., list[Check]] = collect_image_preflight_checks,
     aws_checks_fn: Callable[..., list[Check]] = collect_aws_checks,
 ) -> list[Check]:
+    """Collect local readiness checks and optional deep provider evidence.
+
+    Required local prerequisites use ``FAIL``; incomplete production setup and
+    optional tools generally use ``WARN``.  Feature visibility checks marked
+    ``scored=False`` inform the operator without reducing readiness scores.
+    """
+
     checks: list[Check] = []
     config_exists = config_path(root).exists()
     checks.append(
@@ -74,6 +90,9 @@ def collect_checks(
         )
     )
 
+    # Terraform is required to validate and deploy the infrastructure.  Git and
+    # the fast-mode AWS CLI check remain warnings because local config analysis
+    # can still provide useful output without them.
     tool_checks = [("git", False), ("terraform", True)]
     if not deep:
         tool_checks.append(("aws", False))
@@ -99,6 +118,8 @@ def collect_checks(
         image_detail = "Required before production deploy."
     checks.append(Check("Lambda image URI", image_status, image_detail))
     if image_uri:
+        # Reuse image-domain validation but avoid duplicating its general
+        # policy check already represented as "Lambda image URI" above.
         for preflight_check in image_preflight_fn(cfg):
             if preflight_check.name in {"Lambda image shape", "Lambda image region"}:
                 checks.append(preflight_check)
@@ -209,6 +230,8 @@ def collect_checks(
             )
         )
 
+    # Deep Terraform validation is meaningful only for a complete checkout;
+    # otherwise the missing-files check already explains the root cause.
     if deep and command_exists_fn("terraform") and not missing:
         root_validate = run_command_fn(["terraform", "-chdir=terraform", "validate", "-no-color"], root)
         checks.append(
@@ -242,6 +265,8 @@ def collect_checks(
         )
 
     if deep:
+        # The AWS adapter degrades authentication and missing-resource errors
+        # into checks, so deep diagnostics remain a complete report.
         checks.extend(aws_checks_fn(root, cfg, env_name="prod"))
 
     return checks
@@ -257,6 +282,12 @@ def collect_dashboard_checks(
     github_checks_fn: Callable[..., list[Check]] = collect_github_checks,
     branch_checks_fn: Callable[..., list[Check]] = collect_branch_checks,
 ) -> list[Check]:
+    """Collect the check set appropriate for compact or full dashboards.
+
+    Full mode adds deep local/AWS checks plus GitHub and branch protection;
+    lighter modes avoid those external calls for faster refresh cycles.
+    """
+
     checks = collect_checks_fn(root, cfg, deep=mode == "full")
     if mode == "full":
         checks.extend(github_checks_fn(root, cfg))

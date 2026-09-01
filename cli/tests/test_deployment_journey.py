@@ -1,3 +1,10 @@
+"""Deployment journey tests from domain contracts through workflow integration.
+
+Fixtures model GitHub and AWS responses locally.  The tests verify pure run
+selection and journal behavior, CLI orchestration boundaries, and the tracked
+workflow contract without dispatching a workflow or contacting cloud services.
+"""
+
 import argparse
 import io
 import json
@@ -20,6 +27,8 @@ PREVIOUS_IMAGE = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipelin
 
 
 def deployment_config() -> dict[str, object]:
+    """Return a production-ready config with deterministic deployment inputs."""
+
     cfg = cli.preset_config("enterprise")
     cfg["lambda_image_uri"] = IMAGE
     cfg["backend"]["bucket"] = "devsecops-pipeline-tfstate"
@@ -28,6 +37,8 @@ def deployment_config() -> dict[str, object]:
 
 
 def create_deployment_project(root: Path) -> dict[str, object]:
+    """Create the minimum complete checkout signals needed by preflight tests."""
+
     cfg = deployment_config()
     cli.write_config(root, cfg)
     for relative in cli.REQUIRED_PROJECT_FILES:
@@ -48,6 +59,8 @@ def workflow_run(
     status: str = "completed",
     conclusion: str = "success",
 ) -> dict[str, object]:
+    """Build a normalized GitHub Actions run fixture for one operation."""
+
     return {
         "databaseId": run_id,
         "workflowName": deploy.DEPLOYMENT_WORKFLOW_NAME,
@@ -73,6 +86,8 @@ def workflow_run(
 
 
 class DeploymentDomainTests(unittest.TestCase):
+    """Verify provider-independent dispatch, journal, and run-selection rules."""
+
     def test_dispatch_contract_binds_exact_image_and_protected_ref(self) -> None:
         args = deploy.workflow_dispatch_args("deploy", IMAGE)
 
@@ -171,6 +186,9 @@ class DeploymentDomainTests(unittest.TestCase):
 
 
 class DeploymentCommandTests(unittest.TestCase):
+    """Verify CLI orchestration while replacing every external provider call."""
+
+    # Provider inspection and public parser surface.
     def test_active_image_inspection_uses_get_function_code_uri(self) -> None:
         cfg = deployment_config()
         completed = subprocess.CompletedProcess(["aws"], 0, "", "")
@@ -198,6 +216,7 @@ class DeploymentCommandTests(unittest.TestCase):
                     cli.main(argv)
             self.assertEqual(raised.exception.code, 0)
 
+    # Production preflight, confirmation, dispatch, and optional watch flow.
     def test_production_preflight_can_be_ready_and_blocks_overlap(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -314,6 +333,8 @@ class DeploymentCommandTests(unittest.TestCase):
         self.assertEqual(result, cli.EXIT_OK)
         dispatch.assert_not_called()
 
+    # Status and log commands must remain correlated with the journaled run and
+    # must not mix streamed human progress into machine-readable JSON.
     def test_deploy_status_uses_recorded_run_and_emits_clean_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -424,6 +445,8 @@ class DeploymentCommandTests(unittest.TestCase):
         self.assertEqual(result, cli.EXIT_OK)
         self.assertIn("Next command: devsecops deploy rollback --dry-run", buffer.getvalue())
 
+    # Rollback reuses the protected workflow and requires either journaled or
+    # explicit immutable target evidence before any provider call.
     def test_deploy_rollback_uses_previous_image_through_protected_workflow(self) -> None:
         url = "https://github.com/acme/pipeline/actions/runs/43"
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -483,6 +506,8 @@ class DeploymentCommandTests(unittest.TestCase):
 
 
 class DeploymentWorkflowContractTests(unittest.TestCase):
+    """Pin security-sensitive behavior in the tracked deployment workflow."""
+
     def test_workflow_supports_serialized_protected_manual_rollback(self) -> None:
         workflow = (ROOT_DIR / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
 

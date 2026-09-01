@@ -1,4 +1,9 @@
-"""Shell completion metadata and deterministic script generators."""
+"""Shell completion metadata and deterministic script generators.
+
+Completion data mirrors the public parser contract but remains dependency-free
+and serializes in a stable order.  This makes generated scripts suitable for
+printing directly, shell startup files, and exact-output tests.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,8 @@ import re
 import textwrap
 
 
+# These tables are the shell-neutral completion model.  Multi-word keys in
+# ``COMPLETION_OPTIONS`` describe options for a command plus its subcommand.
 COMPLETION_SHELLS = ("bash", "zsh", "fish")
 COMPLETION_COMMANDS = [
     "menu",
@@ -115,19 +122,27 @@ COMPLETION_OPTIONS = {
 }
 
 def shell_words(words: list[str] | tuple[str, ...]) -> str:
+    """Quote words for safe inclusion in generated POSIX-like shell arrays."""
+
     return " ".join("'" + word.replace("'", "'\"'\"'") + "'" for word in words)
 
 
 def indent_lines(lines: list[str], spaces: int) -> str:
+    """Indent generated blocks while preserving intentional blank lines."""
+
     prefix = " " * spaces
     return "\n".join(prefix + line if line else "" for line in lines)
 
 
 def completion_function_name(program: str) -> str:
+    """Convert an executable name into a shell-compatible function suffix."""
+
     return re.sub(r"[^A-Za-z0-9_]", "_", program)
 
 
 def bash_completion_script(program: str) -> str:
+    """Generate a deterministic Bash completion function for ``program``."""
+
     function_name = completion_function_name(program)
     command_cases = []
     for command, options in sorted(COMPLETION_OPTIONS.items()):
@@ -135,6 +150,8 @@ def bash_completion_script(program: str) -> str:
             continue
         command_cases.append(f"{command}) opts=\"{' '.join(options)}\" ;;")
 
+    # Nested option cases are evaluated before command-level fallbacks so a
+    # subcommand can expose a narrower and more relevant option set.
     nested_cases = []
     for command, options in sorted(COMPLETION_OPTIONS.items()):
         if " " not in command:
@@ -193,6 +210,8 @@ complete -F _{function_name}_completion {program}
 
 
 def zsh_completion_script(program: str) -> str:
+    """Generate a deterministic native Zsh completion function."""
+
     function_name = completion_function_name(program)
     command_cases = []
     for command, options in sorted(COMPLETION_OPTIONS.items()):
@@ -258,6 +277,10 @@ _{function_name} "$@"
 
 
 def fish_completion_script(program: str) -> str:
+    """Generate declarative Fish completion statements for ``program``."""
+
+    # Fish registers long options independently of command position.  A set
+    # removes duplicates before sorting keeps the output stable.
     all_options = sorted({option for options in COMPLETION_OPTIONS.values() for option in options if option.startswith("--")})
     lines = [
         f"# fish completion for {program}",
@@ -273,6 +296,12 @@ def fish_completion_script(program: str) -> str:
 
 
 def completion_script(shell: str, program: str = "devsecops") -> str:
+    """Validate inputs and dispatch to the requested shell generator.
+
+    Restricting the program name is also an injection boundary because it is
+    interpolated into executable shell syntax by every generator.
+    """
+
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", program):
         raise ValueError("Completion program name must contain only letters, numbers, dots, dashes, or underscores.")
     if shell == "bash":

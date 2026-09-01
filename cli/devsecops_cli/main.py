@@ -3,7 +3,8 @@
 
 This CLI is intentionally dependency-free so it can run before the project has
 any Python environment configured. It uses a local TOML config and generates
-ignored Terraform/GitHub helper artifacts.
+ignored Terraform/GitHub helper artifacts.  Domain rules live in focused
+modules; this file coordinates them into commands and human-facing workflows.
 """
 
 from __future__ import annotations
@@ -277,6 +278,8 @@ from .views import (
     preset_rows,
 )
 
+# Stable process statuses are part of the public automation contract documented
+# by ``devsecops inventory``.
 EXIT_OK = 0
 EXIT_VALIDATION_FAILED = 1
 EXIT_MISSING_EXTERNAL_TOOL = 2
@@ -315,7 +318,12 @@ PRODUCTION_EVIDENCE_REQUIRED_FILES = [
 WSL2_EVIDENCE_REQUIRED_FILES = [
     "wsl2-transcript.txt",
 ]
+
+
+# Terminal presentation and interactive input helpers.
 class Style:
+    """ANSI style codes used only when the active output stream supports color."""
+
     RESET = "\033[0m"
     BOLD = "\033[1m"
     DIM = "\033[2m"
@@ -353,9 +361,13 @@ def info(text: str) -> str:
 
 
 def repo_root() -> Path:
+    """Use the current working directory as the explicit project boundary."""
+
     return Path.cwd()
 
 
+# Local snapshot presentation delegates storage and allowlist enforcement to
+# ``snapshots.py``; command handlers here only explain and confirm operations.
 def create_snapshot(root: Path, operation: str, description: str) -> Path:
     """Compatibility boundary that keeps snapshot-id injection patchable."""
 
@@ -504,6 +516,8 @@ def command_exists(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+# External-command wrappers preserve legacy patch points in tests and route
+# provider-specific behavior to the focused AWS and GitHub adapters.
 def run_command(command: list[str], root: Path, timeout: int = 30) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # nosec B603
         command,
@@ -1010,11 +1024,15 @@ def print_preset_detail(name: str) -> int:
 
 
 def cmd_completion(args: argparse.Namespace) -> int:
+    """Print deterministic completion code for the requested shell."""
+
     print(completion_script(args.shell, args.program), end="")
     return EXIT_OK
 
 
 def cmd_envs(args: argparse.Namespace) -> int:
+    """Show normalized per-environment runtime configuration."""
+
     cfg = load_config(repo_root())
     draw_table(
         ["Env", "Memory", "Timeout", "Logs", "Burst/Rate", "CORS"],
@@ -1025,6 +1043,8 @@ def cmd_envs(args: argparse.Namespace) -> int:
 
 
 def cmd_controls(args: argparse.Namespace) -> int:
+    """Show the security-control catalog in human or JSON form."""
+
     cfg = load_config(repo_root())
     if getattr(args, "format", "human") == "json":
         emit_json(
@@ -1058,11 +1078,15 @@ def architecture_lines() -> list[str]:
 
 
 def cmd_architecture(args: argparse.Namespace) -> int:
+    """Print the compact cross-provider architecture overview."""
+
     draw_box("Architecture", architecture_lines())
     return 0
 
 
 def cmd_inventory(args: argparse.Namespace) -> int:
+    """Emit the public command and artifact compatibility inventory."""
+
     status = getattr(args, "status", "all")
     output_format = getattr(args, "format", "human")
     if output_format == "json":
@@ -1085,6 +1109,8 @@ def cmd_inventory(args: argparse.Namespace) -> int:
 
 
 def render_dashboard(root: Path, mode: str = "full", clear: bool = False) -> None:
+    """Render the unified status surface at compact or full detail."""
+
     if clear:
         clear_screen()
     mode = mode if mode in {"compact", "full"} else "full"
@@ -1117,6 +1143,8 @@ def render_dashboard(root: Path, mode: str = "full", clear: bool = False) -> Non
 
 
 def cmd_dashboard(args: argparse.Namespace) -> int:
+    """Render the compatibility dashboard once or on a refresh loop."""
+
     root = repo_root()
     interval = max(1, int(args.interval))
     while True:
@@ -1188,6 +1216,8 @@ def cmd_overview(args: argparse.Namespace) -> int:
 
 
 def render_rich_tui(root: Path) -> bool:
+    """Render the optional Rich UI and report whether Rich was available."""
+
     try:
         from rich.console import Console
         from rich.panel import Panel
@@ -1230,6 +1260,8 @@ def render_rich_tui(root: Path) -> bool:
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
+    """Open the optional TUI or fall back to the compact text dashboard."""
+
     root = repo_root()
     if render_rich_tui(root):
         return 0
@@ -1241,6 +1273,8 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
 
 def cmd_next(args: argparse.Namespace) -> int:
+    """Print the single highest-priority next action for the project."""
+
     root = repo_root()
     cfg = load_config(root)
     action = next_action(root, cfg)
@@ -1265,7 +1299,11 @@ def cmd_next(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# Resumable guided-setup orchestration.  Each step persists progress before
+# work begins so interruption never falsely records an action as complete.
 def choose_setup_mode(args: argparse.Namespace, state: dict[str, Any] | None) -> tuple[str, str]:
+    """Resolve setup mode and preset from arguments, saved state, or a prompt."""
+
     requested_mode = getattr(args, "mode", None)
     requested_preset = getattr(args, "preset", None)
     if requested_mode:
@@ -1314,11 +1352,15 @@ def choose_setup_mode(args: argparse.Namespace, state: dict[str, Any] | None) ->
 
 
 def begin_setup_step(root: Path, state: dict[str, Any], step: str, detail: str = "") -> None:
+    """Persist a setup stage as pending before attempting its work."""
+
     mark_setup_step(state, step, "pending", detail)
     save_setup_state(root, state)
 
 
 def setup_argument_error(args: argparse.Namespace, mode: str) -> str | None:
+    """Reject option combinations that cross the selected setup boundary."""
+
     github_values = [
         getattr(args, "deploy_role_arn", None),
         getattr(args, "plan_role_arn", None),
@@ -1353,6 +1395,8 @@ def prompt_secret(label: str) -> str:
 
 
 def setup_dependency_status() -> dict[str, bool]:
+    """Return local availability for tools used across setup modes."""
+
     return {tool: command_exists(tool) for tool in ("git", "terraform", "aws", "gh")}
 
 
@@ -1381,6 +1425,8 @@ def print_setup_dependencies(mode: str, statuses: dict[str, bool]) -> None:
 
 
 def write_setup_config_change(root: Path, cfg: dict[str, Any], description: str) -> None:
+    """Snapshot an existing config before persisting a guided-setup change."""
+
     if config_path(root).exists():
         snapshot_before_change(root, "setup", description)
     write_config(root, cfg)
@@ -1388,6 +1434,8 @@ def write_setup_config_change(root: Path, cfg: dict[str, Any], description: str)
 
 
 def create_setup_config(root: Path, state: dict[str, Any], interactive: bool) -> dict[str, Any] | None:
+    """Create or reuse the local source configuration for guided setup."""
+
     if config_path(root).exists():
         return load_config(root)
     preset_name = str(state["preset"])
@@ -1424,6 +1472,8 @@ def create_setup_config(root: Path, state: dict[str, Any], interactive: bool) ->
 
 
 def validate_setup_image(cfg: dict[str, Any], image_uri: str) -> list[Check]:
+    """Apply production image preflight rules during guided setup."""
+
     return collect_image_preflight_checks(cfg, image_uri=image_uri, env_name="prod")
 
 
@@ -1433,6 +1483,12 @@ def configure_setup_image(
     image_uri: str | None,
     interactive: bool,
 ) -> tuple[dict[str, Any], bool]:
+    """Resolve, validate, and optionally persist the setup image choice.
+
+    The boolean result distinguishes invalid user input from a valid decision
+    to defer image configuration until a later setup run.
+    """
+
     current = str(cfg.get("lambda_image_uri", ""))
     if current and is_immutable_image(current) and not image_uri:
         print(ok("Immutable image already configured: ") + current)
@@ -1484,6 +1540,8 @@ def configure_setup_backend(
     args: argparse.Namespace,
     interactive: bool,
 ) -> tuple[dict[str, Any], bool]:
+    """Resolve backend names and persist them without creating AWS resources."""
+
     current_bucket = str(cfg["backend"]["bucket"])
     requested_bucket = getattr(args, "backend_bucket", None)
     requested_region = getattr(args, "backend_region", None)
@@ -1548,6 +1606,8 @@ def configure_setup_backend(
 
 
 def setup_aws_identity(root: Path, mode: str) -> Check | None:
+    """Inspect AWS identity only for setup modes that need cloud context."""
+
     if not setup_profile(mode)["cloud_required"]:
         return None
     if not command_exists("aws"):
@@ -1569,6 +1629,8 @@ def setup_backend_resource_checks(
     mode: str,
     identity: Check | None,
 ) -> list[Check]:
+    """Check configured backend resources without creating or changing them."""
+
     if not setup_profile(mode)["cloud_required"]:
         return []
     bucket = str(cfg["backend"]["bucket"])
@@ -1628,6 +1690,12 @@ def setup_github_connection(
     interactive: bool,
     mode: str,
 ) -> tuple[list[Check], bool]:
+    """Inspect GitHub and optionally apply explicitly authorized setup.
+
+    The boolean result signals an attempted mutation failure, distinct from
+    ordinary readiness gaps that can safely be resumed later.
+    """
+
     if not setup_profile(mode)["cloud_required"]:
         print(info("Step 7/9 - GitHub repository / OIDC: not required in demo mode."))
         return [], False
@@ -1691,6 +1759,8 @@ def setup_github_connection(
 
 
 def save_reconciled_setup(root: Path, state: dict[str, Any], stages: list[SetupStage]) -> None:
+    """Persist observable stage results and the next resume point."""
+
     for stage in stages:
         mark_setup_step(state, stage.id, stage.status, stage.detail)
     pending = first_pending_stage(stages)
@@ -1699,6 +1769,8 @@ def save_reconciled_setup(root: Path, state: dict[str, Any], stages: list[SetupS
 
 
 def print_setup_summary(state: dict[str, Any], stages: list[SetupStage]) -> None:
+    """Present required-stage progress and the exact resume command."""
+
     labels = {"complete": "Complete", "pending": "Action needed", "not-required": "Not required"}
     rows = [
         [f"{index}/9", stage.title, labels[stage.status], stage.detail]
@@ -1729,6 +1801,12 @@ def print_setup_summary(state: dict[str, Any], stages: list[SetupStage]) -> None
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
+    """Run or resume guided setup without starting a cloud deployment.
+
+    GitHub mutation requires ``--apply-github`` or interactive confirmation,
+    while AWS calls in this workflow remain read-only inspections.
+    """
+
     root = repo_root()
     cfg = load_config(root)
     context = project_context(root, cfg)
@@ -1950,6 +2028,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     return cmd_setup(args)
 
 
+# Release-criteria and evidence helpers return serializable dictionaries rather
+# than terminal-specific objects so the same facts can feed JSON and tables.
 def file_exists_check(root: Path, label: str, path: str) -> dict[str, str]:
     full_path = root / path
     return {
@@ -2021,6 +2101,8 @@ def evidence_file_checks(evidence_dir: Path, required_files: list[str]) -> list[
 
 
 def v1_criteria_payload(root: Path, evidence_dir: Path | None = None) -> dict[str, Any]:
+    """Evaluate source, test, and evidence requirements for stable release."""
+
     if evidence_dir is None:
         evidence_dir = root / PRODUCTION_EVIDENCE_DIR / f"v{VERSION}"
     elif not evidence_dir.is_absolute():
@@ -2279,6 +2361,8 @@ def print_v1_criteria(payload: dict[str, Any]) -> None:
 
 
 def cmd_criteria(args: argparse.Namespace) -> int:
+    """Show stable-release criteria and optionally enforce them via exit code."""
+
     root = repo_root()
     evidence_arg = getattr(args, "evidence_dir", None)
     payload = v1_criteria_payload(root, Path(evidence_arg) if evidence_arg else None)
@@ -2292,6 +2376,8 @@ def cmd_criteria(args: argparse.Namespace) -> int:
 
 
 def terraform_validate_evidence(root: Path) -> dict[str, Any]:
+    """Capture Terraform validation as bounded release evidence."""
+
     if not command_exists("terraform"):
         return {"available": False, "returncode": None, "detail": "`terraform` not found on PATH."}
     if missing_project_files(root):
@@ -2305,6 +2391,8 @@ def terraform_validate_evidence(root: Path) -> dict[str, Any]:
 
 
 def collect_rc_evidence(root: Path, output_dir: Path) -> dict[str, Any]:
+    """Write a deterministic local release-candidate evidence bundle."""
+
     cfg = load_config(root)
     checks = collect_checks(root, cfg, deep=False)
     if not output_dir.is_absolute():
@@ -2343,6 +2431,8 @@ def collect_rc_evidence(root: Path, output_dir: Path) -> dict[str, Any]:
 
 
 def cmd_evidence(args: argparse.Namespace) -> int:
+    """Validate evidence arguments and collect the requested local bundle."""
+
     command = getattr(args, "evidence_command", None)
     if command != "collect":
         print(fail("Usage: devsecops evidence collect --rc"))
@@ -2362,7 +2452,10 @@ def cmd_evidence(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# Configuration, policy composition, reporting, and local snapshot commands.
 def cmd_validate_config(args: argparse.Namespace) -> int:
+    """Validate configuration and apply strict warning semantics when requested."""
+
     cfg = load_config(repo_root())
     checks = validate_config(cfg)
     output_format = getattr(args, "format", "human")
@@ -2375,6 +2468,8 @@ def cmd_validate_config(args: argparse.Namespace) -> int:
 
 
 def cmd_set(args: argparse.Namespace) -> int:
+    """Set one allowlisted configuration key after taking a snapshot."""
+
     root = repo_root()
     cfg = load_config(root)
     if args.key not in CONFIG_SET_PATHS:
@@ -2399,6 +2494,8 @@ def cmd_set(args: argparse.Namespace) -> int:
 
 
 def apply_preset(root: Path, name: str, render: bool = False) -> int:
+    """Apply policy defaults while preserving project identity and backend."""
+
     if name not in PRESETS:
         print(fail("Unknown preset: ") + name)
         print("Available presets: " + ", ".join(PRESET_ORDER))
@@ -2416,6 +2513,8 @@ def apply_preset(root: Path, name: str, render: bool = False) -> int:
 
 
 def cmd_preset(args: argparse.Namespace) -> int:
+    """Dispatch preset list, show, apply, and compatibility forms."""
+
     command = args.command
     name = args.name
     if command is None:
@@ -2456,6 +2555,8 @@ def compose_summary_rows(cfg: dict[str, Any]) -> list[list[str]]:
 
 
 def cmd_compose(args: argparse.Namespace) -> int:
+    """Interactively compose controls, then regenerate owned local artifacts."""
+
     root = repo_root()
     current = load_config(root)
     draw_box(
@@ -2505,6 +2606,8 @@ def cmd_compose(args: argparse.Namespace) -> int:
 
 
 def cmd_report(args: argparse.Namespace) -> int:
+    """Generate a readiness or audit report under snapshot protection."""
+
     root = repo_root()
     cfg = load_config(root)
     checks = collect_checks(root, cfg, deep=args.deep)
@@ -2527,6 +2630,8 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 
 def cmd_github_setup(args: argparse.Namespace) -> int:
+    """Print, write, or explicitly apply the GitHub repository setup helper."""
+
     root = repo_root()
     cfg = load_config(root)
     if args.apply:
@@ -2548,6 +2653,8 @@ def cmd_github_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_snapshots(args: argparse.Namespace) -> int:
+    """List local snapshots and optionally inspect one snapshot's drift."""
+
     root = repo_root()
     snapshots = print_snapshot_list(root)
     if args.show:
@@ -2564,6 +2671,8 @@ def cmd_snapshots(args: argparse.Namespace) -> int:
 
 
 def cmd_rollback(args: argparse.Namespace) -> int:
+    """Restore only CLI-owned local files from a confirmed snapshot."""
+
     root = repo_root()
     target = args.to
     if args.last or not target:
@@ -2596,6 +2705,8 @@ def cmd_rollback(args: argparse.Namespace) -> int:
 
 
 def cmd_gh_doctor(args: argparse.Namespace) -> int:
+    """Run repository-variable and secret-presence diagnostics through ``gh``."""
+
     root = repo_root()
     cfg = load_config(root)
     checks = collect_github_checks(root, cfg)
@@ -2609,6 +2720,8 @@ def cmd_gh_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_gh_status(args: argparse.Namespace) -> int:
+    """Show recent Actions runs with failed jobs, steps, and remediation."""
+
     status = collect_github_actions_status(repo_root(), limit=args.limit)
     output_format = getattr(args, "format", "human")
     if status.error:
@@ -2673,6 +2786,9 @@ def cmd_gh_status(args: argparse.Namespace) -> int:
     return EXIT_VALIDATION_FAILED if getattr(args, "strict", False) and status.failed_jobs else EXIT_OK
 
 
+# Production deployment is intentionally centralized behind a protected GitHub
+# workflow.  Local handlers validate intent, dispatch an exact image, and keep
+# non-secret correlation metadata; they never run Terraform apply directly.
 PRODUCTION_DEPLOYMENT_POLICY_CHECKS = {
     "Lambda image immutability policy",
     "Production CORS policy",
@@ -2709,6 +2825,8 @@ def production_deployment_preflight_checks(
     active_image_uri: str,
     active_image_error: str | None,
 ) -> list[Check]:
+    """Assemble every local and provider gate required before production deploy."""
+
     checks: list[Check] = []
     config_exists = config_path(root).exists()
     checks.append(
@@ -2844,6 +2962,8 @@ def rollback_deployment_preflight_checks(
     active_image_uri: str,
     active_image_error: str | None,
 ) -> list[Check]:
+    """Validate an explicit rollback target while tolerating desired-state drift."""
+
     workflow_exists = (root / DEPLOYMENT_WORKFLOW_PATH).exists()
     checks = [
         Check(
@@ -2893,6 +3013,8 @@ def resolve_deployment_run(
     root: Path,
     run_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, str] | None, str | None]:
+    """Resolve and verify a deployment run from an id, journal, or discovery."""
+
     record = latest_deployment(root, run_id) if run_id else latest_deployment(root)
     selected_run_id = str(run_id or (record or {}).get("run_id") or "")
     if selected_run_id:
@@ -2928,6 +3050,8 @@ def resolve_dispatched_run(
     operation: str,
     attempts: int = 8,
 ) -> tuple[str, str]:
+    """Correlate a dispatch with its new Actions run, retrying delayed listings."""
+
     run_id, run_url = parse_run_url(output)
     if run_id:
         return run_id, run_url
@@ -2943,6 +3067,8 @@ def resolve_dispatched_run(
 
 
 def confirm_cloud_deployment(operation: str) -> bool:
+    """Require an operation-specific phrase before protected cloud mutation."""
+
     expected = DEPLOYMENT_ENVIRONMENT if operation == "deploy" else "rollback"
     try:
         answer = input(f"Type {expected} to dispatch this {operation} workflow: ").strip().lower()
@@ -2957,6 +3083,8 @@ def print_deployment_intent(
     previous_image_uri: str,
     source_run_id: str = "",
 ) -> None:
+    """Show the exact protected ref, image transition, and underlying command."""
+
     title = "Production Deployment" if operation == "deploy" else "Production Rollback"
     lines = [
         f"Operation: {operation}",
@@ -2983,6 +3111,12 @@ def dispatch_cloud_deployment(
     watch: bool,
     interval: int,
 ) -> int:
+    """Recheck concurrency, dispatch the workflow, journal it, and optionally watch.
+
+    The production lane is checked again after confirmation to close the race
+    between initial preflight and workflow dispatch.
+    """
+
     current_runs, current_runs_error = list_deployment_runs(root)
     if current_runs_error:
         print(fail("Could not recheck the production deployment lane: ") + current_runs_error)
@@ -3050,6 +3184,8 @@ def dispatch_cloud_deployment(
 
 
 def cmd_deploy_prod(args: argparse.Namespace) -> int:
+    """Preflight and optionally dispatch an exact-image production deployment."""
+
     root = repo_root()
     cfg = load_config(root)
     if getattr(args, "interval", 5) < 3:
@@ -3093,6 +3229,8 @@ def cmd_deploy_prod(args: argparse.Namespace) -> int:
 
 
 def cmd_deploy_rollback(args: argparse.Namespace) -> int:
+    """Resolve, preflight, and optionally dispatch a production image rollback."""
+
     root = repo_root()
     cfg = load_config(root)
     if getattr(args, "interval", 5) < 3:
@@ -3147,6 +3285,8 @@ def cmd_deploy_rollback(args: argparse.Namespace) -> int:
 
 
 def deployment_operation_from_run(run: dict[str, Any], record: dict[str, str] | None) -> str:
+    """Infer deployment intent from trusted local metadata or workflow title."""
+
     if record and record.get("operation"):
         return record["operation"]
     title = str(run.get("displayTitle") or "").lower()
@@ -3164,6 +3304,8 @@ def emit_deployment_status(
     active_image_error: str | None,
     output_format: str,
 ) -> None:
+    """Render one stable deployment status in JSON, compact, or human form."""
+
     payload = deployment_status_payload(run, record, active_image_uri)
     if output_format == "json":
         if active_image_error:
@@ -3217,6 +3359,8 @@ def emit_deployment_status(
 
 
 def cmd_deploy_status(args: argparse.Namespace) -> int:
+    """Resolve, optionally watch, and report a protected deployment run."""
+
     root = repo_root()
     interval = getattr(args, "interval", 5)
     output_format = getattr(args, "format", "human")
@@ -3284,6 +3428,8 @@ def cmd_deploy_status(args: argparse.Namespace) -> int:
 
 
 def cmd_deploy_logs(args: argparse.Namespace) -> int:
+    """Stream full or failed-only logs for a verified deployment run."""
+
     root = repo_root()
     run, record, error = resolve_deployment_run(root, getattr(args, "run_id", None))
     if error:
@@ -3328,6 +3474,8 @@ def cmd_deploy_logs(args: argparse.Namespace) -> int:
 
 
 def cmd_deploy(args: argparse.Namespace) -> int:
+    """Dispatch the grouped deployment command to its operation handler."""
+
     command = getattr(args, "deploy_command", None) or "status"
     if command == "prod":
         return cmd_deploy_prod(args)
@@ -3343,6 +3491,8 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
 
 def cmd_branch_doctor(args: argparse.Namespace) -> int:
+    """Inspect deployment-branch protection and required checks."""
+
     checks = collect_branch_checks(repo_root(), branch=args.branch)
     emit_check_output(
         "Branch Protection",
@@ -3354,6 +3504,8 @@ def cmd_branch_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
+    """Dispatch scoped diagnostics or aggregate all provider check sets."""
+
     command = getattr(args, "doctor_command", None) or "local"
     if command == "github":
         return cmd_gh_doctor(args)
@@ -3391,6 +3543,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def run_init(root: Path, force: bool = False, defaults: bool = False, allow_cancel: bool = False) -> int:
+    """Run the legacy interactive configuration initializer safely."""
+
     current = load_config(root)
     path = config_path(root)
     try:
@@ -3492,10 +3646,14 @@ def run_init(root: Path, force: bool = False, defaults: bool = False, allow_canc
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    """Adapt parsed legacy init arguments to the reusable initializer."""
+
     return run_init(repo_root(), force=args.force, defaults=args.defaults)
 
 
 def cmd_preflight(args: argparse.Namespace) -> int:
+    """Validate the selected image and emit the requested output contract."""
+
     root = repo_root()
     cfg = load_config(root)
     checks = collect_image_preflight_checks(
@@ -3517,6 +3675,8 @@ def cmd_preflight(args: argparse.Namespace) -> int:
 
 
 def dry_run_config(root: Path, preset_name: str, image_uri: str | None = None) -> tuple[dict[str, Any], str]:
+    """Resolve an in-memory config for a no-write first-success preview."""
+
     if config_path(root).exists():
         cfg = load_config(root)
         source = str(CONFIG_FILE)
@@ -3529,6 +3689,8 @@ def dry_run_config(root: Path, preset_name: str, image_uri: str | None = None) -
 
 
 def cmd_dry_run(args: argparse.Namespace) -> int:
+    """Preview generated files and readiness without filesystem or cloud writes."""
+
     root = repo_root()
     env_name = getattr(args, "environment", "prod")
     cfg, source = dry_run_config(root, getattr(args, "preset", "balanced"), getattr(args, "image_uri", None))
@@ -3577,6 +3739,8 @@ def print_render_plan(root: Path, outputs: dict[Path, str], title: str = "Deploy
 
 
 def run_render(root: Path, snapshot: bool = True, dry_run: bool = False) -> int:
+    """Generate all CLI-owned artifacts, optionally as a no-write plan."""
+
     cfg = load_config(root)
     outputs = render_outputs(root, cfg)
     if dry_run:
@@ -3599,10 +3763,14 @@ def run_render(root: Path, snapshot: bool = True, dry_run: bool = False) -> int:
 
 
 def cmd_render(args: argparse.Namespace) -> int:
+    """Adapt generate/render command arguments to the shared renderer."""
+
     return run_render(repo_root(), dry_run=getattr(args, "dry_run", False))
 
 
 def cmd_readiness(args: argparse.Namespace) -> int:
+    """Emit readiness details and enforce optional strict scoring."""
+
     root = repo_root()
     cfg = load_config(root)
     checks = collect_checks(root, cfg, deep=getattr(args, "deep", False))
@@ -3619,6 +3787,8 @@ def cmd_readiness(args: argparse.Namespace) -> int:
 
 
 def cmd_health(args: argparse.Namespace) -> int:
+    """Resolve and probe the workload health endpoint, optionally with SigV4."""
+
     root = repo_root()
     cfg = load_config(root)
     checks = collect_health_checks(
@@ -3643,6 +3813,8 @@ def cmd_health(args: argparse.Namespace) -> int:
 
 
 def cmd_aws_doctor(args: argparse.Namespace) -> int:
+    """Run read-only AWS identity, backend, and workload diagnostics."""
+
     root = repo_root()
     cfg = load_config(root)
     checks = collect_aws_checks(root, cfg, env_name=args.environment)
@@ -3656,6 +3828,8 @@ def cmd_aws_doctor(args: argparse.Namespace) -> int:
 
 
 def cmd_aws_outputs(args: argparse.Namespace) -> int:
+    """Inspect deployed AWS output values without changing resources."""
+
     root = repo_root()
     cfg = load_config(root)
     outputs, checks = inspect_aws_outputs(root, cfg, env_name=getattr(args, "environment", "prod"))
@@ -3688,6 +3862,8 @@ def cmd_aws_outputs(args: argparse.Namespace) -> int:
 
 
 def cmd_aws(args: argparse.Namespace) -> int:
+    """Dispatch the grouped AWS command."""
+
     command = getattr(args, "aws_command", None) or "outputs"
     if command == "doctor":
         return cmd_aws_doctor(args)
@@ -3699,6 +3875,8 @@ def cmd_aws(args: argparse.Namespace) -> int:
 
 
 def cmd_github(args: argparse.Namespace) -> int:
+    """Dispatch the grouped GitHub command."""
+
     command = getattr(args, "github_command", None) or "status"
     if command == "setup":
         return cmd_github_setup(args)
@@ -3714,6 +3892,8 @@ def cmd_github(args: argparse.Namespace) -> int:
 
 
 def cmd_terraform(args: argparse.Namespace) -> int:
+    """Dispatch Terraform planning or backend bootstrap operations."""
+
     command = getattr(args, "terraform_command", None)
     if command == "plan":
         return cmd_plan(args)
@@ -3724,6 +3904,8 @@ def cmd_terraform(args: argparse.Namespace) -> int:
 
 
 def cmd_snapshot(args: argparse.Namespace) -> int:
+    """Dispatch snapshot list, show, or local restore operations."""
+
     root = repo_root()
     command = getattr(args, "snapshot_command", None) or "list"
     output_format = getattr(args, "format", "human")
@@ -3763,6 +3945,8 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
 
 def run_plan(root: Path, env_name: str, no_init: bool = False, create_workspace: bool = False) -> int:
+    """Initialize Terraform, select the environment workspace, and run plan."""
+
     cfg = load_config(root)
     if env_name not in cfg["environments"]:
         print(fail("Unknown environment: ") + env_name)
@@ -3800,6 +3984,8 @@ def run_plan(root: Path, env_name: str, no_init: bool = False, create_workspace:
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
+    """Adapt parsed plan arguments to the shared Terraform plan flow."""
+
     return run_plan(
         repo_root(),
         args.environment,
@@ -3809,6 +3995,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def cmd_bootstrap(args: argparse.Namespace) -> int:
+    """Plan or explicitly apply the separate remote-state bootstrap stack."""
+
     root = repo_root()
     cfg = load_config(root)
     bucket = cfg["backend"]["bucket"]
@@ -3840,6 +4028,8 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
 
 
 def explain_text(topic: str, cfg: dict[str, Any] | None = None) -> list[str]:
+    """Return human guidance for a control topic or the full catalog."""
+
     cfg = cfg or default_config()
     normalized = normalize_control_topic(topic)
     if normalized == "all":
@@ -3868,11 +4058,15 @@ def explain_text(topic: str, cfg: dict[str, Any] | None = None) -> list[str]:
 
 
 def cmd_explain(args: argparse.Namespace) -> int:
+    """Print security-control guidance for the requested topic."""
+
     draw_box(f"Explain: {args.topic}", explain_text(args.topic, load_config(repo_root())))
     return 0
 
 
 def cmd_config(args: argparse.Namespace) -> int:
+    """Dispatch grouped configuration read and write operations."""
+
     root = repo_root()
     command = getattr(args, "config_command", None) or "show"
 
@@ -3945,7 +4139,11 @@ def cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+# Interactive menu routing reuses command handlers rather than reimplementing
+# operations, preserving the same validation and mutation boundaries as CLI use.
 def menu_status(root: Path, cfg: dict[str, Any], checks: list[Check] | None = None) -> list[str]:
+    """Build the compact project summary displayed by interactive menus."""
+
     checks = checks or collect_checks(root, cfg, deep=False)
     breakdown_score = overall_breakdown_score(checks)
     image_state = "configured" if cfg["lambda_image_uri"] else "missing"
@@ -4013,6 +4211,8 @@ def open_menu_section(title: str, handler: Any, *args: Any) -> None:
 
 
 def continue_setup_destination(action: dict[str, Any]) -> str:
+    """Map the shared next-action contract to an interactive menu destination."""
+
     action_id = str(action["id"])
     command = str(action["command"])
     if action_id == "missing_project_files":
@@ -4035,6 +4235,8 @@ def continue_setup_destination(action: dict[str, Any]) -> str:
 
 
 def menu_continue_setup(root: Path) -> None:
+    """Route the operator to the menu section that resolves the current gap."""
+
     action = next_action(root, load_config(root))
     destination = continue_setup_destination(action)
     if destination == "setup":
@@ -4091,6 +4293,8 @@ def show_production_rollback_command() -> None:
 
 
 def menu_deploy_hub() -> None:
+    """Present read-only deployment operations and copyable mutation commands."""
+
     clear_screen()
     draw_box(
         "Deploy",
@@ -4138,6 +4342,8 @@ def menu_deploy_hub() -> None:
 
 
 def menu_config_hub(root: Path) -> None:
+    """Present local configuration and policy-composition operations."""
+
     clear_screen()
     draw_box("Configuration", ["Inspect, validate, and edit local source configuration."])
     print()
@@ -4192,6 +4398,8 @@ def menu_readiness_section(root: Path) -> None:
 
 
 def menu_doctor_hub(root: Path) -> None:
+    """Present scoped diagnostic commands without changing provider state."""
+
     clear_screen()
     draw_box("Diagnose Problems", ["Check local setup, integrations, deployments, or all areas together."])
     print()
@@ -4236,6 +4444,8 @@ def menu_doctor_hub(root: Path) -> None:
 
 
 def menu_terraform_hub(root: Path) -> None:
+    """Present Terraform plan and backend-bootstrap entry points."""
+
     clear_screen()
     draw_box("Terraform", ["Plan environments or inspect backend bootstrap changes."])
     print()
@@ -4266,6 +4476,8 @@ def menu_terraform_hub(root: Path) -> None:
 
 
 def menu_github_hub() -> None:
+    """Present GitHub setup and read-only repository diagnostics."""
+
     clear_screen()
     draw_box("GitHub Connection", ["Prepare repository settings and inspect GitHub readiness."])
     print()
@@ -4330,6 +4542,8 @@ def menu_reference_hub() -> None:
 
 
 def menu_generated_files_hub(root: Path) -> None:
+    """Present preview and generation paths for CLI-owned artifacts."""
+
     clear_screen()
     draw_box(
         "Deployment Files",
@@ -4356,6 +4570,8 @@ def menu_generated_files_hub(root: Path) -> None:
 
 
 def menu_reports_hub() -> None:
+    """Present readiness, audit, and release-evidence report operations."""
+
     clear_screen()
     draw_box(
         "Reports and Release Evidence",
@@ -4385,6 +4601,8 @@ def menu_reports_hub() -> None:
 
 
 def menu_advanced_hub(root: Path) -> None:
+    """Group lower-frequency provider, evidence, and recovery tools."""
+
     clear_screen()
     draw_box(
         "Advanced",
@@ -4419,6 +4637,8 @@ def menu_advanced_hub(root: Path) -> None:
 
 
 def menu_rollback_section(root: Path) -> None:
+    """Inspect and optionally restore local snapshots with confirmation."""
+
     clear_screen()
     draw_box(
         "Snapshots / Rollback",
@@ -4471,6 +4691,8 @@ def menu_rollback_section(root: Path) -> None:
 
 
 def cmd_menu(args: argparse.Namespace) -> int:
+    """Run the interactive menu loop until the operator exits."""
+
     root = repo_root()
     while True:
         clear_screen()
@@ -4540,6 +4762,8 @@ def should_print_next_postlude(args: argparse.Namespace) -> bool:
 
 
 def print_next_postlude() -> None:
+    """Append the shared next action after eligible human-readable commands."""
+
     root = repo_root()
     print()
     print_next_action(next_action(root, load_config(root)), title="Recommended Next Step")
@@ -4547,6 +4771,13 @@ def print_next_postlude() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse arguments, run one handler, and translate boundary errors to exits.
+
+    Expected domain failures are handled by command functions.  This final
+    boundary keeps interrupts, corrupt local state, migration failures, and
+    truly unexpected exceptions from leaking tracebacks in normal CLI use.
+    """
+
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

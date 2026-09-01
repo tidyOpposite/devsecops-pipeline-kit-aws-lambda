@@ -1,4 +1,9 @@
-"""Argument parser construction for the public CLI contract."""
+"""Argument parser construction for the public CLI contract.
+
+Parser definitions own command names, flags, defaults, help text, and dispatch
+targets.  Runtime behavior stays in the supplied handler registry so this
+module can describe the interface without importing the orchestration module.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +21,8 @@ COMPLETION_SHELLS = ("bash", "zsh", "fish")
 
 
 def _help_epilog(examples: tuple[str, ...], side_effects: tuple[str, ...]) -> str:
+    """Build consistent examples and explicit mutation boundaries for help."""
+
     example_lines = "\n".join(f"  {line}" for line in examples)
     effect_lines = "\n".join(
         textwrap.fill(line, width=78, initial_indent="  ", subsequent_indent="  ")
@@ -25,6 +32,14 @@ def _help_epilog(examples: tuple[str, ...], side_effects: tuple[str, ...]) -> st
 
 
 def build_parser(handlers: Any) -> argparse.ArgumentParser:
+    """Build the complete parser and bind commands to ``handlers`` methods.
+
+    Stable, compatibility, and hidden experimental commands share one parser.
+    Hidden help entries remain callable to preserve the published inventory and
+    legacy scripts while the primary help stays focused on the first-success
+    workflow.
+    """
+
     parser = argparse.ArgumentParser(
         prog="devsecops",
         description="CLI product for setting up, validating, deploying, and operating a secure AWS Lambda delivery pipeline.",
@@ -82,6 +97,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     )
     parser.set_defaults(func=handlers.cmd_overview)
 
+    # Primary product surfaces appear first in top-level help.
     menu_parser = subparsers.add_parser(
         "menu",
         help="Open the simplified interactive product menu.",
@@ -132,6 +148,8 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     next_parser.add_argument("--format", choices=["human", "json"], default="human", help="Output mode.")
     next_parser.set_defaults(func=handlers.cmd_next)
 
+    # Guided setup declares its cloud-change boundary in help because ``--yes``
+    # must never be confused with authorization to mutate GitHub or AWS.
     setup_parser = subparsers.add_parser(
         "setup",
         help="Start or resume the guided project setup state machine.",
@@ -204,6 +222,8 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     init_parser.add_argument("--defaults", action="store_true", help="Write default config without prompts.")
     init_parser.set_defaults(func=handlers.cmd_init)
 
+    # Diagnostics share output and strictness conventions, while each nested
+    # scope supplies only the provider-specific arguments it needs.
     doctor_parser = subparsers.add_parser(
         "doctor",
         help="Run local, GitHub, AWS, branch, or Actions diagnostics.",
@@ -599,6 +619,8 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     explain_parser.add_argument("topic", nargs="?", default="all")
     explain_parser.set_defaults(func=handlers.cmd_explain)
 
+    # Configuration read and write operations live under one stable group;
+    # compatibility aliases are registered elsewhere in this same parser.
     config_parser = subparsers.add_parser(
         "config",
         help="Manage local source config.",
@@ -671,11 +693,15 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     config_schema_parser = config_subparsers.add_parser("schema", help="Print the local config schema contract.")
     config_schema_parser.add_argument("--format", choices=["json", "markdown"], default="json", help="Schema output format.")
     config_schema_parser.set_defaults(func=handlers.cmd_config)
+    # argparse has no public API for hiding individual already-registered
+    # choices, so filter its help actions without removing command dispatch.
     for parser_choices in (subparsers, config_subparsers):
         if hasattr(parser_choices, "_choices_actions"):
             parser_choices._choices_actions = [  # type: ignore[attr-defined]
                 choice for choice in parser_choices._choices_actions if getattr(choice, "help", None) != argparse.SUPPRESS
             ]
+    # Keep the curated first-success order independent from registration order,
+    # which is organized by implementation domain above.
     primary_order = [
         "menu",
         "setup",

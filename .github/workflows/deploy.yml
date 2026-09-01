@@ -1,6 +1,8 @@
 name: Secure Serverless DevSecOps Pipeline
 run-name: DevSecOps ${{ github.event_name == 'workflow_dispatch' && format('{0} {1}', inputs.mode, inputs.environment) || github.event_name }}
 
+# Pull requests receive validation and a plan; state-changing deploy and rollback
+# modes are available only through the explicitly parameterized manual trigger.
 on:
   pull_request:
     branches:
@@ -32,8 +34,11 @@ on:
         type: string
 
 permissions:
+  # Individual jobs opt into OIDC or pull-request writes only when required.
   contents: read
 
+# Serialize operations per Terraform workspace and never cancel an apply or
+# rollback that may already be changing remote infrastructure.
 concurrency:
   group: terraform-${{ github.event.inputs.environment || 'dev' }}
   cancel-in-progress: false
@@ -45,6 +50,8 @@ env:
   TF_WORKING_DIR: terraform
   DEPLOY_ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
   DEPLOY_MODE: ${{ github.event.inputs.mode || '' }}
+  # An explicit dispatch value takes precedence so the approved run remains
+  # bound to the exact image selected by its caller.
   DISPATCH_IMAGE_URI: ${{ github.event.inputs.image_uri || '' }}
   LAMBDA_IMAGE_URI: ${{ github.event.inputs.image_uri || vars.LAMBDA_IMAGE_URI || '' }}
   API_AUTHORIZATION_TYPE: ${{ vars.API_AUTHORIZATION_TYPE || 'AWS_IAM' }}
@@ -54,6 +61,7 @@ env:
 
 jobs:
   security-and-validate:
+    # This credential-free gate must succeed before any job can request AWS access.
     name: Security and Terraform Validate
     runs-on: ubuntu-latest
 
@@ -92,6 +100,8 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     needs: security-and-validate
+    # Forked pull requests cannot enter an OIDC-enabled job; maintainers can run
+    # their plans separately after reviewing untrusted changes.
     if: (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'plan')
     permissions:
       contents: read
@@ -104,6 +114,7 @@ jobs:
         with:
           persist-credentials: false
 
+      # Fail closed instead of silently granting a plan the more powerful deploy role.
       - name: Require separate AWS plan role
         env:
           PLAN_ROLE_ARN: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}
@@ -150,6 +161,8 @@ jobs:
           path: ${{ env.TF_WORKING_DIR }}/tfplan.txt
           retention-days: 14
 
+      # The stable marker lets repeated runs update one bot comment instead of
+      # filling the pull request with obsolete plans.
       - name: Comment Terraform plan on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
@@ -190,7 +203,10 @@ jobs:
     name: Manual Apply, Deploy, or Roll Back Production
     runs-on: ubuntu-latest
     needs: security-and-validate
+    # Infrastructure mutation is restricted to manual production runs from main.
     if: github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'deploy' || github.event.inputs.mode == 'rollback') && github.event.inputs.environment == 'prod' && github.ref == 'refs/heads/main'
+    # The protected GitHub environment performs its approval before this job can
+    # obtain an OIDC token or read environment-scoped secrets.
     environment: ${{ vars.PROD_APPROVAL_ENVIRONMENT || 'prod' }}
     permissions:
       contents: read
@@ -206,6 +222,8 @@ jobs:
         with:
           persist-credentials: false
 
+      # Rollback always requires an explicit target, and mutable bootstrap/latest
+      # tags are rejected before AWS credentials are configured.
       - name: Require Lambda image URI
         run: |
           if [ "${DEPLOY_MODE}" = "rollback" ] && [ -z "${DISPATCH_IMAGE_URI}" ]; then
@@ -235,12 +253,15 @@ jobs:
             echo "- Image: \`${LAMBDA_IMAGE_URI}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      # Exchange GitHub's short-lived OIDC identity for the production role;
+      # no long-lived AWS access keys are stored in repository secrets.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      # Enabling the optional image scan makes its credentials and result blocking.
       - name: Require Snyk token when scan is enabled
         if: env.ENABLE_SNYK_SCAN == 'true' && env.SNYK_TOKEN == ''
         run: |
@@ -279,6 +300,8 @@ jobs:
           terraform -chdir="${TF_WORKING_DIR}" workspace select "${DEPLOY_ENVIRONMENT}" \
             || terraform -chdir="${TF_WORKING_DIR}" workspace new "${DEPLOY_ENVIRONMENT}"
 
+      # Provision foundational encryption and registry resources before applying
+      # a workload that references the selected container image.
       - name: Bootstrap KMS and ECR
         run: |
           terraform -chdir="${TF_WORKING_DIR}" apply \
@@ -290,6 +313,7 @@ jobs:
             -var="api_authorization_type=${API_AUTHORIZATION_TYPE}" \
             -var="project_name=${PROJECT_NAME}"
 
+      # Preserve the live image URI as the recovery point for any later failure.
       - name: Capture currently deployed Lambda image
         id: capture-current-image
         run: |
@@ -301,6 +325,8 @@ jobs:
           echo "function_name=${function_name}" >> "${GITHUB_OUTPUT}"
           echo "previous_image_uri=${previous_image_uri}" >> "${GITHUB_OUTPUT}"
 
+      # Pass the exact validated image into Terraform so desired state and the
+      # deployed Lambda revision remain aligned.
       - name: Terraform apply workload with configured Lambda image
         id: apply-workload
         run: |
@@ -321,6 +347,8 @@ jobs:
       - name: Wait for Lambda update
         run: aws lambda wait function-updated --function-name "${{ steps.capture-current-image.outputs.function_name }}"
 
+      # IAM-protected endpoints are signed with the temporary session credentials;
+      # explicitly public endpoints use a normal unauthenticated request.
       - name: Smoke test Lambda health endpoint
         if: env.ENABLE_HTTP_VALIDATION == 'true'
         run: |
@@ -335,6 +363,8 @@ jobs:
             curl --fail --silent --show-error --max-time 20 "${health_url}"
           fi
 
+      # The baseline scanner is unauthenticated, so it is safe and useful only for
+      # an API intentionally configured as public.
       - name: Run DAST scan with OWASP ZAP
         if: env.ENABLE_DAST == 'true' && env.API_AUTHORIZATION_TYPE == 'NONE'
         uses: zaproxy/action-baseline@7c4deb10e6261301961c86d65d54a516394f9aed # v0.14.0
@@ -350,6 +380,8 @@ jobs:
         run: |
           echo "ENABLE_DAST is true, but API_AUTHORIZATION_TYPE=${API_AUTHORIZATION_TYPE}. OWASP ZAP baseline is skipped unless the API is explicitly public."
 
+      # On any failed apply or validation, restore both the Lambda code and
+      # Terraform's recorded desired image to the captured recovery point.
       - name: Roll back Lambda image on failed deployment validation
         if: failure() && steps.capture-current-image.outputs.previous_image_uri != '' && steps.capture-current-image.outputs.previous_image_uri != 'None'
         run: |

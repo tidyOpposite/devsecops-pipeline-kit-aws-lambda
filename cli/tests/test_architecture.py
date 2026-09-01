@@ -1,3 +1,9 @@
+"""Architecture tests for the dependency direction inside ``devsecops_cli``.
+
+The suite parses imports without importing modules, so it can detect dependency
+cycles and forbidden coupling even when runtime import caching would hide them.
+"""
+
 import ast
 import unittest
 from pathlib import Path
@@ -27,6 +33,8 @@ def package_dependencies(path: Path) -> set[str]:
 
 
 class CliArchitectureTests(unittest.TestCase):
+    """Enforce a directed acyclic package graph with ``main`` at the boundary."""
+
     def test_only_entry_point_imports_main(self) -> None:
         offenders = []
         for path in PACKAGE_DIR.glob("*.py"):
@@ -45,6 +53,8 @@ class CliArchitectureTests(unittest.TestCase):
             if path.stem in modules
         }
 
+        # Repeatedly remove dependency-free modules (Kahn's algorithm).  If no
+        # module is removable, every remaining node participates in a cycle.
         remaining = {module: set(dependencies) for module, dependencies in graph.items()}
         while remaining:
             ready = {module for module, dependencies in remaining.items() if not dependencies}

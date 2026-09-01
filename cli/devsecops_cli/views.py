@@ -1,4 +1,8 @@
-"""Pure row builders shared by text, rich, and Markdown presentations."""
+"""Pure row builders shared by text, rich, and Markdown presentations.
+
+These helpers translate domain configuration into strings without printing or
+performing I/O, keeping column semantics consistent across CLI surfaces.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +21,8 @@ from .models import Control
 
 
 def env_rows(cfg: dict[str, Any]) -> list[list[str]]:
+    """Build environment rows in the configuration's stable insertion order."""
+
     rows: list[list[str]] = []
     for env_name, env_cfg in cfg["environments"].items():
         rows.append(
@@ -33,6 +39,8 @@ def env_rows(cfg: dict[str, Any]) -> list[list[str]]:
 
 
 def preset_rows() -> list[list[str]]:
+    """Summarize every preset's scanners, validation, CORS, and release gates."""
+
     rows: list[list[str]] = []
     for name in PRESET_ORDER:
         cfg = preset_config(name)
@@ -58,6 +66,8 @@ def preset_rows() -> list[list[str]]:
 
 
 def preset_detail_rows(cfg: dict[str, Any]) -> list[list[str]]:
+    """Flatten policy controls and environment settings for detail tables."""
+
     rows: list[list[str]] = [
         ["Snyk container scan", "on" if cfg["enable_snyk_scan"] else "off"],
         ["HTTP validation", "on" if cfg["enable_http_validation"] else "off"],
@@ -81,6 +91,8 @@ def preset_detail_rows(cfg: dict[str, Any]) -> list[list[str]]:
 
 
 def compact_join(items: tuple[str, ...], limit: int = 2) -> str:
+    """Join the first values and summarize any hidden remainder."""
+
     selected = list(items[:limit])
     if len(items) > limit:
         selected.append(f"+{len(items) - limit} more")
@@ -88,6 +100,8 @@ def compact_join(items: tuple[str, ...], limit: int = 2) -> str:
 
 
 def generated_behavior_summary(control: Control) -> str:
+    """Build a one-line cross-layer summary from a control definition."""
+
     parts = [
         f"Terraform: {control.terraform[0]}",
         f"GitHub: {control.github[0]}",
@@ -98,6 +112,8 @@ def generated_behavior_summary(control: Control) -> str:
 
 
 def control_rows(cfg: dict[str, Any]) -> list[list[str]]:
+    """Build control rows with configuration-derived state and behavior."""
+
     return [
         [
             control.title,

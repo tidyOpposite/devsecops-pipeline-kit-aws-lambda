@@ -44,14 +44,20 @@ class DeploymentStateError(ValueError):
 
 
 def utc_now() -> str:
+    """Return a stable, second-precision UTC timestamp for journal records."""
+
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def empty_deployment_state() -> dict[str, Any]:
+    """Build a fresh deployment-journal envelope for the current schema."""
+
     return {"schema_version": DEPLOYMENT_STATE_SCHEMA_VERSION, "deployments": []}
 
 
 def deployment_state_path(root: Path) -> Path:
+    """Return the project-local path of the non-secret deployment journal."""
+
     return root / DEPLOYMENT_STATE_FILE
 
 
@@ -76,6 +82,12 @@ def _clean_record(record: dict[str, Any]) -> dict[str, str]:
 
 
 def load_deployment_state(root: Path) -> dict[str, Any]:
+    """Load, validate, and sanitize the deployment journal.
+
+    Corrupt or unsupported state is rejected instead of guessed because an
+    incorrect previous image could lead an operator to the wrong rollback.
+    """
+
     path = deployment_state_path(root)
     if not path.exists():
         return empty_deployment_state()
@@ -102,6 +114,8 @@ def load_deployment_state(root: Path) -> dict[str, Any]:
 
 
 def save_deployment_state(root: Path, state: dict[str, Any]) -> Path:
+    """Atomically persist a bounded, owner-readable deployment history."""
+
     records = state.get("deployments")
     if not isinstance(records, list):
         raise DeploymentStateError("Deployment state field `deployments` must be a list.")
@@ -113,6 +127,8 @@ def save_deployment_state(root: Path, state: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
+        # Write beside the destination so os.replace remains atomic on the same
+        # filesystem; restrictive permissions protect operational metadata.
         temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         temporary.chmod(0o600)
         os.replace(temporary, path)
@@ -123,6 +139,8 @@ def save_deployment_state(root: Path, state: dict[str, Any]) -> Path:
 
 
 def record_deployment(root: Path, record: dict[str, Any]) -> dict[str, str]:
+    """Prepend one sanitized deployment record and persist the journal."""
+
     state = load_deployment_state(root)
     cleaned = _clean_record(record)
     records = [cleaned, *state["deployments"]]
@@ -131,6 +149,8 @@ def record_deployment(root: Path, record: dict[str, Any]) -> dict[str, str]:
 
 
 def latest_deployment(root: Path, run_id: str | None = None) -> dict[str, str] | None:
+    """Return the newest record, or the record for a specific workflow run."""
+
     records = load_deployment_state(root)["deployments"]
     if run_id is None:
         return records[0] if records else None
@@ -139,6 +159,8 @@ def latest_deployment(root: Path, run_id: str | None = None) -> dict[str, str] |
 
 
 def rollback_target(root: Path, source_run_id: str | None = None) -> tuple[str, dict[str, str] | None]:
+    """Resolve the previous image recorded for a deployment workflow run."""
+
     record = latest_deployment(root, source_run_id)
     if record is None:
         return "", None
@@ -146,6 +168,8 @@ def rollback_target(root: Path, source_run_id: str | None = None) -> tuple[str, 
 
 
 def workflow_dispatch_args(operation: str, image_uri: str) -> list[str]:
+    """Build ``gh`` arguments for the protected production workflow dispatch."""
+
     if operation not in DEPLOYMENT_OPERATIONS:
         raise ValueError(f"Unsupported deployment operation: {operation}")
     return [
@@ -164,6 +188,8 @@ def workflow_dispatch_args(operation: str, image_uri: str) -> list[str]:
 
 
 def workflow_run_list_args(limit: int = 20) -> list[str]:
+    """Build ``gh`` arguments for candidate deployment-run discovery."""
+
     return [
         "run",
         "list",
@@ -181,22 +207,32 @@ def workflow_run_list_args(limit: int = 20) -> list[str]:
 
 
 def workflow_run_view_args(run_id: str) -> list[str]:
+    """Build ``gh`` arguments for structured details of one run."""
+
     return ["run", "view", str(run_id), "--json", DEPLOYMENT_RUN_JSON_FIELDS]
 
 
 def workflow_run_log_args(run_id: str, failed_only: bool = False) -> list[str]:
+    """Build ``gh`` arguments for all logs or only failed-step logs."""
+
     return ["run", "view", str(run_id), "--log-failed" if failed_only else "--log"]
 
 
 def workflow_run_watch_args(run_id: str, interval: int = 5) -> list[str]:
+    """Build ``gh`` arguments that propagate the watched run's exit status."""
+
     return ["run", "watch", str(run_id), "--exit-status", "--interval", str(interval)]
 
 
 def display_gh_command(args: list[str]) -> str:
+    """Render a copyable shell-safe representation of a GitHub CLI command."""
+
     return shlex.join(["gh", *args])
 
 
 def parse_run_url(output: str) -> tuple[str, str]:
+    """Extract a GitHub Actions run identifier and URL from dispatch output."""
+
     match = _RUN_URL_RE.search(output or "")
     if not match:
         return "", ""
@@ -204,6 +240,12 @@ def parse_run_url(output: str) -> tuple[str, str]:
 
 
 def is_deployment_run(run: dict[str, Any]) -> bool:
+    """Return whether a GitHub run matches this CLI's deployment contract.
+
+    Event, protected branch, workflow identity, and display title are all
+    checked to avoid selecting an unrelated manual workflow run.
+    """
+
     if str(run.get("event") or "") != "workflow_dispatch":
         return False
     if str(run.get("headBranch") or "") != DEPLOYMENT_REF:
@@ -216,6 +258,8 @@ def is_deployment_run(run: dict[str, Any]) -> bool:
 
 
 def active_deployment_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter candidate runs to deployment-related work still in progress."""
+
     return [
         run
         for run in runs
@@ -232,6 +276,8 @@ def active_deployment_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def newest_deployment_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return the first valid deployment run from newest-first API results."""
+
     return next((run for run in runs if is_deployment_run(run)), None)
 
 
@@ -240,6 +286,12 @@ def select_dispatched_run(
     runs: list[dict[str, Any]],
     operation: str | None = None,
 ) -> dict[str, Any] | None:
+    """Find the newly created run by excluding the pre-dispatch snapshot.
+
+    Comparing identifiers is more reliable than timestamps when GitHub API
+    results arrive with coarse or delayed time metadata.
+    """
+
     expected_title = f"devsecops {operation} {DEPLOYMENT_ENVIRONMENT}" if operation else ""
     for run in runs:
         run_id = str(run.get("databaseId") or "")
@@ -255,6 +307,8 @@ def select_dispatched_run(
 
 
 def deployment_job_rows(run: dict[str, Any]) -> list[list[str]]:
+    """Normalize optional GitHub job objects into presentation rows."""
+
     jobs = run.get("jobs")
     if not isinstance(jobs, list):
         return []
@@ -279,6 +333,12 @@ def deployment_status_payload(
     record: dict[str, str] | None = None,
     active_image_uri: str = "",
 ) -> dict[str, Any]:
+    """Combine provider run data and local journal context into stable JSON.
+
+    Journal metadata takes precedence because it records the exact image intent
+    supplied by the CLI.  The workflow title is only a compatibility fallback.
+    """
+
     record = record or {}
     operation = record.get("operation") or ""
     if not operation:
@@ -325,6 +385,12 @@ def deployment_status_payload(
 
 
 def deployment_exit_code(run: dict[str, Any]) -> int:
+    """Map a completed unsuccessful workflow to a failing CLI exit status.
+
+    Queued and in-progress runs remain successful observations; their eventual
+    outcome is handled by the watch command rather than status inspection.
+    """
+
     status = str(run.get("status") or "")
     conclusion = str(run.get("conclusion") or "")
     if status == "completed" and conclusion not in {"success", "neutral", "skipped"}:

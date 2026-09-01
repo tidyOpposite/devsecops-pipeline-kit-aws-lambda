@@ -20,7 +20,11 @@ class ConfigMigrationError(Exception):
 
 @dataclass
 class EcrImageRef:
-    """Parsed reference to an Amazon ECR container image."""
+    """Parsed reference to an Amazon ECR container image.
+
+    Valid parser output identifies the image with either ``tag`` or ``digest``;
+    downstream AWS lookup code relies on that exclusivity.
+    """
 
     registry: str
     region: str
@@ -31,7 +35,11 @@ class EcrImageRef:
 
 @dataclass(frozen=True)
 class Control:
-    """Security control exposed by the CLI inventory and explain commands."""
+    """Immutable cross-layer description of one security control.
+
+    Each tuple describes how the same control appears in the CLI, Terraform,
+    GitHub, AWS, scanners, and retained audit evidence.
+    """
 
     id: str
     title: str
@@ -46,7 +54,11 @@ class Control:
 
 @dataclass
 class ActionsStatus:
-    """Normalized GitHub Actions status used by human and JSON renderers."""
+    """Normalized GitHub Actions status used by human and JSON renderers.
+
+    Row shapes are produced by the GitHub adapter, while ``error`` represents
+    a provider-level failure that prevented a trustworthy status view.
+    """
 
     runs: list[list[str]]
     failed_jobs: list[list[str]]
@@ -57,7 +69,12 @@ class ActionsStatus:
 
 @dataclass
 class Check:
-    """A single readiness, validation, or integration check."""
+    """A single readiness, validation, or integration observation.
+
+    Status is one of the CLI's presentation states such as ``OK``, ``WARN``,
+    ``FAIL``, or ``INFO``.  Unscored checks remain visible but do not affect
+    readiness percentages or strict-mode decisions.
+    """
 
     name: str
     status: str

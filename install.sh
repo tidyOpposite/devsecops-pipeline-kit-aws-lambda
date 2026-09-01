@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+# Release installer settings can be overridden for mirrors, pinned versions,
+# custom Python interpreters, or non-default user-local installation paths.
 REPO="${DEVSECOPS_INSTALL_REPO:-tidyOpposite/devsecops-pipeline-kit-aws-lambda}"
 COMMAND_NAME="devsecops"
 VERSION="${DEVSECOPS_VERSION:-latest}"
@@ -53,6 +55,7 @@ fail() {
   exit 1
 }
 
+# Parse options before performing network or filesystem changes.
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --version)
@@ -98,6 +101,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 command_path() {
+  # Accept either a command name on PATH or an explicit executable path.
   if command -v "$1" >/dev/null 2>&1; then
     command -v "$1"
     return 0
@@ -110,6 +114,8 @@ command_path() {
 }
 
 valid_python() {
+  # Package metadata supports Python 3.11 through 3.14; validate the actual
+  # interpreter instead of inferring compatibility from its executable name.
   "$1" - <<'PY' >/dev/null 2>&1
 import sys
 major_minor = sys.version_info[:2]
@@ -126,6 +132,8 @@ select_python() {
     return 0
   fi
 
+  # Prefer the newest explicitly supported interpreter, then accept a generic
+  # python3 only when its runtime version passes the same check.
   for candidate in python3.14 python3.13 python3.12 python3.11 python3; do
     candidate_path="$(command_path "$candidate" || true)"
     if [ -n "$candidate_path" ] && valid_python "$candidate_path"; then
@@ -137,6 +145,8 @@ select_python() {
   fail "Python 3.11, 3.12, 3.13, or 3.14 is required. Install one, then rerun this installer."
 }
 
+# Unsupported platforms receive a warning rather than an early failure because
+# POSIX-compatible environments may still complete the installation safely.
 platform="$(uname -s 2>/dev/null || printf unknown)"
 case "$platform" in
   Darwin|Linux) ;;
@@ -153,10 +163,13 @@ log "Using Python $PYTHON_VERSION at $PYTHON_BIN"
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/devsecops-install.XXXXXX")"
 cleanup() {
+  # TMP_DIR is a concrete mktemp result, never a broad or caller-supplied path.
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT INT TERM
 
+# Use the validated interpreter for HTTPS release resolution and downloads so
+# the shell script does not depend on curl, jq, or platform checksum utilities.
 release_info="$("$PYTHON_BIN" - "$REPO" "$VERSION" "$TMP_DIR" "$VERIFY_CHECKSUMS" "$HTTP_TIMEOUT" <<'PY'
 import json
 import os
@@ -192,6 +205,8 @@ else:
 
 
 def request(url: str) -> urllib.request.Request:
+    """Build a GitHub request with optional authenticated rate limits."""
+
     return urllib.request.Request(url, headers=headers)
 
 
@@ -201,6 +216,8 @@ class DeadlineExpired(Exception):
 
 @contextmanager
 def deadline(label: str):
+    """Apply an overall operation deadline where SIGALRM is available."""
+
     if not hasattr(signal, "SIGALRM"):
         yield
         return
@@ -242,6 +259,8 @@ if verify == "1" and sums_asset is None:
 
 
 def download(asset: dict[str, object]) -> pathlib.Path:
+    """Download one release asset into the installer-owned temporary directory."""
+
     name = str(asset["name"])
     url = str(asset["browser_download_url"])
     output_path = destination_path / name
@@ -267,6 +286,8 @@ print(sums_path)
 PY
 )"
 
+# The embedded resolver emits this fixed three-line protocol for simple,
+# dependency-free transfer back into the shell.
 RELEASE_TAG="$(printf '%s\n' "$release_info" | sed -n '1p')"
 WHEEL_PATH="$(printf '%s\n' "$release_info" | sed -n '2p')"
 SUMS_PATH="$(printf '%s\n' "$release_info" | sed -n '3p')"
@@ -275,6 +296,7 @@ WHEEL_NAME="$(basename "$WHEEL_PATH")"
 log "Downloaded $WHEEL_NAME from $RELEASE_TAG"
 
 if [ "$VERIFY_CHECKSUMS" = "1" ]; then
+  # Match by exact wheel filename and compare digest before installation.
   "$PYTHON_BIN" - "$WHEEL_PATH" "$SUMS_PATH" <<'PY'
 import hashlib
 import pathlib
@@ -304,6 +326,8 @@ VENV_DIR="$INSTALL_DIR/venv"
 MANAGED_MARKER="$INSTALL_DIR/.devsecops-installer-managed"
 
 mkdir -p "$INSTALL_DIR" "$BIN_DIR"
+# Refuse to replace an unrelated virtual environment.  Only a directory carrying
+# this installer's marker is eligible for managed upgrades.
 if [ -d "$VENV_DIR" ] && [ ! -f "$MANAGED_MARKER" ]; then
   fail "$VENV_DIR already exists and was not created by this installer"
 fi
@@ -321,6 +345,8 @@ if [ "$WITH_TUI" = "1" ]; then
   "$VENV_PYTHON" -m pip install "rich>=13.7" "textual>=0.79"
 fi
 
+# Generate a small launcher bound to the private environment's exact interpreter
+# so activation is never required and PATH lookup cannot select another Python.
 "$VENV_PYTHON" - "$BIN_DIR/$COMMAND_NAME" "$VENV_PYTHON" <<'PY'
 import pathlib
 import shlex
@@ -337,6 +363,7 @@ PY
 installed_version="$("$BIN_DIR/$COMMAND_NAME" --version)"
 log "Installed $installed_version"
 
+# Colon-delimited matching avoids false positives from partial directory names.
 case ":$PATH:" in
   *":$BIN_DIR:"*)
     log "Run the CLI with: $COMMAND_NAME"
@@ -349,6 +376,8 @@ case ":$PATH:" in
 esac
 
 if [ "$RUN_AFTER" = "1" ]; then
+  # Never start an interactive CLI when the installer is running in a pipe or
+  # unattended bootstrap environment.
   if [ -t 0 ]; then
     exec "$BIN_DIR/$COMMAND_NAME"
   fi

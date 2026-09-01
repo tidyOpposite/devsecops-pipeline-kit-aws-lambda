@@ -18,12 +18,16 @@ from .paths import SNAPSHOT_DIR, SNAPSHOT_FILES, SNAPSHOT_FILE_PATHS
 
 
 def snapshot_id(operation: str, now: dt.datetime | None = None) -> str:
+    """Build a sortable UTC identifier with a filesystem-safe operation suffix."""
+
     current = now or dt.datetime.now(dt.UTC)
     safe_operation = re.sub(r"[^a-z0-9-]+", "-", operation.lower()).strip("-") or "change"
     return f"{current.strftime('%Y%m%dT%H%M%SZ')}-{safe_operation}"
 
 
 def snapshot_base(root: Path) -> Path:
+    """Return the snapshot store below the explicit project root."""
+
     return root / SNAPSHOT_DIR
 
 
@@ -34,6 +38,13 @@ def create_snapshot(
     *,
     id_factory: Callable[[str], str] = snapshot_id,
 ) -> Path:
+    """Copy allowlisted files and their prior-presence state into a snapshot.
+
+    Recording absent files is essential: restoring the snapshot must remove an
+    owned artifact that was created only after the snapshot.  Identifier
+    collisions receive numeric suffixes instead of overwriting history.
+    """
+
     base = snapshot_base(root)
     base.mkdir(parents=True, exist_ok=True)
     base_id = id_factory(operation)
@@ -66,6 +77,8 @@ def create_snapshot(
 
 
 def read_snapshot_manifest(snapshot_path: Path) -> dict[str, Any]:
+    """Read a manifest best-effort, returning empty data for malformed entries."""
+
     manifest_path = snapshot_path / "manifest.json"
     if not manifest_path.exists():
         return {}
@@ -77,6 +90,12 @@ def read_snapshot_manifest(snapshot_path: Path) -> dict[str, Any]:
 
 
 def snapshot_entry_relative_path(file_entry: dict[str, Any]) -> Path | None:
+    """Resolve an entry only when its exact path is in the restore allowlist.
+
+    This is the traversal and scope boundary for manifests, including manifests
+    copied from elsewhere or edited after creation.
+    """
+
     raw_path = str(file_entry.get("path", ""))
     if raw_path not in SNAPSHOT_FILE_PATHS:
         return None
@@ -84,6 +103,8 @@ def snapshot_entry_relative_path(file_entry: dict[str, Any]) -> Path | None:
 
 
 def list_snapshots(root: Path) -> list[dict[str, Any]]:
+    """Return valid snapshot manifests in newest-first identifier order."""
+
     base = snapshot_base(root)
     if not base.exists():
         return []
@@ -104,6 +125,8 @@ def resolve_snapshot(
     snapshot_id_value: str | None = None,
     last: bool = False,
 ) -> dict[str, Any] | None:
+    """Resolve the newest snapshot or an exact snapshot identifier."""
+
     snapshots = list_snapshots(root)
     if not snapshots:
         return None
@@ -116,6 +139,12 @@ def resolve_snapshot(
 
 
 def file_line_counts(before: str, after: str) -> tuple[int, int]:
+    """Estimate changed line counts without constructing a full text diff.
+
+    Equal-length edits count as one addition and removal so modified content is
+    never displayed as an unchanged zero-line delta.
+    """
+
     before_lines = before.splitlines()
     after_lines = after.splitlines()
     added = max(0, len(after_lines) - len(before_lines))
@@ -127,6 +156,8 @@ def file_line_counts(before: str, after: str) -> tuple[int, int]:
 
 
 def snapshot_changes(root: Path, snapshot: dict[str, Any]) -> list[dict[str, str]]:
+    """Describe modifications, additions, and deletions since a snapshot."""
+
     snapshot_path = Path(str(snapshot["_path"]))
     changes: list[dict[str, str]] = []
     for file_entry in snapshot.get("files", []):
@@ -158,6 +189,8 @@ def snapshot_changes(root: Path, snapshot: dict[str, Any]) -> list[dict[str, str
 
 
 def snapshot_rows(snapshots: list[dict[str, Any]]) -> list[list[str]]:
+    """Project manifests into numbered presentation rows."""
+
     return [
         [
             str(index + 1),
@@ -170,6 +203,8 @@ def snapshot_rows(snapshots: list[dict[str, Any]]) -> list[list[str]]:
 
 
 def resolve_snapshot_selection(root: Path, selection: str) -> dict[str, Any] | None:
+    """Resolve a one-based displayed number or an exact identifier."""
+
     snapshots = list_snapshots(root)
     if not snapshots:
         return None
@@ -184,6 +219,13 @@ def resolve_snapshot_selection(root: Path, selection: str) -> dict[str, Any] | N
 
 
 def restore_snapshot(root: Path, snapshot: dict[str, Any], dry_run: bool = False) -> list[dict[str, str]]:
+    """Restore only allowlisted files to their recorded presence and contents.
+
+    A dry run returns the same change description without touching the
+    filesystem.  Cloud resources, Terraform state, and unowned paths are never
+    candidates for this operation.
+    """
+
     changes = snapshot_changes(root, snapshot)
     if dry_run:
         return changes

@@ -22,6 +22,8 @@ from .models import Check
 from .paths import SETUP_STATE_FILE
 
 
+# Modes describe how much evidence setup requires, not authorization levels.
+# Even production mode cannot mutate GitHub without a separate explicit action.
 SETUP_STATE_SCHEMA_VERSION = 1
 SETUP_MODES = ("demo", "standard", "production")
 SETUP_STEP_ORDER = (
@@ -77,7 +79,11 @@ class SetupStateError(Exception):
 
 @dataclass(frozen=True)
 class SetupStage:
-    """One reconciled guided-setup stage."""
+    """One immutable guided-setup observation.
+
+    Status is constrained by state helpers to ``complete``, ``pending``, or
+    ``not-required``; details explain the current observation, not past intent.
+    """
 
     id: str
     title: str
@@ -86,20 +92,28 @@ class SetupStage:
 
 
 def _now() -> str:
+    """Return a second-precision UTC timestamp for local setup metadata."""
+
     return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
 
 
 def setup_state_path(root: Path) -> Path:
+    """Return the project-local path for resumable non-secret progress."""
+
     return root / SETUP_STATE_FILE
 
 
 def setup_profile(mode: str) -> dict[str, Any]:
+    """Return a copy of a validated setup-mode profile."""
+
     if mode not in SETUP_PROFILES:
         raise ValueError(f"Unknown setup mode: {mode}")
     return dict(SETUP_PROFILES[mode])
 
 
 def mode_for_preset(preset: str) -> str:
+    """Map an advanced preset choice to the closest guided setup mode."""
+
     if preset == "student-demo":
         return "demo"
     if preset in {"strict", "enterprise"}:
@@ -108,6 +122,8 @@ def mode_for_preset(preset: str) -> str:
 
 
 def new_setup_state(mode: str, preset: str | None = None) -> dict[str, Any]:
+    """Build an empty, schema-versioned setup state for a valid mode."""
+
     profile = setup_profile(mode)
     timestamp = _now()
     return {
@@ -123,6 +139,12 @@ def new_setup_state(mode: str, preset: str | None = None) -> dict[str, Any]:
 
 
 def load_setup_state(root: Path) -> dict[str, Any] | None:
+    """Load and validate setup progress, refusing ambiguous or future state.
+
+    Invalid progress is not silently reset because doing so could misrepresent
+    which external checks or explicitly authorized actions have occurred.
+    """
+
     path = setup_state_path(root)
     if not path.exists():
         return None
@@ -152,7 +174,7 @@ def load_setup_state(root: Path) -> dict[str, Any] | None:
 
 
 def save_setup_state(root: Path, state: dict[str, Any]) -> Path:
-    """Atomically persist non-secret setup progress."""
+    """Atomically persist non-secret setup progress with owner-only access."""
 
     path = setup_state_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -160,6 +182,8 @@ def save_setup_state(root: Path, state: dict[str, Any]) -> Path:
     state["updated_at"] = _now()
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
+        # Same-directory replacement keeps the final write atomic and prevents
+        # interruption from leaving a partially written state file.
         temporary.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         temporary.chmod(0o600)
         os.replace(temporary, path)
@@ -170,7 +194,11 @@ def save_setup_state(root: Path, state: dict[str, Any]) -> Path:
 
 
 def switch_setup_mode(state: dict[str, Any], mode: str, preset: str | None = None) -> dict[str, Any]:
-    """Change mode explicitly and invalidate event-derived progress."""
+    """Change mode explicitly and invalidate event-derived progress.
+
+    Requirements differ by mode, so retaining completed stages or a dry-run
+    fingerprint could incorrectly mark the new journey complete.
+    """
 
     setup_profile(mode)
     if state.get("mode") == mode and (preset is None or state.get("preset") == preset):
@@ -184,6 +212,8 @@ def switch_setup_mode(state: dict[str, Any], mode: str, preset: str | None = Non
 
 
 def mark_setup_step(state: dict[str, Any], step: str, status: str, detail: str = "") -> None:
+    """Record one known step and constrained status in mutable setup state."""
+
     if step not in SETUP_STEP_ORDER:
         raise ValueError(f"Unknown setup step: {step}")
     if status not in {"complete", "pending", "not-required"}:
@@ -197,6 +227,8 @@ def mark_setup_step(state: dict[str, Any], step: str, status: str, detail: str =
 
 
 def setup_config_fingerprint(cfg: dict[str, Any], image_override: str | None = None) -> str:
+    """Hash canonical setup inputs to prove a dry-run is still current."""
+
     payload = dict(cfg)
     if image_override:
         payload["lambda_image_uri"] = image_override
@@ -205,7 +237,11 @@ def setup_config_fingerprint(cfg: dict[str, Any], image_override: str | None = N
 
 
 def demo_image_uri(cfg: dict[str, Any]) -> str:
-    """Return a non-contacted sample URI aligned with the configured region."""
+    """Return a non-contacted sample URI aligned with the configured region.
+
+    The value exists only to exercise rendering and validation in demo mode; it
+    is not persisted as a deployable image selection.
+    """
 
     region = str(cfg.get("aws_region") or "us-east-1")
     project = str(cfg.get("project_name") or "devsecops-pipeline")
@@ -213,15 +249,21 @@ def demo_image_uri(cfg: dict[str, Any]) -> str:
 
 
 def is_backend_bucket_configured(value: str) -> bool:
+    """Return whether a value is a plausible non-placeholder S3 bucket name."""
+
     normalized = value.strip()
     return bool(_S3_BUCKET_RE.fullmatch(normalized)) and not normalized.startswith("replace-with")
 
 
 def is_iam_role_arn(value: str) -> bool:
+    """Validate IAM role ARN shape without contacting AWS."""
+
     return bool(_IAM_ROLE_ARN_RE.fullmatch(value.strip()))
 
 
 def github_setup_ready(checks: list[Check]) -> bool:
+    """Require core GitHub observations and every scored check to be ready."""
+
     required_names = {"GitHub CLI", "GitHub auth", "GitHub repository"}
     observed_names = {check.name for check in checks}
     return required_names <= observed_names and all(
@@ -230,7 +272,12 @@ def github_setup_ready(checks: list[Check]) -> bool:
 
 
 def setup_config_blockers(cfg: dict[str, Any], mode: str) -> list[Check]:
-    """Return schema or mode-posture checks that block the config stage."""
+    """Return schema or mode-posture checks that block the config stage.
+
+    Demo accepts structurally valid risk choices, standard requires baseline
+    identity and approval controls, and production requires strict scored policy
+    except for the image handled by its dedicated setup stage.
+    """
 
     checks = validate_config(cfg)
     failures = [check for check in checks if check.status == "FAIL"]
@@ -269,7 +316,12 @@ def setup_stages(
     aws_identity: Check | None,
     github_checks: list[Check],
 ) -> list[SetupStage]:
-    """Reconcile persisted progress with the current observable project state."""
+    """Reconcile persisted progress with the current observable project state.
+
+    Saved step labels are never trusted as completion evidence.  Files, tools,
+    provider checks, and the dry-run fingerprint are evaluated on every call so
+    external drift naturally moves a stage back to pending.
+    """
 
     mode = str(state["mode"])
     profile = setup_profile(mode)
@@ -324,6 +376,8 @@ def setup_stages(
     backend_bucket = str(cfg.get("backend", {}).get("bucket", ""))
     backend_configured = is_backend_bucket_configured(backend_bucket)
     backend_check_names = {"State bucket", "Lock table"}
+    # A configured name is not sufficient in cloud modes: both the bucket and
+    # lock table must have successful observable checks.
     backend_ready = (
         backend_configured
         and backend_check_names <= {check.name for check in backend_checks}
@@ -384,6 +438,8 @@ def setup_stages(
             else "GitHub authentication, repository variables, or OIDC role secrets are incomplete.",
         )
 
+    # Fingerprinting the demo-only sample makes dry-run completion sensitive to
+    # project/region changes without persisting a fake image into config.
     effective_image = demo_image_uri(cfg) if mode == "demo" and not image_ready else None
     fingerprint = setup_config_fingerprint(cfg, image_override=effective_image)
     dry_run_ready = state.get("dry_run_fingerprint") == fingerprint
@@ -426,15 +482,21 @@ def setup_stages(
 
 
 def first_pending_stage(stages: list[SetupStage]) -> SetupStage | None:
+    """Return the earliest pending stage in journey order."""
+
     return next((stage for stage in stages if stage.status == "pending"), None)
 
 
 def completed_stage_count(stages: list[SetupStage]) -> tuple[int, int]:
+    """Count completed stages against only those required by the mode."""
+
     required = [stage for stage in stages if stage.status != "not-required"]
     return sum(stage.status == "complete" for stage in required), len(required)
 
 
 def setup_next_command(stage: SetupStage | None, mode: str) -> str:
+    """Return the most direct command for the next reconciled setup stage."""
+
     if stage is None:
         return "devsecops status --deep" if mode != "demo" else "devsecops status"
     if stage.id == "backend" and "bucket name is still required" not in stage.detail:

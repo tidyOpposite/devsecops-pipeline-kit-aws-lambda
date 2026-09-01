@@ -1,4 +1,9 @@
-"""Deterministic generators for CLI-owned project artifacts."""
+"""Deterministic generators for CLI-owned project artifacts.
+
+Generators are pure with respect to configuration: they return complete file
+contents and leave directory creation, snapshots, permissions, and writes to
+the orchestration layer.  Stable ordering makes preview and golden diffs useful.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,8 @@ from .paths import CONFIG_FILE, DIST_DIR, GENERATED_ARTIFACT_DOC, GENERATED_TFVA
 
 
 def hcl_value(value: Any) -> str:
+    """Serialize the limited config value types accepted by generated HCL."""
+
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
@@ -21,10 +28,14 @@ def hcl_value(value: Any) -> str:
 
 
 def hcl_attribute_line(key: str, value: Any, width: int) -> str:
+    """Align one HCL assignment for readable deterministic output."""
+
     return f"{key.ljust(width)} = {hcl_value(value)}"
 
 
 def cli_owned_comment(command: str) -> str:
+    """Build the ownership header shared by generated text formats."""
+
     return "\n".join(
         [
             "# CLI-owned generated file. Do not edit directly.",
@@ -35,6 +46,8 @@ def cli_owned_comment(command: str) -> str:
 
 
 def cli_owned_markdown_notice(command: str, artifact: str) -> str:
+    """Build an inline ownership notice suitable for generated Markdown."""
+
     return (
         f"CLI-owned generated {artifact}. Do not edit directly; "
         f"update `{CONFIG_FILE}` and rerun `{command}`."
@@ -42,6 +55,8 @@ def cli_owned_markdown_notice(command: str, artifact: str) -> str:
 
 
 def terraform_tfvars(cfg: dict[str, Any]) -> str:
+    """Render root inputs and the per-environment map as canonical HCL."""
+
     top_level = [
         ("project_name", cfg["project_name"]),
         ("aws_region", cfg["aws_region"]),
@@ -65,6 +80,12 @@ def terraform_tfvars(cfg: dict[str, Any]) -> str:
 
 
 def backend_tf(cfg: dict[str, Any]) -> str:
+    """Render a reviewable S3 backend template from local configuration.
+
+    The output lives under ``dist`` and is not silently installed over the
+    tracked backend file; operators review and copy it when ready.
+    """
+
     backend = cfg["backend"]
     lines = cli_owned_comment("devsecops render").splitlines() + [
         "# Review and copy into terraform/backend.tf when ready.",
@@ -84,6 +105,8 @@ def backend_tf(cfg: dict[str, Any]) -> str:
 
 
 def github_variables(cfg: dict[str, Any]) -> str:
+    """Render the non-secret repository-variable handoff file."""
+
     lines = cli_owned_comment("devsecops render").splitlines() + [
         "# Repository variables to configure in GitHub.",
         "# Example with gh:",
@@ -102,6 +125,8 @@ def github_variables(cfg: dict[str, Any]) -> str:
 
 
 def checklist(cfg: dict[str, Any]) -> str:
+    """Render the human setup checklist with posture-dependent requirements."""
+
     snyk_label = "`SNYK_TOKEN`" if cfg["enable_snyk_scan"] else "`SNYK_TOKEN` (optional)"
     return textwrap.dedent(
         f"""\
@@ -142,6 +167,12 @@ def checklist(cfg: dict[str, Any]) -> str:
 
 
 def github_setup_script(cfg: dict[str, Any]) -> str:
+    """Render a strict-shell helper for applying GitHub variables and secrets.
+
+    Secret commands contain placeholders rather than local secret values; the
+    generated script must be reviewed and completed before execution.
+    """
+
     snyk_token_command = (
         'gh secret set SNYK_TOKEN --body "<snyk-token>"'
         if cfg["enable_snyk_scan"]
@@ -172,11 +203,15 @@ def github_setup_script(cfg: dict[str, Any]) -> str:
 
 
 def shell_quote(value: str) -> str:
+    """Single-quote a value for safe interpolation into POSIX shell syntax."""
+
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
 
 def render_outputs(root: Path, cfg: dict[str, Any]) -> dict[Path, str]:
+    """Return the complete path-to-content manifest for generated artifacts."""
+
     dist = root / DIST_DIR
     return {
         root / GENERATED_TFVARS: terraform_tfvars(cfg),

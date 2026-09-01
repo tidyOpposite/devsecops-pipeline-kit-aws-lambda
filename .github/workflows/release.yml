@@ -1,11 +1,13 @@
 name: Publish GitHub Release
 
+# Only semantic-looking version tags enter the publication path.
 on:
   push:
     tags:
       - "v*.*.*"
 
 permissions:
+  # Keep the workflow read-only unless a job explicitly needs broader access.
   contents: read
 
 jobs:
@@ -14,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      # Repository writes are scoped to the single job that creates the release.
       contents: write
 
     steps:
@@ -27,22 +30,26 @@ jobs:
         with:
           python-version: "3.11"
 
+      # Pinned packaging tools make wheel and source archive creation repeatable.
       - name: Build Python package artifacts
         run: |
           python -m pip install --upgrade pip==26.1.2 build==1.5.0 setuptools==82.0.1 wheel==0.47.0
           python -m build
 
+      # Ship the reviewed standalone installer alongside Python package formats.
       - name: Stage installer
         run: |
           cp install.sh dist/install.sh
           chmod 0755 dist/install.sh
 
+      # Cover every downloadable artifact and immediately verify the manifest.
       - name: Generate release checksums
         run: |
           cd dist
           sha256sum install.sh *.whl *.tar.gz > SHA256SUMS
           sha256sum -c SHA256SUMS
 
+      # Prefer notes dedicated to this tag, with the changelog as a safe fallback.
       - name: Resolve release notes
         id: notes
         run: |
@@ -52,6 +59,7 @@ jobs:
           fi
           echo "path=${notes_path}" >> "${GITHUB_OUTPUT}"
 
+      # The commit-pinned publisher uploads only files produced by this job.
       - name: Create GitHub release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:

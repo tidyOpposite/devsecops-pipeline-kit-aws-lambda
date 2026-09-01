@@ -1,4 +1,9 @@
-"""GitHub CLI adapter, repository diagnostics, and Actions parsers."""
+"""GitHub CLI adapter, repository diagnostics, and Actions parsers.
+
+The adapter shells out to ``gh`` to preserve the user's existing authentication
+and repository context.  It converts provider output into stable domain models
+and never requests secret values: secret diagnostics inspect names only.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +19,8 @@ from .images import is_immutable_image
 from .models import ActionsStatus, Check
 
 
+# Repository variables are non-secret deployment inputs whose values can be
+# compared with local configuration.  Secret contracts are name-only.
 REQUIRED_GH_VARIABLES = [
     "PROJECT_NAME",
     "LAMBDA_IMAGE_URI",
@@ -59,6 +66,8 @@ def _gh_command(root: Path, args: list[str], timeout: int = 30) -> subprocess.Co
 
 
 def _gh_stream_command(root: Path, args: list[str], timeout: int = 300) -> subprocess.CompletedProcess[str]:
+    """Run an interactive-style ``gh`` command with inherited output streams."""
+
     return subprocess.run(  # nosec B603
         ["gh", *args],
         cwd=root,
@@ -69,11 +78,15 @@ def _gh_stream_command(root: Path, args: list[str], timeout: int = 300) -> subpr
 
 
 def compact_error(result: subprocess.CompletedProcess[str]) -> str:
+    """Return the final provider-output line for a compact diagnostic."""
+
     output = (result.stderr or result.stdout or "").strip().splitlines()
     return output[-1] if output else f"Command exited with {result.returncode}."
 
 
 def github_expected_variables(cfg: dict[str, Any]) -> dict[str, str]:
+    """Map normalized local settings to their GitHub variable representation."""
+
     return {
         "PROJECT_NAME": str(cfg["project_name"]),
         "LAMBDA_IMAGE_URI": str(cfg["lambda_image_uri"]),
@@ -86,6 +99,8 @@ def github_expected_variables(cfg: dict[str, Any]) -> dict[str, str]:
 
 
 def required_github_secrets(cfg: dict[str, Any]) -> list[str]:
+    """Return secret names required by the configured workflow features."""
+
     required = [*BASE_REQUIRED_GH_SECRETS, PLAN_ROLE_ENV_NAME]
     if cfg["enable_snyk_scan"]:
         required.append(SNYK_ENV_NAME)
@@ -93,6 +108,8 @@ def required_github_secrets(cfg: dict[str, Any]) -> list[str]:
 
 
 def optional_github_secrets(cfg: dict[str, Any]) -> list[str]:
+    """Return recognized secret names that are optional for this posture."""
+
     optional: list[str] = []
     if not cfg["enable_snyk_scan"]:
         optional.append(SNYK_ENV_NAME)
@@ -100,6 +117,13 @@ def optional_github_secrets(cfg: dict[str, Any]) -> list[str]:
 
 
 def parse_gh_items(stdout: str, value_key: str | None = None) -> dict[str, str]:
+    """Parse ``gh`` list output into a name-to-value mapping.
+
+    JSON is preferred, but the plain-table fallback supports older GitHub CLI
+    output and test fixtures.  When ``value_key`` is absent, only item presence
+    is retained—this is the path used for repository secrets.
+    """
+
     if not stdout.strip():
         return {}
     try:
@@ -121,6 +145,8 @@ def parse_gh_items(stdout: str, value_key: str | None = None) -> dict[str, str]:
 
 
 def parse_gh_plain_table(stdout: str, value_key: str | None = None) -> dict[str, str]:
+    """Parse the stable first column of legacy ``gh`` table output."""
+
     items: dict[str, str] = {}
     for raw_line in stdout.splitlines():
         line = raw_line.strip()
@@ -133,6 +159,8 @@ def parse_gh_plain_table(stdout: str, value_key: str | None = None) -> dict[str,
 
 
 def github_variable_checks(cfg: dict[str, Any], variables: dict[str, str]) -> list[Check]:
+    """Compare required repository variables with normalized local values."""
+
     checks: list[Check] = []
     expected = github_expected_variables(cfg)
     for name in REQUIRED_GH_VARIABLES:
@@ -152,6 +180,8 @@ def github_variable_checks(cfg: dict[str, Any], variables: dict[str, str]) -> li
 
 
 def github_secret_checks(cfg: dict[str, Any], secrets: dict[str, str]) -> list[Check]:
+    """Report required and optional secrets by name without exposing values."""
+
     checks: list[Check] = []
     for name in required_github_secrets(cfg):
         checks.append(
@@ -174,6 +204,8 @@ def github_secret_checks(cfg: dict[str, Any], secrets: dict[str, str]) -> list[C
 
 
 def parse_json_object(stdout: str) -> dict[str, Any]:
+    """Return a decoded JSON object, or an empty mapping for invalid shapes."""
+
     if not stdout.strip():
         return {}
     try:
@@ -184,6 +216,12 @@ def parse_json_object(stdout: str) -> dict[str, Any]:
 
 
 def required_status_check_names(protection: dict[str, Any]) -> set[str]:
+    """Normalize both GitHub branch-protection status-check response shapes.
+
+    GitHub may expose legacy string ``contexts`` and newer app-aware ``checks``;
+    combining them keeps diagnostics compatible across repository settings.
+    """
+
     status_checks = protection.get("required_status_checks")
     if not isinstance(status_checks, dict):
         return set()
@@ -205,6 +243,8 @@ def branch_protection_checks(
     protection: dict[str, Any] | None,
     required_checks: list[str] | None = None,
 ) -> list[Check]:
+    """Evaluate branch protection, pull-request review, and CI check policy."""
+
     required_checks = required_checks or REQUIRED_BRANCH_CHECKS
     checks: list[Check] = []
     if protected is True:
@@ -249,6 +289,8 @@ def branch_protection_checks(
 
 
 def parse_gh_runs(stdout: str) -> list[dict[str, Any]]:
+    """Parse a JSON run list while discarding malformed entries."""
+
     if not stdout.strip():
         return []
     try:
@@ -307,6 +349,8 @@ def dispatch_workflow(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
 ) -> subprocess.CompletedProcess[str]:
+    """Dispatch a pre-built workflow command with a conventional missing-tool result."""
+
     if not command_exists_fn("gh"):
         return subprocess.CompletedProcess(["gh", *args], 127, "", "`gh` not found on PATH.")
     return gh_command_fn(root, args)
@@ -319,6 +363,8 @@ def read_workflow_logs(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     gh_stream_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_stream_command,
 ) -> subprocess.CompletedProcess[str]:
+    """Stream workflow logs without buffering potentially large output."""
+
     if not command_exists_fn("gh"):
         return subprocess.CompletedProcess(["gh", *args], 127, "", "`gh` not found on PATH.")
     return gh_stream_command_fn(root, args, timeout=300)
@@ -333,6 +379,8 @@ def watch_workflow_run(
     gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
     gh_stream_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_stream_command,
 ) -> subprocess.CompletedProcess[str]:
+    """Watch a workflow run, optionally streaming progress directly to the user."""
+
     if not command_exists_fn("gh"):
         return subprocess.CompletedProcess(["gh", *args], 127, "", "`gh` not found on PATH.")
     if stream:
@@ -341,6 +389,8 @@ def watch_workflow_run(
 
 
 def actions_run_rows(runs: list[dict[str, Any]]) -> list[list[str]]:
+    """Project workflow-run dictionaries into presentation rows."""
+
     rows: list[list[str]] = []
     for run in runs:
         rows.append(
@@ -356,6 +406,8 @@ def actions_run_rows(runs: list[dict[str, Any]]) -> list[list[str]]:
 
 
 def failed_job_rows(workflow_name: str, stdout: str) -> list[list[str]]:
+    """Extract unsuccessful jobs from a ``gh run view --json jobs`` payload."""
+
     payload = parse_json_object(stdout)
     jobs = payload.get("jobs", [])
     rows: list[list[str]] = []
@@ -378,6 +430,12 @@ def failed_job_rows(workflow_name: str, stdout: str) -> list[list[str]]:
 
 
 def runbook_for_failure(workflow_name: str, job_name: str, step_name: str, conclusion: str = "") -> str:
+    """Select the most specific troubleshooting runbook for a failed location.
+
+    Matching order is intentional: rollback and missing-image failures often
+    contain generic words such as "deploy" or "validation" and must win first.
+    """
+
     text = " ".join([workflow_name, job_name, step_name, conclusion]).lower()
     if "rollback" in text:
         return RUNBOOK_FAILED_ROLLBACK
@@ -395,6 +453,8 @@ def runbook_for_failure(workflow_name: str, job_name: str, step_name: str, concl
 
 
 def failed_step_rows(workflow_name: str, stdout: str) -> list[list[str]]:
+    """Extract failed steps and attach a runbook to each actionable row."""
+
     payload = parse_json_object(stdout)
     jobs = payload.get("jobs", [])
     rows: list[list[str]] = []
@@ -420,12 +480,16 @@ def failed_step_rows(workflow_name: str, stdout: str) -> list[list[str]]:
                     rows.append([workflow_name, job_name, step_name, step_conclusion, runbook])
                     added_step = True
         if not added_step:
+            # Jobs can fail before GitHub reports step details (for example,
+            # environment approval or runner startup failures).
             runbook = runbook_for_failure(workflow_name, job_name, "", job_conclusion)
             rows.append([workflow_name, job_name, "(job failed before step details)", job_conclusion, runbook])
     return rows
 
 
 def actions_next_actions(run: dict[str, Any], failed_steps: list[list[str]]) -> list[str]:
+    """Turn failed-step rows into copyable commands and runbook guidance."""
+
     run_id = str(run.get("databaseId") or "")
     run_url = str(run.get("url") or "")
     workflow_name = str(run.get("workflowName") or "")
@@ -455,6 +519,12 @@ def collect_github_checks(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
 ) -> list[Check]:
+    """Inspect CLI availability, authentication, repository, variables, and secrets.
+
+    Authentication failure short-circuits repository API calls to avoid
+    repeating the same credential error for every downstream check.
+    """
+
     checks: list[Check] = []
     if not command_exists_fn("gh"):
         return [
@@ -499,6 +569,8 @@ def collect_branch_checks(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
 ) -> list[Check]:
+    """Inspect required protection settings for the deployment branch."""
+
     if not command_exists_fn("gh"):
         return [
             Check("GitHub CLI", "WARN", "`gh` not found on PATH."),
@@ -555,6 +627,8 @@ def github_status_rows(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
 ) -> tuple[list[list[str]], str | None]:
+    """Return recent Actions runs as rows plus a non-throwing provider error."""
+
     if not command_exists_fn("gh"):
         return [], "`gh` not found on PATH."
     result = gh_command_fn(
@@ -584,6 +658,13 @@ def collect_github_actions_status(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
 ) -> ActionsStatus:
+    """Collect recent runs and bounded failure details with remediation steps.
+
+    Only the first ``failed_jobs_limit`` failed runs receive additional API
+    calls, keeping dashboard refreshes responsive on repositories with a long
+    failure history.
+    """
+
     if not command_exists_fn("gh"):
         return ActionsStatus([], [], [], [], "`gh` not found on PATH.")
     result = gh_command_fn(
@@ -653,6 +734,8 @@ def github_actions_status(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
 ) -> tuple[list[list[str]], list[list[str]], str | None]:
+    """Return the legacy tuple view of the richer Actions status model."""
+
     status = collect_github_actions_status(
         root,
         limit=limit,
@@ -672,6 +755,12 @@ def github_setup_precheck(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
 ) -> list[Check]:
+    """Validate local prerequisites and arguments before repository mutation.
+
+    This function performs read-only GitHub inspection.  Applying variables or
+    secrets remains the responsibility of the explicitly authorized command.
+    """
+
     checks: list[Check] = []
     gh_available = command_exists_fn("gh")
     checks.append(Check("GitHub CLI", "OK" if gh_available else "WARN", "Installed." if gh_available else "`gh` not found on PATH."))
