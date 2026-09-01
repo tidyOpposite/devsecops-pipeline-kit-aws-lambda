@@ -743,6 +743,7 @@ devsecops health --aws-sigv4
 * [Upgrade guide](docs/upgrade-guide.md)
 * [Known limitations](docs/known-limitations.md)
 * [Changelog](CHANGELOG.md)
+* [v0.14.0 release notes](docs/release-v0.14.0.md)
 * [v0.13.1 release notes](docs/release-v0.13.1.md)
 * [v0.13.0 release notes](docs/release-v0.13.0.md)
 * [v0.12.0 release notes](docs/release-v0.12.0.md)

@@ -5,6 +5,8 @@ semantic versioning.
 
 ## Unreleased
 
+## v0.14.0 - 2026-09-01
+
 ### Added
 
 * Preferred `setup`, `status`, `image validate`, and `generate` commands with

@@ -1,6 +1,6 @@
 # Release Checklist
 
-Use this checklist for every `vX.Y.Z` release. Replace `0.13.1` and `v0.13.1`
+Use this checklist for every `vX.Y.Z` release. Replace `0.14.0` and `v0.14.0`
 with the target version.
 
 ## 1. Prepare The Version
@@ -19,7 +19,7 @@ Update all version references together:
 Update release documentation:
 
 * `CHANGELOG.md`
-* `docs/release-v0.13.1.md`
+* `docs/release-v0.14.0.md`
 * `README.md` release links when a new release note is added
 * `ROADMAP.md` milestone status when a milestone ships
 
@@ -118,9 +118,9 @@ git add -- \
   docs/stability-contract.md \
   docs/v1.0.0-release-candidate-checklist.md \
   docs/upgrade-guide.md \
-  docs/release-v0.13.1.md \
+  docs/release-v0.14.0.md \
   docs/command-inventory.md
-git commit -m "Release v0.13.1 Python 3.14 support"
+git commit -m "Release v0.14.0"
 ```
 
 ## 5. Tag And Push
@@ -128,9 +128,9 @@ git commit -m "Release v0.13.1 Python 3.14 support"
 Create an annotated tag from the release commit:
 
 ```bash
-git tag -a v0.13.1 -m "Release v0.13.1"
+git tag -a v0.14.0 -m "Release v0.14.0"
 git push origin main
-git push origin v0.13.1
+git push origin v0.14.0
 ```
 
 The `Publish GitHub Release` workflow runs on `v*.*.*` tags.
@@ -140,7 +140,7 @@ The `Publish GitHub Release` workflow runs on `v*.*.*` tags.
 After the workflow finishes:
 
 ```bash
-VERSION="0.13.1"
+VERSION="0.14.0"
 TAG="v${VERSION}"
 BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
 WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
@@ -157,7 +157,7 @@ devsecops --version
 ```
 
 Confirm the release page includes the expected notes from
-`docs/release-v0.13.1.md`.
+`docs/release-v0.14.0.md`.
 
 ## 7. Production Evidence Gate
 
@@ -209,7 +209,7 @@ Confirm:
 
 ## 9. v1.0 Release Candidate Hardening Gate
 
-For `v0.13.1` release-candidate hardening and the final pre-`v1.0.0` release
+For `v0.14.0` release-candidate hardening and the final pre-`v1.0.0` release
 record, complete [v1.0.0 release candidate checklist](v1.0.0-release-candidate-checklist.md).
 
 At minimum, attach evidence for:
