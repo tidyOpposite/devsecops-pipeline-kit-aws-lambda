@@ -52,9 +52,31 @@ Create an IAM OIDC identity provider:
 * Provider URL: `https://token.actions.githubusercontent.com`
 * Audience: `sts.amazonaws.com`
 
+In both trust policies below, replace `<ACCOUNT_ID>` with the AWS account that
+owns the IAM role and `<GITHUB_REPOSITORY_SUBJECT>` with the repository segment
+from the deployment repository's OIDC `sub` claim.
+
+| Repository subject format | Value to substitute |
+| --- | --- |
+| Name-based | `OWNER/REPOSITORY` |
+| Immutable | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` |
+
+GitHub repositories created after July 15, 2026 use immutable subjects by
+default. Older repositories can opt in. If the repository customizes its
+subject claims, use the exact `sub` for each allowed job. Match the audience
+and subjects with `StringEquals`. See the [GitHub OIDC subject reference](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims).
+
 ## Deploy Trust Policy Example
 
-Replace placeholders with your account, owner, and repository names.
+The deploy and rollback job uses the GitHub Environment `prod`. Its subject
+ends in `:environment:prod`. The workflow also checks that it runs from `main`.
+The environment subject does not encode the branch, so enforce that restriction
+in GitHub before attaching this trust policy to the deploy role.
+
+In **Settings → Environments → prod**, set **Deployment branches and tags** to
+**Selected branches and tags**. Add an exact `main` branch rule and leave tags
+out of the allowlist. Add required reviewers for the production approval gate.
+See the [GitHub environment protection settings](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments#deployment-branches-and-tags).
 
 ```json
 {
@@ -68,10 +90,8 @@ Replace placeholders with your account, owner, and repository names.
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:<GITHUB_OWNER>/<REPOSITORY>:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": "repo:<GITHUB_REPOSITORY_SUBJECT>:environment:prod"
         }
       }
     }
@@ -79,20 +99,56 @@ Replace placeholders with your account, owner, and repository names.
 }
 ```
 
-For PR plans, create a separate trust policy scoped to the pull request subject
-patterns you are willing to trust. The bundled workflow skips AWS-backed
-Terraform plans for pull requests from forks; keep that guard unless you have a
-separate review and sandbox strategy for untrusted contributions.
+## Plan Trust Policy Example
+
+The Terraform Plan job runs without a GitHub Environment. Same-repository
+pull requests use the `:pull_request` subject. For manual plans, dispatch
+`deploy.yml` from `main` with `mode=plan` to match the branch subject below.
+Add an exact branch subject to this list for each additional ref that you
+intend to allow for manual plans. The workflow skips AWS-backed plans for fork
+pull requests. The PR subject itself does not distinguish fork authors.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": [
+            "repo:<GITHUB_REPOSITORY_SUBJECT>:pull_request",
+            "repo:<GITHUB_REPOSITORY_SUBJECT>:ref:refs/heads/main"
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+## Verify Role Setup
 
 After creating the roles, run:
 
 ```bash
-devsecops compose
-devsecops gh-setup --apply \
+devsecops github setup --apply \
   --deploy-role-arn arn:aws:iam::<ACCOUNT_ID>:role/<DEPLOY_ROLE> \
   --plan-role-arn arn:aws:iam::<ACCOUNT_ID>:role/<PLAN_ROLE>
-devsecops gh-doctor
+devsecops doctor github --strict
+devsecops doctor branch --branch main --strict
 ```
+
+In the target repository, confirm that `Configure AWS credentials` assumes the
+plan role in both a same-repository PR and a manual `mode=plan` run from `main`.
+During the approved production walkthrough, confirm that the deploy job waits
+for `prod` approval and then assumes the deploy role. Record the run IDs and
+role names in the [deployment evidence](docs/production-deployment-evidence.md).
 
 `AWS_PLAN_ROLE_TO_ASSUME_ARN` is required even if older local config or presets
 have `use_separate_aws_plan_role=false`. That config value is retained for
@@ -238,10 +294,9 @@ specific `kms:DescribeKey`, `iam:GetRole`, `iam:GetRolePolicy`,
 `lambda:GetFunctionConfiguration`, `ecr:DescribeRepositories`, and S3 listing
 permissions as Terraform reports missing access.
 
-Keep the plan role trust policy scoped to the repository and pull request
-subjects you trust. The bundled workflow skips forked pull requests for
-AWS-backed plans; keep that guard unless you provide a separate sandbox account
-and review process for untrusted code.
+Keep the role scoped to the [plan subjects](#plan-trust-policy-example) you
+intend to allow. Use a separate sandbox account and review process if you need
+AWS-backed plans for untrusted code.
 
 ## KMS Admin Role Name
 

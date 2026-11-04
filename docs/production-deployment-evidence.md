@@ -44,11 +44,11 @@ Complete these before dispatching production:
   `SHA256SUMS` once published.
 * Use a real GitHub repository with `main` protected by pull requests and the
   required `Security and Terraform Validate` and `Terraform Plan` checks.
-* Configure the protected production GitHub Environment named by
-  `PROD_APPROVAL_ENVIRONMENT`, normally `prod`.
-* Configure separate GitHub OIDC roles:
-  `AWS_PLAN_ROLE_TO_ASSUME_ARN` for plans and `AWS_ROLE_TO_ASSUME_ARN` for
-  approved production deploys.
+* Configure the GitHub Environment `prod` with required reviewers and an
+  exact `main` branch allowlist.
+* Configure [separate GitHub OIDC roles](../AWS_policy.md#deploy-trust-policy-example)
+  for `AWS_PLAN_ROLE_TO_ASSUME_ARN` and `AWS_ROLE_TO_ASSUME_ARN`. Capture the
+  role names and run IDs as described in [Verify role setup](../AWS_policy.md#verify-role-setup).
 * Configure an S3 backend bucket and DynamoDB lock table in the target AWS
   account.
 * Publish a Lambda-compatible immutable ECR image before workflow dispatch.

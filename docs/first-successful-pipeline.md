@@ -149,6 +149,12 @@ template unchanged; your backend names do not need to be committed.
 
 ## 5. Configure GitHub Repository Settings
 
+Create separate AWS IAM roles using the [deploy and plan trust policies](../AWS_policy.md#deploy-trust-policy-example)
+for your deployment repository. The deploy role trusts the `prod` environment
+subject. The plan role trusts the PR subject and the exact branches you allow
+for manual plans. The workflow limits AWS-backed PR plans to branches within
+the same repository.
+
 The guided equivalent is explicit about the repository mutation boundary:
 
 ```bash
@@ -192,9 +198,10 @@ does not silently fall back to template defaults. Run the setup command again
 after changing local settings. Never put credentials or tokens in this variable.
 
 In repository Settings > Environments > `prod`, configure at least one
-required reviewer. A named environment without required reviewers is not an
-approval gate. Diagnostics fail when the rules cannot be inspected, including
-when the account plan or token permissions do not expose them.
+required reviewer and allow deployments from the exact branch `main` only.
+The GitHub environment enforces the branch restriction for the deploy role.
+Diagnostics fail when the reviewer rules cannot be inspected, including when
+the account plan or token permissions do not expose them.
 
 ```bash
 devsecops doctor github --strict
