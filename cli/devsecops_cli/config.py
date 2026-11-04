@@ -326,11 +326,11 @@ CONTROL_CATALOG = [
         title="Production Approval Gate",
         cli_options=("use_prod_approval_environment", "devsecops compose", "devsecops preset apply"),
         terraform=("No Terraform variable; this is enforced before Terraform apply starts.",),
-        github=("deploy-main uses environment: vars.PROD_APPROVAL_ENVIRONMENT || 'prod'.", "Deploy only runs on workflow_dispatch deploy/prod from main."),
+        github=("deploy-main verifies the prod environment protection rules before AWS credentials.", "Deploy and rollback run only on workflow_dispatch from main."),
         aws=("Prevents unreviewed production AWS mutations by gating the deploy job before credentials are issued.",),
         scanners=("None; this is a release authorization control.",),
         audit_evidence=("PROD_APPROVAL_ENVIRONMENT repository variable", "deploy-main environment name", "Config validation policy check"),
-        guidance="Keep the value set to prod or another protected GitHub Environment with required reviewers.",
+        guidance="Require reviewers, prevent self-review and admin bypass, and allow only the main branch in the prod environment.",
     ),
     Control(
         id="plan-role",
@@ -414,7 +414,7 @@ CONTROL_CATALOG = [
         title="HTTP Health Validation",
         cli_options=("enable_http_validation", "devsecops health --aws-sigv4", "devsecops compose"),
         terraform=("Outputs api_gateway_health_url for the deployed API Gateway endpoint.",),
-        github=("Deploy job curls /health when ENABLE_HTTP_VALIDATION=true and signs AWS_IAM requests.", "Rollback runs when enabled validation fails."),
+        github=("Production requires HTTP validation before AWS access and checks /health after apply.", "AWS_IAM requests are signed."),
         aws=("API Gateway invokes Lambda through the deployed endpoint.",),
         scanners=("None; this is a smoke validation gate.",),
         audit_evidence=("ENABLE_HTTP_VALIDATION repository variable", "api_gateway_health_url Terraform output", "Health command output"),
@@ -1067,6 +1067,22 @@ def validate_config(cfg: dict[str, Any]) -> list[Check]:
     )
     return checks
 
+def production_policy_blockers(checks: list[Check]) -> list[Check]:
+    """Select config checks that must pass before production changes."""
+
+    required_policies = {
+        "Lambda image immutability policy",
+        "Production CORS policy",
+        "Production approval gate policy",
+        "Separate plan role policy",
+        "Deployment validation policy",
+    }
+    return [
+        check for check in checks
+        if check.status == "FAIL" or (check.status == "WARN" and check.name in required_policies)
+    ]
+
+
 __all__ = [
     "API_AUTHORIZATION_TYPES",
     "AWS_REGION_RE",
@@ -1113,6 +1129,7 @@ __all__ = [
     "pipeline_config_json",
     "preset_config",
     "prod_approval_environment",
+    "production_policy_blockers",
     "toml_value",
     "unified_text_diff",
     "uses_strict_cors",

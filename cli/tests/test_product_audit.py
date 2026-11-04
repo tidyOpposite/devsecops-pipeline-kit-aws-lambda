@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -88,21 +88,61 @@ class PipelineTransportTests(unittest.TestCase):
 
     def test_runner_exports_matching_region_flags_and_exact_dispatch_image(self):
         cfg = customer_config()
+        cfg["lambda_image_uri"] = ""
         target = IMAGE.replace("sha-abc123", "sha-reviewed")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            environment = os.environ | {"PYTHONPATH": str(ROOT / "cli"),
-                                       config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(cfg),
+            environment = {config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(cfg),
                                        "GITHUB_ENV": str(root / "github-env"), "DISPATCH_IMAGE_URI": target,
-                                       "DEPLOY_MODE": "deploy"}
-            result = subprocess.run([sys.executable, "-m", "devsecops_cli.workflow"], cwd=root,
-                                    env=environment, text=True, capture_output=True, check=False)
-            self.assertEqual(result.returncode, 0, result.stderr)
+                                       "DEPLOY_MODE": "deploy", "GITHUB_REPOSITORY": "owner/deployment"}
+            with patch.dict(os.environ, environment, clear=True), patch.object(workflow.Path, "cwd", return_value=root), \
+                 patch.object(workflow, "production_environment_check", return_value=Check("Approval", "OK", "Protected")) as approval, \
+                 redirect_stdout(io.StringIO()):
+                self.assertEqual(workflow.main(), 0)
+            approval.assert_called_once_with(root, "owner/deployment")
             env_values = dict(line.split("=", 1) for line in (root / "github-env").read_text().splitlines())
+            self.assertIn(target, (root / cli.GENERATED_TFVARS).read_text())
         self.assertEqual(env_values["AWS_REGION"], cfg["aws_region"])
         self.assertEqual(env_values["ENABLE_HTTP_VALIDATION"], "true")
         self.assertEqual(env_values["LAMBDA_IMAGE_URI"], target)
         self.assertNotIn("AWS_SECRET_ACCESS_KEY", env_values)
+
+    def test_runner_rejects_production_policy_gaps_before_writing(self):
+        for mode in ("deploy", "rollback"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                cfg = customer_config()
+                cfg.update(enable_http_validation=False, use_separate_aws_plan_role=False)
+                environment = os.environ | {"PYTHONPATH": str(ROOT / "cli"),
+                    config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(cfg),
+                    "GITHUB_ENV": str(root / "github-env"), "DISPATCH_IMAGE_URI": IMAGE,
+                    "DEPLOY_MODE": mode, "GITHUB_REPOSITORY": "owner/deployment"}
+                result = subprocess.run([sys.executable, "-m", "devsecops_cli.workflow"], cwd=root,
+                                        env=environment, text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Deployment validation policy", result.stderr)
+                self.assertIn("Separate plan role policy", result.stderr)
+                self.assertEqual(list(root.iterdir()), [])
+
+    def test_runner_blocks_unverified_protection_but_plan_can_render(self):
+        cfg = customer_config()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(cfg),
+                           "DEPLOY_MODE": "deploy", "GITHUB_REPOSITORY": "owner/deployment"}
+            with patch.dict(os.environ, environment, clear=True), patch.object(workflow.Path, "cwd", return_value=root), \
+                 patch.object(workflow, "production_environment_check", return_value=Check("Approval", "FAIL", "No reviewers")) as approval, \
+                 redirect_stderr(io.StringIO()) as errors, redirect_stdout(io.StringIO()):
+                self.assertEqual(workflow.main(), 1)
+                self.assertIn("No reviewers", errors.getvalue())
+                self.assertEqual(list(root.iterdir()), [])
+                approval.assert_called_once_with(root, "owner/deployment")
+                approval.reset_mock()
+                cfg["enable_http_validation"] = False
+                os.environ.update(DEPLOY_MODE="plan", PIPELINE_CONFIG_JSON=config.pipeline_config_json(cfg))
+                self.assertEqual(workflow.main(), 0)
+                approval.assert_not_called()
+                self.assertTrue((root / cli.GENERATED_TFVARS).exists())
 
     def test_workflow_materializes_settings_before_cloud_access(self):
         source = (ROOT / ".github/workflows/deploy.yml").read_text()
@@ -223,12 +263,38 @@ class ReadinessRegressionTests(unittest.TestCase):
             self.assertEqual(next(c for c in deploy_checks if c.name == "Generated deployment helpers").status, "FAIL")
             self.assertEqual(action["command"], "devsecops generate")
 
-    def test_actual_github_environment_reviewers_are_required(self):
-        for payload in [{}, {"protection_rules": []}, {"protection_rules": [{"type": "wait_timer"}]},
-                        {"protection_rules": [{"type": "required_reviewers", "reviewers": []}]}]:
-            self.assertEqual(github.environment_approval_checks(payload)[0].status, "FAIL")
-        protected = {"protection_rules": [{"type": "required_reviewers", "reviewers": [{"reviewer": {"id": 123}}]}]}
-        self.assertEqual(github.environment_approval_checks(protected)[0].status, "OK")
+    def test_actual_github_environment_protections_are_required(self):
+        protected = {
+            "protection_rules": [{"type": "required_reviewers", "prevent_self_review": True,
+                                  "reviewers": [{"reviewer": {"id": 123}}]}],
+            "can_admins_bypass": False,
+            "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
+        }
+        main = {"total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}]}
+
+        def inspect(environment, branches):
+            def run(root, args):
+                payload = branches if args[1].endswith("/deployment-branch-policies") else environment
+                return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+            return github.production_environment_check(ROOT, "owner/deployment", gh_command_fn=run)
+
+        self.assertEqual(inspect(protected, main).status, "OK")
+        self_review = copy.deepcopy(protected)
+        self_review["protection_rules"][0]["prevent_self_review"] = False
+        for environment, branches, detail in [
+            (protected | {"protection_rules": []}, main, "required reviewer"),
+            (self_review, main, "Prevent self-review"),
+            (protected | {"can_admins_bypass": True}, main, "bypass"),
+            (protected | {"can_admins_bypass": None}, main, "bypass"),
+            (protected | {"deployment_branch_policy": None}, main, "exact main branch"),
+            (protected, main | {"total_count": 31}, "exact main branch"),
+            (protected, main | {"branch_policies": [{"name": "main", "type": "tag"}]}, "exact main branch"),
+            (protected, main | {"branch_policies": [{"name": "*", "type": "branch"}]}, "exact main branch"),
+        ]:
+            with self.subTest(detail=detail):
+                check = inspect(environment, branches)
+                self.assertEqual(check.status, "FAIL")
+                self.assertIn(detail, check.detail)
 
     def test_github_collector_checks_environment_and_fails_when_unobservable(self):
         commands = []

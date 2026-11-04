@@ -52,8 +52,8 @@ devsecops config set lambda_image_uri \
 
 ## HTTP Validation Contract
 
-If `ENABLE_HTTP_VALIDATION=true`, the image must handle API Gateway HTTP API
-events and return a successful response for:
+For production, set `enable_http_validation=true`. The image must handle API
+Gateway HTTP API events and return a successful response for:
 
 ```text
 GET /health

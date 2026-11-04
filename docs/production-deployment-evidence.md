@@ -44,8 +44,8 @@ Complete these before dispatching production:
   `SHA256SUMS` once published.
 * Use a real GitHub repository with `main` protected by pull requests and the
   required `Security and Terraform Validate` and `Terraform Plan` checks.
-* Configure the GitHub Environment `prod` with required reviewers and an
-  exact `main` branch allowlist.
+* Configure the GitHub Environment `prod` with required reviewers, self-review
+  and administrator bypass disabled, and an exact `main` branch allowlist.
 * Configure [separate GitHub OIDC roles](../AWS_policy.md#deploy-trust-policy-example)
   for `AWS_PLAN_ROLE_TO_ASSUME_ARN` and `AWS_ROLE_TO_ASSUME_ARN`. Capture the
   role names and run IDs as described in [Verify role setup](../AWS_policy.md#verify-role-setup).
@@ -53,7 +53,7 @@ Complete these before dispatching production:
   account.
 * Publish a Lambda-compatible immutable ECR image before workflow dispatch.
   Use a digest or immutable tag, never `latest` or `bootstrap`.
-* If `ENABLE_HTTP_VALIDATION=true`, make sure the workload implements
+* Set `enable_http_validation=true` and make sure the workload implements
   `GET /health`.
 * If `ENABLE_DAST=true`, set `API_AUTHORIZATION_TYPE=NONE` only when the public
   API can tolerate a passive OWASP ZAP baseline scan.
@@ -141,12 +141,13 @@ download them by the recorded run ID with `gh run download <run-id> -D
 The workflow run must show `status=completed` and `conclusion=success`.
 Review the run log for these production steps:
 
+* `Verify production policy and prepare pipeline configuration`
 * `Require Lambda image URI`
 * `Capture currently deployed Lambda image`
 * `Terraform apply workload with configured Lambda image`
 * `Read deployment outputs`
 * `Wait for Lambda update`
-* `Smoke test Lambda health endpoint`, when HTTP validation is enabled
+* `Smoke test Lambda health endpoint`
 * `Run DAST scan with OWASP ZAP`, when DAST is enabled and
   `API_AUTHORIZATION_TYPE=NONE`
 * `Roll back Lambda image on failed deployment validation`, present as the

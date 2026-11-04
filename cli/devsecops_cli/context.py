@@ -255,8 +255,8 @@ def next_action(
         approval_gap = next((check for check in github_gaps if check.name == "GitHub environment approvals"), None)
         if approval_gap:
             return _next_action(
-                action_id="missing_github_approvals", title="Production reviewer approval is not verified",
-                why=approval_gap.detail, changes="Read-only inspection; configure required reviewers in GitHub Settings > Environments > prod.",
+                action_id="missing_github_approvals", title="Production environment protection is not verified",
+                why=approval_gap.detail, changes="Read-only inspection of GitHub Environment prod protection rules.",
                 command="devsecops doctor github --strict", docs="docs/first-successful-pipeline.md#5-configure-github-repository-settings", context=context,
             )
         branch_gaps = [check for check in github_gaps if check.name.startswith(("Branch `", "Required check"))]

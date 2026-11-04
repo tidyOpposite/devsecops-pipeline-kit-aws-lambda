@@ -213,6 +213,7 @@ jobs:
     # obtain an OIDC token or read environment-scoped secrets.
     environment: prod
     permissions:
+      actions: read
       contents: read
       id-token: write
     env:
@@ -225,7 +226,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Prepare user pipeline configuration
+      - name: Verify production policy and prepare pipeline configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: PYTHONPATH=cli python3 -m devsecops_cli.workflow
 
       # Rollback always requires an explicit target, and mutable bootstrap/latest
@@ -356,7 +359,6 @@ jobs:
       # IAM-protected endpoints are signed with the temporary session credentials;
       # explicitly public endpoints use a normal unauthenticated request.
       - name: Smoke test Lambda health endpoint
-        if: env.ENABLE_HTTP_VALIDATION == 'true'
         run: |
           health_url="${{ steps.deployment-outputs.outputs.api_gateway_health_url }}"
           if [ "${API_AUTHORIZATION_TYPE}" = "AWS_IAM" ]; then

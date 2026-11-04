@@ -170,7 +170,7 @@ sharper. Pin a release tag for repeatable demos or evaluations, read the
 GitHub artifacts before applying them in real AWS accounts.
 
 Security is an active development area. GitHub OIDC, immutable image inputs,
-Terraform validation, IaC scanning, optional Snyk, optional `/health`
+Terraform validation, IaC scanning, optional Snyk, production `/health`
 validation, optional DAST, and rollback behavior are already present, but the
 controls, defaults, and audit outputs are still evolving. Follow the
 [Roadmap](ROADMAP.md) to see what is implemented, what is next, and what is not
@@ -614,9 +614,9 @@ Repository variables:
 | `LAMBDA_IMAGE_URI` | none | Required for manual production deploy. Immutable image URI deployed to Lambda. |
 | `API_AUTHORIZATION_TYPE` | `AWS_IAM` | API Gateway route authorization. Use `NONE` only for demo or intentionally public non-sensitive APIs. |
 | `ENABLE_SNYK_SCAN` | `false` | When `true` and `SNYK_TOKEN` is present, CI scans the configured image with Snyk. |
-| `ENABLE_HTTP_VALIDATION` | `false` | When `true`, CI calls the API Gateway `/health` URL after deployment. |
+| `ENABLE_HTTP_VALIDATION` | `false` | Compatibility mirror of `enable_http_validation` in `PIPELINE_CONFIG_JSON`. Production requires `true` and checks `/health` after apply. |
 | `ENABLE_DAST` | `false` | When `true`, CI runs OWASP ZAP baseline scan only when `API_AUTHORIZATION_TYPE=NONE`. |
-| `PROD_APPROVAL_ENVIRONMENT` | `prod` | Compatibility posture value. Production jobs always use `prod`, and CLI preflight verifies its required reviewers. |
+| `PROD_APPROVAL_ENVIRONMENT` | `prod` | Compatibility posture value. Production jobs and CLI preflight verify `prod` reviewer and branch protections. |
 
 Recommended branch protection for `main`:
 
@@ -641,8 +641,8 @@ and [Security controls and policy presets](docs/security-controls.md).
 | Pull request to `main` from fork | n/a | validation only | No AWS credentials. |
 | Push to `main` | n/a | none | No workflow run. Maintainer pushes do not consume Actions minutes. |
 | Manual `workflow_dispatch`, `mode=plan` | selected `dev/staging/prod` | `plan` only | No apply. |
-| Manual `workflow_dispatch`, `mode=deploy`, `environment=prod`, branch `main` | `prod` | `apply` | Scan configured image when enabled, deploy Lambda, optionally validate HTTP and DAST, rollback on failure. |
-| Manual `workflow_dispatch`, `mode=rollback`, `environment=prod`, branch `main` | `prod` | `apply` | Restore the explicit immutable image through the protected environment, then run the same enabled validation. |
+| Manual `workflow_dispatch`, `mode=deploy`, `environment=prod`, branch `main` | `prod` | `apply` | Scan the image when enabled, deploy Lambda, check `/health`, run DAST when enabled, and roll back on failure when a previous image is available. |
+| Manual `workflow_dispatch`, `mode=rollback`, `environment=prod`, branch `main` | `prod` | `apply` | Restore the explicit immutable image through the protected environment, then run the same validation. |
 | Push tag `v*.*.*` | n/a | n/a | Publish GitHub Release from `docs/release-<tag>.md` or `CHANGELOG.md` with installer, wheel, source distribution, and `SHA256SUMS`. |
 
 ## Deployment Flow
@@ -696,8 +696,8 @@ real workload source in a separate repository; use
 [Separate example workload template](docs/example-workload-template.md) as the
 repository contract.
 
-If `ENABLE_HTTP_VALIDATION=true`, the image must handle API Gateway HTTP API
-events and return a successful response for `GET /health`. If
+For production, set `enable_http_validation=true`. The image must handle API
+Gateway HTTP API events and return a successful response for `GET /health`. If
 `ENABLE_DAST=true`, set `API_AUTHORIZATION_TYPE=NONE` only when the API is
 safe for a passive unauthenticated OWASP ZAP baseline scan.
 

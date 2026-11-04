@@ -1958,7 +1958,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("environment: prod", deploy_workflow)
         self.assertIn("LAMBDA_IMAGE_URI must use an immutable tag or digest", deploy_workflow)
         self.assertIn("Smoke test Lambda health endpoint", deploy_workflow)
-        self.assertIn("if: env.ENABLE_HTTP_VALIDATION == 'true'", deploy_workflow)
+        self.assertNotIn("if: env.ENABLE_HTTP_VALIDATION", deploy_workflow)
         self.assertIn("zaproxy/action-baseline", deploy_workflow)
         self.assertIn("id-token: write", deploy_workflow)
         self.assertIn("pull-requests: write", deploy_workflow)

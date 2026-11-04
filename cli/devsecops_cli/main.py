@@ -114,6 +114,7 @@ from .config import (
     parse_config_value,
     preset_config,
     prod_approval_environment,
+    production_policy_blockers,
     uses_strict_cors,
     validate_config,
     toml_value,
@@ -2812,15 +2813,6 @@ def cmd_gh_status(args: argparse.Namespace) -> int:
 # Production deployment is intentionally centralized behind a protected GitHub
 # workflow.  Local handlers validate intent, dispatch an exact image, and keep
 # non-secret correlation metadata; they never run Terraform apply directly.
-PRODUCTION_DEPLOYMENT_POLICY_CHECKS = {
-    "Lambda image immutability policy",
-    "Production CORS policy",
-    "Production approval gate policy",
-    "Separate plan role policy",
-    "Deployment validation policy",
-}
-
-
 def deployment_error_exit_code(error: str) -> int:
     lowered = error.lower()
     if "not found on path" in lowered:
@@ -2870,13 +2862,7 @@ def production_deployment_preflight_checks(
         )
     )
 
-    validation = validate_config(cfg)
-    policy_blockers = [
-        check
-        for check in validation
-        if check.status == "FAIL"
-        or (check.name in PRODUCTION_DEPLOYMENT_POLICY_CHECKS and check.status == "WARN")
-    ]
+    policy_blockers = production_policy_blockers(validate_config(cfg))
     checks.append(
         Check(
             "Production config policy",

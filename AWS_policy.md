@@ -75,7 +75,8 @@ in GitHub before attaching this trust policy to the deploy role.
 
 In **Settings → Environments → prod**, set **Deployment branches and tags** to
 **Selected branches and tags**. Add an exact `main` branch rule and leave tags
-out of the allowlist. Add required reviewers for the production approval gate.
+out of the allowlist. Add required reviewers, enable **Prevent self-review**,
+and clear **Allow administrators to bypass configured protection rules**.
 See the [GitHub environment protection settings](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments#deployment-branches-and-tags).
 
 ```json

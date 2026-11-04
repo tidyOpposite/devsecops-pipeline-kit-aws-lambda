@@ -189,8 +189,6 @@ Expected output includes:
 Applied GitHub repository variables/secrets available from config and arguments.
 ```
 
-Then check GitHub readiness:
-
 This setup also synchronizes `PIPELINE_CONFIG_JSON`: your complete non-secret
 configuration, including region, environment runtime settings, CORS, log
 retention, and backend names. The cloud workflow requires this variable and
@@ -198,10 +196,10 @@ does not silently fall back to template defaults. Run the setup command again
 after changing local settings. Never put credentials or tokens in this variable.
 
 In repository Settings > Environments > `prod`, configure at least one
-required reviewer and allow deployments from the exact branch `main` only.
-The GitHub environment enforces the branch restriction for the deploy role.
-Diagnostics fail when the reviewer rules cannot be inspected, including when
-the account plan or token permissions do not expose them.
+required reviewer, enable **Prevent self-review**, disable administrator
+bypass, and allow the exact branch `main` with no tags. Both the CLI and the
+production runner verify these settings. Diagnostics fail when the account
+plan or token permissions prevent inspecting the rules.
 
 ```bash
 devsecops doctor github --strict
@@ -225,6 +223,10 @@ Set `LAMBDA_IMAGE_URI` ... See `docs/troubleshooting.md#lambda-image-uri-is-miss
 ```
 
 ## 7. Run The Production Workflow Dispatch
+
+Implement `GET /health` and enable it with `devsecops config set enable_http_validation true`.
+Regenerate and synchronize the configuration after this change. The production
+workflow rejects disabled health validation before requesting AWS credentials.
 
 After CI has passed on `main`, preview the exact production operation. This
 runs local, GitHub, branch-protection, image, and concurrent-run checks but

@@ -10,11 +10,10 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
 
-from .config import PIPELINE_CONFIG_VARIABLE, pipeline_config_json, prod_approval_environment
+from .config import PIPELINE_CONFIG_VARIABLE, PROD_APPROVAL_ENVIRONMENT, pipeline_config_json, prod_approval_environment
 from .deploy import DEPLOYMENT_WORKFLOW_NAME
 from .images import is_immutable_image
 from .models import ActionsStatus, Check
@@ -582,31 +581,61 @@ def collect_github_checks(
         checks.extend(github_secret_checks(cfg, parse_gh_items(secrets_result.stdout)))
 
     if cfg["use_prod_approval_environment"]:
-        if repo.returncode == 0 and repo.stdout.strip():
-            environment = urllib.parse.quote(prod_approval_environment(cfg), safe="")
-            result = gh_command_fn(root, ["api", f"repos/{repo.stdout.strip()}/environments/{environment}"])
-            if result.returncode == 0:
-                checks.extend(environment_approval_checks(parse_json_object(result.stdout)))
-            else:
-                checks.append(Check("GitHub environment approvals", "FAIL",
-                                    "Cannot verify production environment required reviewers: " + compact_error(result)))
-        else:
-            checks.append(Check("GitHub environment approvals", "FAIL", "Cannot verify required reviewers without repository access."))
+        repository = repo.stdout.strip() if repo.returncode == 0 else ""
+        checks.append(production_environment_check(root, repository, gh_command_fn=gh_command_fn))
 
     return checks
 
 
-def environment_approval_checks(environment: dict[str, Any]) -> list[Check]:
-    """Require observable human approval, not merely a named environment."""
+def production_environment_check(
+    root: Path,
+    repository: str,
+    *,
+    gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
+) -> Check:
+    """Verify the GitHub protections that back the production OIDC trust."""
 
+    name = "GitHub environment approvals"
+    settings = f"Settings > Environments > {PROD_APPROVAL_ENVIRONMENT}"
+    if not repository:
+        return Check(name, "FAIL", "Cannot verify production environment protection without repository access.")
+
+    endpoint = f"repos/{repository}/environments/{PROD_APPROVAL_ENVIRONMENT}"
+    result = gh_command_fn(root, ["api", endpoint])
+    if result.returncode != 0:
+        return Check(name, "FAIL", f"Cannot read {settings}: {compact_error(result)}")
+
+    environment = parse_json_object(result.stdout)
     rules = environment.get("protection_rules")
-    reviewers = []
+    reviewer_rule = {}
     if isinstance(rules, list):
-        reviewers = [reviewer for rule in rules if isinstance(rule, dict) and rule.get("type") == "required_reviewers"
-                     for reviewer in (rule.get("reviewers") or []) if isinstance(reviewer, dict) and reviewer.get("reviewer")]
-    return [Check("GitHub environment approvals", "OK" if reviewers else "FAIL",
-                  "Production environment requires reviewer approval." if reviewers else
-                  "Configure at least one required reviewer in repository Settings > Environments > prod.")]
+        reviewer_rule = next(
+            (rule for rule in rules if isinstance(rule, dict) and rule.get("type") == "required_reviewers"), {}
+        )
+    reviewers = reviewer_rule.get("reviewers")
+    if not isinstance(reviewers, list) or not any(isinstance(entry, dict) and entry.get("reviewer") for entry in reviewers):
+        return Check(name, "FAIL", f"Add a required reviewer in {settings}.")
+    if reviewer_rule.get("prevent_self_review") is not True:
+        return Check(name, "FAIL", f"Enable Prevent self-review in {settings}.")
+    if environment.get("can_admins_bypass") is not False:
+        return Check(name, "FAIL", f"Verify that Allow administrators to bypass configured protection rules is disabled in {settings}.")
+
+    branch_detail = f"Allow only the exact {DEFAULT_BRANCH} branch and no tags in {settings}."
+    branch_policy = environment.get("deployment_branch_policy")
+    if not isinstance(branch_policy, dict) or branch_policy.get("custom_branch_policies") is not True:
+        return Check(name, "FAIL", branch_detail)
+
+    result = gh_command_fn(root, ["api", f"{endpoint}/deployment-branch-policies"])
+    if result.returncode != 0:
+        return Check(name, "FAIL", f"Cannot verify production deployment branches: {compact_error(result)}")
+    payload = parse_json_object(result.stdout)
+    policies = payload.get("branch_policies")
+    if payload.get("total_count") != 1 or not isinstance(policies, list) or len(policies) != 1:
+        return Check(name, "FAIL", branch_detail)
+    rule = policies[0]
+    if not isinstance(rule, dict) or rule.get("name") != DEFAULT_BRANCH or rule.get("type") != "branch":
+        return Check(name, "FAIL", branch_detail)
+    return Check(name, "OK", f"Production requires an independent reviewer, disables admin bypass, and allows only the {DEFAULT_BRANCH} branch.")
 
 
 def collect_branch_checks(
