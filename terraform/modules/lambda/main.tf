@@ -111,7 +111,6 @@ resource "aws_lambda_function" "workload" {
 
   environment {
     variables = {
-      AWS_REGION         = var.aws_region
       ENVIRONMENT        = var.environment
       OUTPUT_BUCKET_NAME = var.output_bucket_name
     }

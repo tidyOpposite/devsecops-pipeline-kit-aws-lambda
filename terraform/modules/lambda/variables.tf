@@ -1,8 +1,3 @@
-variable "aws_region" {
-  description = "AWS region exposed to the Lambda runtime."
-  type        = string
-}
-
 variable "environment" {
   description = "Deployment environment."
   type        = string

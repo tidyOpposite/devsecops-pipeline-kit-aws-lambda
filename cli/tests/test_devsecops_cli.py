@@ -1998,6 +1998,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("precondition", lambda_tf)
         self.assertIn("latest|bootstrap", lambda_tf)
         self.assertNotIn(":bootstrap", lambda_tf)
+        self.assertNotRegex(lambda_tf, r'(?m)^\s*"?AWS_REGION"?\s*=')
         self.assertIn("kms_key_arn", lambda_tf)
         self.assertIn("reserved_concurrent_executions", lambda_tf)
         self.assertIn("DenyInsecureTransport", storage_tf)
