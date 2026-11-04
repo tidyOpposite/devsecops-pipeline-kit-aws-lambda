@@ -2212,7 +2212,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
     def test_collect_aws_checks_successful_resources(self) -> None:
         cfg = cli.default_config()
         cfg["backend"]["bucket"] = "state-bucket"
-        cfg["lambda_image_uri"] = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123"
+        cfg["lambda_image_uri"] = "210987654321.dkr.ecr.us-east-1.amazonaws.com/external/lambda:sha-abc123"
 
         def completed(command: list[str], stdout: str = "{}") -> subprocess.CompletedProcess[str]:
             return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
@@ -2242,6 +2242,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
                     json.dumps({"logGroups": [{"logGroupName": "/aws/lambda/devsecops-pipeline-prod-lambda", "retentionInDays": 365}]}),
                 )
             if "ecr describe-images" in command_text:
+                self.assertIn("--registry-id 210987654321 --repository-name external/lambda", command_text)
                 return completed(command, json.dumps({"imageDetails": [{"imageTags": ["sha-abc123"]}]}))
             return subprocess.CompletedProcess(command, 1, stdout="", stderr="unexpected command")
 

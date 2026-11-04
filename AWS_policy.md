@@ -222,13 +222,27 @@ environment names are stable.
         "ecr:DescribeRepositories",
         "ecr:GetDownloadUrlForLayer",
         "ecr:GetLifecyclePolicy",
+        "ecr:GetRepositoryPolicy",
         "ecr:PutImageScanningConfiguration",
         "ecr:PutImageTagMutability",
         "ecr:PutLifecyclePolicy",
+        "ecr:SetRepositoryPolicy",
         "ecr:TagResource",
         "ecr:UntagResource"
       ],
       "Resource": "arn:aws:ecr:<AWS_REGION>:<ACCOUNT_ID>:repository/<PROJECT_NAME>-*-lambda-repo"
+    },
+    {
+      "Sid": "ManageECRKMSGrants",
+      "Effect": "Allow",
+      "Action": ["kms:CreateGrant", "kms:RetireGrant"],
+      "Resource": "arn:aws:kms:<AWS_REGION>:<ACCOUNT_ID>:key/*",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "ecr.<AWS_REGION>.amazonaws.com",
+          "aws:ResourceTag/Project": "<PROJECT_NAME>"
+        }
+      }
     },
     {
       "Sid": "ManageWorkloadWithTerraform",
@@ -290,6 +304,15 @@ environment names are stable.
   ]
 }
 ```
+
+An operator creating the built-in repository with Terraform needs its ECR
+and KMS permissions in the target account. For an external repository, grant
+the deploy role `ecr:BatchGetImage` and `ecr:GetDownloadUrlForLayer` on that
+repository ARN. A cross-account repository must also authorize the consumer
+account and the Lambda service as described in the
+[AWS Lambda image permissions guide](https://docs.aws.amazon.com/lambda/latest/dg/images-create.html#images-create-permissions).
+The local deployment reviewer also needs these two ECR read actions and
+`ecr:GetAuthorizationToken`. Local AWS doctor uses `ecr:DescribeImages`.
 
 ## Plan Role Guidance
 

@@ -43,7 +43,7 @@ from .aws import (
     fetch_health_url,
     is_resource_missing,
     missing_or_error_detail,
-    resolve_ecr_image_digest,
+    verify_ecr_lambda_image,
 )
 from .deploy import (
     DEPLOYMENT_ENVIRONMENT,
@@ -3105,15 +3105,9 @@ def review_deployment_intent(
             raise ConfigValidationError(f"Cannot read the repository configuration for rollback: {compact_error(remote)}")
         cfg = decode_pipeline_config(remote.stdout, production=True, image_uri=image_uri)
 
-    image = parse_ecr_image_uri(image_uri)
-    if image is None or image.region != cfg["aws_region"] or not is_immutable_image(image_uri):
-        raise ConfigValidationError("Select an immutable ECR image in the deployment region.")
-    if image.digest:
-        digest_uri = f"{image.registry}/{image.repository}@{image.digest.lower()}"
-    else:
-        if not command_exists("aws"):
-            raise ConfigValidationError("Install and authenticate AWS CLI to resolve the ECR tag, or select a reviewed @sha256 digest.")
-        digest_uri = resolve_ecr_image_digest(root, image_uri, cfg["aws_region"], aws_json_fn=aws_json)
+    if not command_exists("aws"):
+        raise ConfigValidationError("Install and authenticate AWS CLI to verify the selected ECR image.")
+    digest_uri = verify_ecr_lambda_image(root, image_uri, cfg["aws_region"], aws_json_fn=aws_json)
     intent = DeploymentIntent(name, commit_sha, deployment_config_sha256(cfg, digest_uri), digest_uri)
     return intent, cfg
 

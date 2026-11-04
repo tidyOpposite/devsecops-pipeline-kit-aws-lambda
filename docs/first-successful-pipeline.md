@@ -98,9 +98,9 @@ bucket and DynamoDB lock table exist in the active AWS account.
 
 ## 3. Bring Your Own Lambda Image
 
-Build and publish the Lambda workload image outside this repository. The image
-must be an AWS Lambda-compatible container image in ECR and must use an
-immutable tag or digest.
+Build a single-platform Linux `amd64` Lambda image outside this repository.
+Publish it with an immutable tag or digest to an existing ECR repository,
+or publish it after provisioning the built-in repository in step 4.
 
 ```bash
 devsecops image validate \
@@ -146,6 +146,9 @@ The CLI generates ignored `dist/devsecops/backend.hcl`. Local plan commands
 pass this file to Terraform explicitly. GitHub Actions generates its own copy
 from your repository configuration. Leave the tracked `terraform/backend.tf`
 template unchanged; your backend names do not need to be committed.
+
+If you use the kit's ECR repository, [provision it and publish the image](bring-your-own-image.md#provision-the-built-in-repository-before-the-first-deploy)
+before running the production preflight.
 
 ## 5. Configure GitHub Repository Settings
 
@@ -241,10 +244,10 @@ devsecops deploy prod --dry-run
 ```
 
 The preview shows the repository, current remote `main` commit, effective
-configuration SHA-256, backend, and exact ECR image digest. To resolve a tag,
-the CLI uses local AWS credentials with `ecr:BatchGetImage`. An image URI
-already pinned to `@sha256` can be reviewed without local AWS credentials.
-The runner checks that the digest is still available before changing AWS.
+configuration SHA-256, backend, and exact ECR image digest. For both tags and
+digests, the CLI uses local AWS credentials to verify the manifest,
+Linux `amd64` platform, and ECR pull access. The runner repeats these checks
+under the deploy role before initializing Terraform.
 
 Then confirm the pinned inputs and dispatch the protected workflow:
 

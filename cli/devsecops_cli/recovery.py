@@ -10,7 +10,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from .aws import _aws_command, _aws_json, compact_error, fetch_health_url, resolve_ecr_image_digest, resolved_lambda_image_uri
+from .aws import (
+    _aws_command, _aws_json, compact_error, fetch_health_url, resolve_ecr_image_digest,
+    resolved_lambda_image_uri, verify_ecr_lambda_image,
+)
 from .images import parse_ecr_image_uri
 from .models import ConfigValidationError
 
@@ -125,12 +128,19 @@ def main() -> int:
     env = os.environ
     try:
         command = sys.argv[1]
-        if command == "capture":
+        if command == "verify-image":
+            image = env["LAMBDA_IMAGE_URI"]
+            ref = parse_ecr_image_uri(image)
+            if ref is None or not ref.digest:
+                raise RecoveryError("The runner requires the reviewed ECR image digest.")
+            verified = verify_ecr_lambda_image(root, image, env["AWS_REGION"])
+            write_actions_values(env["GITHUB_OUTPUT"], {"registry_id": ref.registry_id})
+            print(f"Verified linux/amd64 image and ECR pull access: {verified}")
+        elif command == "capture":
             function = f"{env['PROJECT_NAME']}-{env['DEPLOY_ENVIRONMENT']}-lambda"
             current = lambda_image(root, function, env["AWS_REGION"])
             if env["DEPLOY_MODE"] == "rollback" and current is None:
                 raise RecoveryError("Lambda is missing. Manual rollback requires an existing function.")
-            resolve_ecr_image_digest(root, env["LAMBDA_IMAGE_URI"], env["AWS_REGION"])
             previous = current.digest_uri if current else ""
             if previous and env["DEPLOY_MODE"] == "deploy":
                 resolve_ecr_image_digest(root, previous, env["AWS_REGION"])

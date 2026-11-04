@@ -32,6 +32,10 @@ class EcrImageRef:
     tag: str | None = None
     digest: str | None = None
 
+    @property
+    def registry_id(self) -> str:
+        return self.registry.split(".", 1)[0]
+
 
 @dataclass(frozen=True)
 class Control:

@@ -6,6 +6,7 @@ workflow contract without dispatching a workflow or contacting cloud services.
 """
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -13,11 +14,14 @@ import stat
 import subprocess
 import tempfile
 import unittest
+import urllib.request
+import urllib.response
 from contextlib import redirect_stdout
+from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
-from devsecops_cli import config, deploy, recovery
+from devsecops_cli import aws as aws_provider, config, deploy, recovery
 from devsecops_cli import main as cli
 
 
@@ -540,17 +544,15 @@ class DeploymentCommandTests(unittest.TestCase):
 class DeploymentIntentTests(unittest.TestCase):
     def test_review_resolves_tag_before_producing_dispatch_inputs(self) -> None:
         cfg = deployment_config()
-        registry_image = {"images": [{"imageId": {"imageDigest": "sha256:" + "b" * 64}}]}
-        completed = subprocess.CompletedProcess([], 0, "", "")
         gh_reads = [subprocess.CompletedProcess([], 0, text, "") for text in ("acme/pipeline\n", COMMIT_SHA + "\n")]
         with patch.object(cli, "gh_command", side_effect=gh_reads) as gh, \
              patch.object(cli, "command_exists", return_value=True), \
-             patch.object(cli, "aws_json", return_value=(registry_image, completed)) as aws:
+             patch.object(cli, "verify_ecr_lambda_image", return_value=IMAGE_DIGEST) as verify:
             intent, reviewed = cli.review_deployment_intent(ROOT_DIR, IMAGE, cfg)
         self.assertEqual(intent, fixture_intent(IMAGE, cfg)[0])
         self.assertIs(reviewed, cfg)
         self.assertIn("repos/acme/pipeline/git/ref/heads/main", gh.call_args.args[1])
-        self.assertIn("imageTag=sha-new", aws.call_args.args[1])
+        verify.assert_called_once_with(ROOT_DIR, IMAGE, cfg["aws_region"], aws_json_fn=cli.aws_json)
         self.assertIn(f"image_uri={IMAGE_DIGEST}", deploy.workflow_dispatch_args("deploy", intent))
 
     def test_rollback_uses_remote_settings_for_the_reviewed_digest(self) -> None:
@@ -558,12 +560,114 @@ class DeploymentIntentTests(unittest.TestCase):
         remote["backend"]["key"] = "state-from-github.tfstate"
         values = ("acme/pipeline", COMMIT_SHA, config.pipeline_config_json(remote))
         gh_reads = [subprocess.CompletedProcess([], 0, value, "") for value in values]
-        with patch.object(cli, "gh_command", side_effect=gh_reads) as gh, patch.object(cli, "aws_json") as aws:
+        with patch.object(cli, "gh_command", side_effect=gh_reads) as gh, \
+             patch.object(cli, "command_exists", return_value=True), \
+             patch.object(cli, "verify_ecr_lambda_image", return_value=PREVIOUS_DIGEST) as verify:
             intent, reviewed = cli.review_deployment_intent(ROOT_DIR, PREVIOUS_DIGEST)
-        aws.assert_not_called()
+        verify.assert_called_once_with(ROOT_DIR, PREVIOUS_DIGEST, remote["aws_region"], aws_json_fn=cli.aws_json)
         self.assertEqual(intent, fixture_intent(PREVIOUS_DIGEST, remote)[0])
         self.assertEqual(reviewed["backend"]["key"], "state-from-github.tfstate")
         self.assertIn("repos/acme/pipeline/actions/variables/PIPELINE_CONFIG_JSON", gh.call_args.args[1])
+
+    def test_missing_pinned_digest_stops_deploy_before_confirmation_or_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cfg = create_deployment_project(root)
+            cfg["lambda_image_uri"] = IMAGE_DIGEST
+            cli.write_config(root, cfg)
+            gh_reads = [subprocess.CompletedProcess([], 0, value, "") for value in ("acme/pipeline", COMMIT_SHA)]
+            with patch.object(cli, "repo_root", return_value=root), \
+                 patch.object(cli, "list_deployment_runs", return_value=([], None)), \
+                 patch.object(cli, "inspect_active_lambda_image", return_value=("", None)), \
+                 patch.object(cli, "production_deployment_preflight_checks", return_value=[]), \
+                 patch.object(cli, "command_exists", return_value=True), \
+                 patch.object(cli, "gh_command", side_effect=gh_reads), \
+                 patch.object(cli, "aws_json", return_value=({"images": []}, subprocess.CompletedProcess([], 0, "", ""))), \
+                 patch.object(cli, "confirm_cloud_deployment") as confirm, \
+                 patch.object(cli, "dispatch_cloud_deployment") as dispatch, redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(cli.main(["deploy", "prod"]), cli.EXIT_VALIDATION_FAILED)
+            self.assertIn("unavailable in ECR", output.getvalue())
+            confirm.assert_not_called()
+            dispatch.assert_not_called()
+
+
+class EcrImageVerificationTests(unittest.TestCase):
+    registry = "210987654321.dkr.ecr.us-east-1.amazonaws.com"
+    image_uri = registry + "/external/lambda:sha-abc123"
+    layer_digest = "sha256:" + "f" * 64
+
+    def test_validates_stored_manifest_and_platform_with_the_image_registry(self) -> None:
+        cases = [
+            ("application/vnd.oci.image.manifest.v1+json", "application/vnd.oci.image.config.v1+json", "amd64", None),
+            ("application/vnd.docker.distribution.manifest.v2+json", "application/vnd.docker.container.image.v1+json", "amd64", None),
+            ("application/vnd.oci.image.manifest.v1+json", "application/vnd.oci.image.config.v1+json", "arm64", "linux/amd64"),
+            ("application/vnd.oci.image.manifest.v1+json", "application/vnd.oci.image.config.v1+json", "amd64", "Cannot pull"),
+            ("application/vnd.oci.image.index.v1+json", "", "amd64", "single-platform"),
+        ]
+        for media_type, config_type, architecture, error in cases:
+            with self.subTest(media_type=media_type, architecture=architecture, error=error):
+                blob = json.dumps({"os": "linux", "architecture": architecture}).encode()
+                config_digest = "sha256:" + hashlib.sha256(blob).hexdigest()
+                manifest = json.dumps({
+                    "schemaVersion": 2, "mediaType": media_type,
+                    "config": {"mediaType": config_type, "digest": config_digest, "size": len(blob)},
+                    "layers": [{"digest": self.layer_digest}],
+                })
+                digest = "sha256:" + hashlib.sha256(manifest.encode()).hexdigest()
+                identity = {"imageId": {"imageDigest": digest}, "registryId": "210987654321", "repositoryName": "external/lambda"}
+                responses = [
+                    {"images": [identity]},
+                    {"images": [{**identity, "imageManifest": manifest}]},
+                    {"layerDigest": self.layer_digest, "downloadUrl": "https://s3.example.test/layer"},
+                    {"authorizationData": [{"authorizationToken": "ZmFrZQ=="}]},
+                ]
+                completed = subprocess.CompletedProcess([], 0, "", "")
+                results = [(response, completed) for response in responses]
+                if error == "Cannot pull":
+                    results[2] = ({}, subprocess.CompletedProcess([], 254, "", "AccessDeniedException"))
+                with patch.object(aws_provider, "_read_ecr_config", return_value=blob) as read_blob, \
+                     patch.object(aws_provider, "_aws_json", side_effect=results) as aws:
+                    args = (ROOT_DIR, self.image_uri, "us-east-1")
+                    if error:
+                        with self.assertRaisesRegex(cli.ConfigValidationError, error):
+                            aws_provider.verify_ecr_lambda_image(*args, aws_json_fn=aws)
+                    else:
+                        self.assertEqual(aws_provider.verify_ecr_lambda_image(*args, aws_json_fn=aws),
+                                         self.registry + "/external/lambda@" + digest)
+                    self.assertIn("imageTag=sha-abc123", aws.call_args_list[0].args[1])
+                    self.assertIn("imageDigest=" + digest, aws.call_args_list[1].args[1])
+                    for call in aws.call_args_list:
+                        command = call.args[1]
+                        if "--registry-id" in command:
+                            self.assertEqual(command[command.index("--registry-id") + 1], "210987654321")
+                    if config_type and error != "Cannot pull":
+                        read_blob.assert_called_once_with(aws_provider.parse_ecr_image_uri(self.image_uri),
+                                                          config_digest, len(blob), "ZmFrZQ==")
+                    else:
+                        read_blob.assert_not_called()
+
+    def test_registry_blob_redirect_omits_authorization(self) -> None:
+        requests = []
+        target = "https://s3.example.test/blob"
+
+        def respond(handler, request):
+            requests.append(request)
+            headers = Message()
+            if len(requests) == 1:
+                headers["Location"] = target
+                response = urllib.response.addinfourl(io.BytesIO(b""), headers, request.full_url, 307)
+                response.msg = "Temporary Redirect"
+                return response
+            response = urllib.response.addinfourl(io.BytesIO(b"config"), headers, request.full_url, 200)
+            response.msg = "OK"
+            return response
+
+        ref = aws_provider.parse_ecr_image_uri(self.image_uri)
+        with patch.object(urllib.request.HTTPSHandler, "https_open", autospec=True, side_effect=respond):
+            self.assertEqual(aws_provider._read_ecr_config(ref, self.layer_digest, 6, "ZmFrZQ=="), b"config")
+        self.assertEqual(requests[0].get_header("Authorization"), "Basic ZmFrZQ==")
+        self.assertEqual(requests[1].full_url, target)
+        self.assertIsNone(requests[1].get_header("Authorization"))
 
 
 class RecoveryTests(unittest.TestCase):
@@ -586,11 +690,11 @@ class RecoveryTests(unittest.TestCase):
         completed = subprocess.CompletedProcess([], 0, "", "")
         image = {"images": [{"imageId": {"imageDigest": "sha256:" + "a" * 64}}]}
         with patch.object(cli, "aws_json", side_effect=[(image, completed), ({"images": []}, completed)]) as aws:
-            self.assertEqual(cli.resolve_ecr_image_digest(ROOT_DIR, PREVIOUS_IMAGE, self.region, aws_json_fn=aws), PREVIOUS_DIGEST)
+            self.assertEqual(aws_provider.resolve_ecr_image_digest(ROOT_DIR, PREVIOUS_IMAGE, self.region, aws_json_fn=aws), PREVIOUS_DIGEST)
             self.assertIn("imageTag=sha-old", aws.call_args.args[1])
             self.assertIn("123456789012", aws.call_args.args[1])
             with self.assertRaisesRegex(cli.ConfigValidationError, "unavailable in ECR"):
-                cli.resolve_ecr_image_digest(ROOT_DIR, PREVIOUS_DIGEST, self.region, aws_json_fn=aws)
+                aws_provider.resolve_ecr_image_digest(ROOT_DIR, PREVIOUS_DIGEST, self.region, aws_json_fn=aws)
             self.assertIn("imageDigest=sha256:" + "a" * 64, aws.call_args.args[1])
 
     def test_restore_updates_only_code_and_requires_state_and_health(self) -> None:
@@ -677,7 +781,13 @@ class DeploymentWorkflowContractTests(unittest.TestCase):
         self.assertIn("apply -input=false -no-color workload.tfplan", workflow)
         self.assertIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}", workflow)
         self.assertNotIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}-${{", workflow)
-        self.assertLess(workflow.index("recovery capture"), workflow.index("- name: Bootstrap KMS and ECR"))
+        image_gate = workflow.index("recovery verify-image")
+        self.assertLess(workflow.index("role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}"), image_gate)
+        self.assertLess(image_gate, workflow.index("recovery capture"))
+        self.assertLess(image_gate, workflow.index("workspace select -or-create"))
+        self.assertLess(image_gate, workflow.index("apply -input=false -no-color workload.tfplan"))
+        self.assertNotIn("-target=module.ecr", workflow)
+        self.assertIn("registries: ${{ steps.verify-image.outputs.registry_id }}", workflow)
         self.assertIn("id: apply-workload\n        if: env.DEPLOY_MODE == 'deploy'", workflow)
         self.assertIn("name: Restore requested Lambda image\n        if: env.DEPLOY_MODE == 'rollback'", workflow)
         self.assertIn("failure() && env.DEPLOY_MODE == 'deploy' && (steps.apply-workload.outcome", workflow)

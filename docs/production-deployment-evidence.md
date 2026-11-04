@@ -59,6 +59,8 @@ Complete these before dispatching production:
   account.
 * Publish a Lambda-compatible immutable ECR image before workflow dispatch.
   Use a digest or immutable tag, never `latest` or `bootstrap`.
+  For the kit's repository, follow the separate
+  [ECR bootstrap procedure](bring-your-own-image.md#provision-the-built-in-repository-before-the-first-deploy).
 * Set `enable_http_validation=true` and make sure the workload implements
   `GET /health`.
 * If `ENABLE_DAST=true`, set `API_AUTHORIZATION_TYPE=NONE` only when the public
@@ -155,6 +157,7 @@ Review the run log for these production steps:
 * `Verify reviewed production intent before approval`, with the reviewed commit,
   configuration SHA-256, and ECR digest in the run summary
 * `Verify production policy and prepare pipeline configuration`
+* `Verify reviewed Lambda image in ECR` before Terraform initialization
 * `Capture currently deployed Lambda image`
 * `Verify Terraform recovery state`
 * `Plan production workload from reviewed inputs`

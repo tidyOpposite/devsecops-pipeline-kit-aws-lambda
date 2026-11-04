@@ -251,6 +251,10 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Verify reviewed Lambda image in ECR
+        id: verify-image
+        run: PYTHONPATH=cli python3 -m devsecops_cli.recovery verify-image
+
       - name: Capture currently deployed Lambda image
         id: capture-current-image
         run: PYTHONPATH=cli python3 -m devsecops_cli.recovery capture
@@ -275,6 +279,8 @@ jobs:
       - name: Login to Amazon ECR for image scan
         if: env.ENABLE_SNYK_SCAN == 'true' && env.SNYK_TOKEN != ''
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
+        with:
+          registries: ${{ steps.verify-image.outputs.registry_id }}
 
       - name: Scan configured Lambda image with Snyk
         if: env.ENABLE_SNYK_SCAN == 'true' && env.SNYK_TOKEN != ''
@@ -305,20 +311,6 @@ jobs:
           RECOVERY_FUNCTION_NAME: ${{ steps.capture-current-image.outputs.function_name }}
           RECOVERY_FUNCTION_ARN: ${{ steps.capture-current-image.outputs.function_arn }}
         run: PYTHONPATH=cli python3 -m devsecops_cli.recovery state
-
-      # Provision foundational encryption and registry resources before applying
-      # a workload that references the selected container image.
-      - name: Bootstrap KMS and ECR
-        if: env.DEPLOY_MODE == 'deploy'
-        run: |
-          terraform -chdir="${TF_WORKING_DIR}" apply \
-            -target=module.kms \
-            -target=module.ecr \
-            -auto-approve \
-            -input=false \
-            -no-color \
-            -var="api_authorization_type=${API_AUTHORIZATION_TYPE}" \
-            -var="project_name=${PROJECT_NAME}"
 
       - name: Plan production workload from reviewed inputs
         if: env.DEPLOY_MODE == 'deploy'

@@ -672,13 +672,15 @@ production-proof release record, use
    requests or manual runs.
 5. Run Trivy IaC scanning.
 6. Run `devsecops deploy prod --dry-run` to review the ECR digest, configuration
-   SHA-256, and remote `main` commit. A configured tag requires local AWS CLI
-   access to ECR so the CLI can resolve its digest.
+   SHA-256, and remote `main` commit. The CLI uses local AWS credentials to
+   verify the selected ECR image and its Linux `amd64` platform.
 7. Run `devsecops deploy prod` and confirm the pinned inputs. GitHub verifies
     the inputs before approval and again before requesting AWS credentials.
-8. Capture the previously deployed Lambda digest and verify it remains available in ECR.
+8. Verify the selected image again under the runner's deploy role, then
+   capture the previously deployed Lambda digest and verify it remains in ECR.
 9. Optionally scan the configured Lambda image with Snyk.
-10. Verify the Lambda matches the selected Terraform state, then apply KMS and ECR bootstrap targets.
+10. Verify the Lambda matches the selected Terraform state. To publish to the
+    built-in ECR repository, [provision it separately before the first deployment](docs/bring-your-own-image.md#provision-the-built-in-repository-before-the-first-deploy).
 11. Create a Terraform plan with the reviewed digest and apply that saved plan
     in the same approved run.
 12. Wait for the Lambda update to complete.

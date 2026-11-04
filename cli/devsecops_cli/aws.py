@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import re
@@ -24,7 +25,7 @@ from typing import Any, Callable
 
 from . import VERSION
 from .images import is_immutable_image, parse_ecr_image_uri
-from .models import Check, ConfigValidationError
+from .models import Check, ConfigValidationError, EcrImageRef
 
 
 # Keep process execution behind small adapters so collectors can be exercised
@@ -76,18 +77,15 @@ def compact_error(result: subprocess.CompletedProcess[str]) -> str:
     return output[-1] if output else f"Command exited with {result.returncode}."
 
 
-def resolve_ecr_image_digest(
-    root: Path, image_uri: str, region: str, *,
-    aws_json_fn: Callable[..., tuple[Any, subprocess.CompletedProcess[str]]] = _aws_json,
-) -> str:
-    """Return the exact ECR digest, using the account that owns the referenced registry."""
-
+def _read_ecr_image(
+    root: Path, image_uri: str, region: str, aws_json_fn: Callable[..., tuple[Any, subprocess.CompletedProcess[str]]],
+) -> tuple[EcrImageRef, str, dict]:
     ref = parse_ecr_image_uri(image_uri)
     if not ref or ref.region != region or not is_immutable_image(image_uri):
         raise ConfigValidationError("An immutable ECR image in the deployment region is required.")
     image_id = f"imageDigest={ref.digest.lower()}" if ref.digest else f"imageTag={ref.tag}"
     payload, result = aws_json_fn(root, [
-        "ecr", "batch-get-image", "--registry-id", ref.registry.split(".", 1)[0],
+        "ecr", "batch-get-image", "--registry-id", ref.registry_id,
         "--repository-name", ref.repository, "--image-ids", image_id, "--region", region,
     ])
     if result.returncode != 0:
@@ -100,7 +98,113 @@ def resolve_ecr_image_digest(
     digest = identity.get("imageDigest") if isinstance(identity, dict) else None
     if not isinstance(digest, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", digest) or (ref.digest and ref.digest.lower() != digest):
         raise ConfigValidationError("ECR did not return the expected image digest.")
+    if image.get("registryId", ref.registry_id) != ref.registry_id or image.get("repositoryName", ref.repository) != ref.repository:
+        raise ConfigValidationError("ECR returned an image from a different registry or repository.")
+    return ref, digest, image
+
+
+def resolve_ecr_image_digest(
+    root: Path, image_uri: str, region: str, *,
+    aws_json_fn: Callable[..., tuple[Any, subprocess.CompletedProcess[str]]] = _aws_json,
+) -> str:
+    """Return the exact ECR digest, using the account that owns the referenced registry."""
+
+    ref, digest, _ = _read_ecr_image(root, image_uri, region, aws_json_fn)
     return f"{ref.registry}/{ref.repository}@{digest}"
+
+
+_IMAGE_CONFIG_TYPES = {
+    "application/vnd.docker.distribution.manifest.v2+json": "application/vnd.docker.container.image.v1+json",
+    "application/vnd.oci.image.manifest.v1+json": "application/vnd.oci.image.config.v1+json",
+}
+_MAX_IMAGE_CONFIG_BYTES = 4 * 1024 * 1024
+
+
+class _HttpsBlobRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlsplit(newurl).scheme != "https":
+            raise ConfigValidationError("ECR redirected the image configuration outside HTTPS.")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _read_ecr_config(ref: EcrImageRef, digest: str, size: int, token: str) -> bytes:
+    url = f"https://{ref.registry}/v2/{ref.repository}/blobs/{digest}"
+    request = urllib.request.Request(url)
+    # ECR can redirect blob downloads to presigned URLs. Keep Basic auth on
+    # the original registry request, including when a redirect fails.
+    request.add_unredirected_header("Authorization", f"Basic {token}")
+    try:
+        with urllib.request.build_opener(_HttpsBlobRedirectHandler()).open(request, timeout=20) as response:
+            return response.read(size + 1)
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        raise ConfigValidationError(f"Cannot read the ECR image configuration (HTTP {exc.code}).") from None
+    except (OSError, ValueError, http.client.HTTPException):
+        raise ConfigValidationError("Cannot read the ECR image configuration over HTTPS.") from None
+
+
+def verify_ecr_lambda_image(
+    root: Path, image_uri: str, region: str, *,
+    aws_json_fn: Callable[..., tuple[Any, subprocess.CompletedProcess[str]]] = _aws_json,
+) -> str:
+    """Verify a pullable single-platform image for the kit's x86_64 Lambda."""
+
+    ref, digest, image = _read_ecr_image(root, image_uri, region, aws_json_fn)
+    digest_uri = f"{ref.registry}/{ref.repository}@{digest}"
+    if ref.tag:
+        # ECR may translate manifests requested by tag. Verify the exact
+        # stored object after resolving the tag once.
+        _, _, image = _read_ecr_image(root, digest_uri, region, aws_json_fn)
+    manifest_text = image.get("imageManifest")
+    try:
+        manifest = json.loads(manifest_text)
+    except (TypeError, ValueError):
+        manifest = None
+    if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 2:
+        raise ConfigValidationError("ECR did not return a version 2 image manifest.")
+    media_type = manifest.get("mediaType") or image.get("imageManifestMediaType")
+    if not isinstance(media_type, str) or media_type not in _IMAGE_CONFIG_TYPES or "manifests" in manifest:
+        raise ConfigValidationError("Use a single-platform Docker V2 or OCI image. Build for linux/amd64 with provenance disabled.")
+    if "sha256:" + hashlib.sha256(manifest_text.encode("utf-8")).hexdigest() != digest:
+        raise ConfigValidationError("The ECR manifest content does not match the image digest.")
+    descriptor = manifest.get("config")
+    if not isinstance(descriptor, dict) or descriptor.get("mediaType") != _IMAGE_CONFIG_TYPES[media_type]:
+        raise ConfigValidationError("The manifest lacks a supported container image configuration.")
+    config_digest, size = descriptor.get("digest"), descriptor.get("size")
+    if (not isinstance(config_digest, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", config_digest)
+            or type(size) is not int or not 0 < size <= _MAX_IMAGE_CONFIG_BYTES):
+        raise ConfigValidationError("The ECR image configuration descriptor has an invalid digest or size.")
+    layers = manifest.get("layers")
+    if not isinstance(layers, list) or not layers:
+        raise ConfigValidationError("The ECR image manifest has no filesystem layers.")
+    layer_digest = layers[0].get("digest") if isinstance(layers[0], dict) else None
+    if not isinstance(layer_digest, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", layer_digest):
+        raise ConfigValidationError("The ECR image manifest has an invalid filesystem layer digest.")
+
+    layer, result = aws_json_fn(root, [
+        "ecr", "get-download-url-for-layer", "--registry-id", ref.registry_id,
+        "--repository-name", ref.repository, "--layer-digest", layer_digest, "--region", region,
+    ])
+    if result.returncode != 0:
+        raise ConfigValidationError(f"Cannot pull image layers from ECR: {compact_error(result)}")
+    if not isinstance(layer, dict) or layer.get("layerDigest") != layer_digest or not layer.get("downloadUrl"):
+        raise ConfigValidationError("ECR did not grant download access to the image layer.")
+    authorization, result = aws_json_fn(root, ["ecr", "get-authorization-token", "--region", region])
+    entries = authorization.get("authorizationData") if isinstance(authorization, dict) else None
+    entry = entries[0] if isinstance(entries, list) and entries else None
+    token = entry.get("authorizationToken") if isinstance(entry, dict) else None
+    if result.returncode != 0 or not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", token):
+        raise ConfigValidationError("Cannot obtain an ECR authorization token. Verify credentials and ecr:GetAuthorizationToken.")
+    content = _read_ecr_config(ref, config_digest, size, token)
+    if len(content) != size or "sha256:" + hashlib.sha256(content).hexdigest() != config_digest:
+        raise ConfigValidationError("The downloaded ECR image configuration does not match its descriptor.")
+    try:
+        configuration = json.loads(content)
+    except ValueError:
+        configuration = None
+    if not isinstance(configuration, dict) or (configuration.get("os"), configuration.get("architecture")) != ("linux", "amd64"):
+        raise ConfigValidationError("Lambda uses x86_64. Publish a single-platform linux/amd64 image.")
+    return digest_uri
 
 
 # Terraform and the CLI share this naming contract.  Centralizing it prevents
@@ -288,12 +392,14 @@ def collect_aws_checks(
             # prove their image existence through AWS APIs.
             checks.append(Check("Configured ECR image", "INFO", "Image URI is not an AWS ECR URI; existence check skipped.", scored=False))
         else:
-            image_id = f"imageTag={image_ref.tag}" if image_ref.tag else f"imageDigest={image_ref.digest}"
+            image_id = f"imageDigest={image_ref.digest.lower()}" if image_ref.digest else f"imageTag={image_ref.tag}"
             image_payload, image_result = aws_json_fn(
                 root,
                 [
                     "ecr",
                     "describe-images",
+                    "--registry-id",
+                    image_ref.registry_id,
                     "--repository-name",
                     image_ref.repository,
                     "--image-ids",
@@ -803,5 +909,6 @@ __all__ = [
     "missing_or_error_detail",
     "parse_ecr_image_uri",
     "resolve_ecr_image_digest",
+    "verify_ecr_lambda_image",
     "resolve_health_url",
 ]

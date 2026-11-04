@@ -361,7 +361,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
         epilog=_help_epilog(
             ("devsecops deploy prod --dry-run", "devsecops deploy prod --watch"),
             (
-                "Preflight and --dry-run are read-only.",
+                "Preflight and --dry-run use local AWS credentials to verify the image in ECR.",
                 "A confirmed run dispatches the protected workflow with the exact immutable image; the local CLI never writes AWS directly.",
             ),
         ),
