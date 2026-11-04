@@ -18,6 +18,7 @@ jobs:
     permissions:
       # Repository writes are scoped to the single job that creates the release.
       contents: write
+      actions: read
 
     steps:
       - name: Checkout repository
@@ -30,20 +31,62 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Classify release tag
+        id: tag
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[[:alnum:].-]+)?$ ]]; then
+            echo "Expected a version tag such as v1.0.0 or v1.0.0-rc.1." >&2
+            exit 1
+          fi
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            echo "prerelease=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+          fi
+          if [[ "${GITHUB_REF_NAME}" != v0.* && "${GITHUB_REF_NAME}" != *-* ]]; then
+            echo "stable=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "stable=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Verify stable release evidence and retrieve reviewed assets
+        if: steps.tag.outputs.stable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export PYTHONPATH=cli
+          version="$(python -c 'from devsecops_cli import VERSION; print(VERSION)')"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+          commit="$(git rev-parse HEAD)"
+          draft="evidence-${GITHUB_REF_NAME}"
+          metadata="$(gh release view "${draft}" --repo "${GITHUB_REPOSITORY}" --json isDraft,targetCommitish)"
+          jq -e --arg commit "${commit}" '.isDraft and .targetCommitish == $commit' <<< "${metadata}"
+          gh release download "${draft}" --repo "${GITHUB_REPOSITORY}" --pattern release-evidence.zip --dir "${RUNNER_TEMP}"
+          evidence_dir="${RUNNER_TEMP}/release-evidence"
+          python -m devsecops_cli.release_evidence unpack "${RUNNER_TEMP}/release-evidence.zip" "${evidence_dir}"
+          python -m devsecops_cli criteria --strict --format json --evidence-dir "${evidence_dir}" --verify-github "${GITHUB_REPOSITORY}"
+          ci_run="$(jq -r '.ci_run_id' "${evidence_dir}/release-proof.json")"
+          gh run download "${ci_run}" --repo "${GITHUB_REPOSITORY}" --name release-candidate --dir dist
+          (cd dist && sha256sum -c SHA256SUMS)
+          python -m devsecops_cli criteria --strict --format json --evidence-dir "${evidence_dir}" --artifacts-dir dist
+
       # Pinned packaging tools make wheel and source archive creation repeatable.
       - name: Build Python package artifacts
+        if: steps.tag.outputs.stable != 'true'
         run: |
           python -m pip install --upgrade pip==26.1.2 build==1.5.0 setuptools==82.0.1 wheel==0.47.0
           python -m build
 
       # Ship the reviewed standalone installer alongside Python package formats.
       - name: Stage installer
+        if: steps.tag.outputs.stable != 'true'
         run: |
           cp install.sh dist/install.sh
           chmod 0755 dist/install.sh
 
       # Cover every downloadable artifact and immediately verify the manifest.
       - name: Generate release checksums
+        if: steps.tag.outputs.stable != 'true'
         run: |
           cd dist
           sha256sum install.sh *.whl *.tar.gz > SHA256SUMS
@@ -70,4 +113,4 @@ jobs:
             dist/*.tar.gz
             dist/SHA256SUMS
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.tag.outputs.prerelease == 'true' }}

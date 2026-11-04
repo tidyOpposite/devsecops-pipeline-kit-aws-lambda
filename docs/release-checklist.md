@@ -134,6 +134,10 @@ git push origin v0.14.0
 ```
 
 The `Publish GitHub Release` workflow runs on `v*.*.*` tags.
+For a final tag at `v1.0.0` or later, complete the [production evidence workflow](production-deployment-evidence.md#final-verification-gate)
+and stage its separate draft before pushing the stable tag. The publisher
+cross-checks GitHub runs and logs for the release commit and publishes the
+reviewed CI candidate artifacts. A missing or invalid bundle fails publication.
 
 ## 6. Verify The Published Release
 

@@ -126,6 +126,11 @@ from .config import (
     write_config,
 )
 from .workflow import decode_pipeline_config
+from .release_evidence import (
+    WSL2_EVIDENCE_REQUIRED_FILES,
+    production_evidence_checks,
+    wsl_evidence_checks,
+)
 from .completion import (
     COMPLETION_COMMANDS,
     COMPLETION_OPTIONS,
@@ -297,35 +302,6 @@ EXIT_INTERRUPTED = 130
 READINESS_CATEGORIES = ["Local", "Terraform", "GitHub", "AWS", "Security", "Deployment"]
 CANCEL_INPUTS = {"b", "back", "cancel", "q", "quit"}
 MENU_CANCEL_INPUTS = CANCEL_INPUTS | {"0"}
-PRODUCTION_EVIDENCE_REQUIRED_FILES = [
-    "release-install.txt",
-    "release-checksums.txt",
-    "config.json",
-    "config-validate.json",
-    "readiness.json",
-    "readiness-report.md",
-    "audit-report.json",
-    "terraform-generated.auto.tfvars",
-    "github-setup.sh",
-    "github-variables.env",
-    "setup-checklist.md",
-    "github-doctor.json",
-    "branch-doctor.json",
-    "github-status.json",
-    "workflow-run.json",
-    "terraform-output.json",
-    "aws-outputs.json",
-    "aws-doctor.json",
-    "health.json",
-    "health-response.txt",
-    "cloudwatch-log-groups.json",
-    "cloudwatch-tail.txt",
-    "active-lambda-image.txt",
-    "notes.md",
-]
-WSL2_EVIDENCE_REQUIRED_FILES = [
-    "wsl2-transcript.txt",
-]
 
 
 # Terminal presentation and interactive input helpers.
@@ -2103,33 +2079,8 @@ def make_criterion(
     }
 
 
-def evidence_file_checks(evidence_dir: Path, required_files: list[str]) -> list[dict[str, str]]:
-    checks: list[dict[str, str]] = []
-    for relative in required_files:
-        path = evidence_dir / relative
-        if not path.exists():
-            checks.append({"name": relative, "status": "BLOCKED", "detail": f"Missing {path}."})
-            continue
-        if path.is_file() and path.stat().st_size == 0:
-            checks.append({"name": relative, "status": "BLOCKED", "detail": f"{path} is empty."})
-            continue
-        if path.suffix == ".json":
-            try:
-                json.loads(path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
-                checks.append({"name": relative, "status": "BLOCKED", "detail": f"{path} is not valid JSON: {exc.msg}."})
-                continue
-        checks.append(
-            {
-                "name": relative,
-                "status": "OK",
-                "detail": str(path),
-            }
-        )
-    return checks
-
-
-def v1_criteria_payload(root: Path, evidence_dir: Path | None = None) -> dict[str, Any]:
+def v1_criteria_payload(root: Path, evidence_dir: Path | None = None, *, repository: str | None = None,
+                        artifacts_dir: Path | None = None) -> dict[str, Any]:
     """Evaluate source, test, and evidence requirements for stable release."""
 
     if evidence_dir is None:
@@ -2336,14 +2287,14 @@ def v1_criteria_payload(root: Path, evidence_dir: Path | None = None) -> dict[st
             "production-evidence-bundle-attached",
             "Full AWS/GitHub production evidence bundle is attached.",
             [str(evidence_dir), "docs/production-deployment-evidence.md"],
-            evidence_file_checks(evidence_dir, PRODUCTION_EVIDENCE_REQUIRED_FILES),
+            production_evidence_checks(root, evidence_dir, repository=repository, artifacts_dir=artifacts_dir),
             f"Run docs/production-deployment-evidence.md and store the required files under {evidence_dir_display}.",
         ),
         make_criterion(
             "wsl2-compatibility-transcript-attached",
             "WSL2 compatibility transcript is attached.",
             [str(evidence_dir / WSL2_EVIDENCE_REQUIRED_FILES[0]), "docs/distribution.md"],
-            evidence_file_checks(evidence_dir, WSL2_EVIDENCE_REQUIRED_FILES),
+            wsl_evidence_checks(evidence_dir, root),
             f"Capture WSL2 install, dry-run, completion, and test transcript in {evidence_dir_display}/{WSL2_EVIDENCE_REQUIRED_FILES[0]}.",
         ),
     ]
@@ -2394,7 +2345,12 @@ def cmd_criteria(args: argparse.Namespace) -> int:
 
     root = repo_root()
     evidence_arg = getattr(args, "evidence_dir", None)
-    payload = v1_criteria_payload(root, Path(evidence_arg) if evidence_arg else None)
+    artifacts_arg = getattr(args, "artifacts_dir", None)
+    payload = v1_criteria_payload(
+        root, Path(evidence_arg) if evidence_arg else None,
+        repository=getattr(args, "verify_github", None),
+        artifacts_dir=root / artifacts_arg if artifacts_arg else None,
+    )
     if getattr(args, "format", "human") == "json":
         emit_json(payload)
     else:

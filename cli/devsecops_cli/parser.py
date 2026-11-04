@@ -194,6 +194,8 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
         help=f"Production evidence directory. Defaults to {PRODUCTION_EVIDENCE_DIR}/v{VERSION}.",
     )
     criteria_parser.add_argument("--strict", action="store_true", help="Exit non-zero until all criteria and stable-release gates are OK.")
+    criteria_parser.add_argument("--verify-github", metavar="OWNER/REPO", help="Cross-check CI, deploy and recovery proof with GitHub.")
+    criteria_parser.add_argument("--artifacts-dir", help="Compare the publication wheel with the reviewed wheel checksum.")
     criteria_parser.set_defaults(func=handlers.cmd_criteria)
 
     evidence_parser = subparsers.add_parser("evidence", help=argparse.SUPPRESS)

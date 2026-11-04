@@ -19,6 +19,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from devsecops_cli.release_evidence import PRODUCTION_EVIDENCE_REQUIRED_FILES, WSL2_EVIDENCE_REQUIRED_FILES
+
 package = importlib.import_module("devsecops_cli")
 cli = importlib.import_module("devsecops_cli.main")
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -468,7 +470,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             "health.json",
             "cloudwatch-tail.txt",
             "active-lambda-image.txt",
-            "devsecops status --strict --format json",
+            "devsecops status --deep --strict --format json",
             "devsecops doctor aws --environment prod --strict --format json",
             "Roll back Lambda image on failed deployment validation",
         ]:
@@ -1278,11 +1280,11 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertEqual(gate_statuses["wsl2-compatibility-transcript-attached"], "BLOCKED")
         self.assertTrue(any("production-deployment-evidence" in action for action in payload["next_actions"]))
 
-    def test_criteria_strict_passes_when_required_external_evidence_exists(self) -> None:
+    def test_criteria_strict_rejects_placeholder_external_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             evidence_dir = Path(tmpdir) / "evidence"
             (evidence_dir / "workflow-artifacts").mkdir(parents=True)
-            for relative in [*cli.PRODUCTION_EVIDENCE_REQUIRED_FILES, *cli.WSL2_EVIDENCE_REQUIRED_FILES]:
+            for relative in [*PRODUCTION_EVIDENCE_REQUIRED_FILES, *WSL2_EVIDENCE_REQUIRED_FILES]:
                 path = evidence_dir / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("{}\n" if path.suffix == ".json" else "test evidence\n", encoding="utf-8")
@@ -1294,10 +1296,10 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
 
         payload = json.loads(buffer.getvalue())
 
-        self.assertEqual(result, cli.EXIT_OK)
-        self.assertTrue(payload["stable_ready"])
+        self.assertEqual(result, cli.EXIT_VALIDATION_FAILED)
+        self.assertFalse(payload["stable_ready"])
         self.assertTrue(all(item["status"] == "OK" for item in payload["criteria"]))
-        self.assertTrue(all(item["status"] == "OK" for item in payload["stable_release_gates"]))
+        self.assertTrue(all(item["status"] == "BLOCKED" for item in payload["stable_release_gates"]))
 
     def test_first_success_documented_commands_are_stable(self) -> None:
         first_success_doc = (ROOT_DIR / "docs/first-successful-pipeline.md").read_text(encoding="utf-8")

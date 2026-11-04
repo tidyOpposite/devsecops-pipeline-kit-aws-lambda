@@ -11,10 +11,14 @@ Lambda image, and protected `main` branch.
 
 ## Evidence Bundle
 
-Store live evidence outside Git because `dist/` is ignored:
+Store live evidence outside Git. Collect it for one candidate commit on the
+release repository's `main` branch. The successful CI run for that commit
+provides the package files used in the walkthrough and stable publication.
 
 ```bash
-export RELEASE_TAG="${RELEASE_TAG:-v0.14.0}"
+export RELEASE_TAG="v$(PYTHONPATH=cli python3 -c 'from devsecops_cli import VERSION; print(VERSION)')"
+export RELEASE_SHA="$(git rev-parse HEAD)"
+export RELEASE_REPOSITORY="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 export EVIDENCE_ROOT="${EVIDENCE_ROOT:-dist/devsecops/production-evidence}"
 export EVIDENCE_DIR="${EVIDENCE_DIR:-${EVIDENCE_ROOT}/${RELEASE_TAG}}"
 
@@ -25,23 +29,25 @@ The final bundle should contain:
 
 | Evidence | File |
 | --- | --- |
+| Candidate identity | `release-proof.json` |
 | Release install and checksum proof | `release-install.txt`, `release-checksums.txt` |
 | Local config and strict validation | `config.json`, `config-validate.json` |
 | Rendered/audit evidence | `readiness-report.md`, `audit-report.json`, generated helper artifacts |
 | GitHub setup and branch protection | `github-doctor.json`, `branch-doctor.json` |
-| Workflow dispatch and run result | `workflow-run.json`, `github-status.json`, `workflow-artifacts/` |
+| Workflow dispatch and run result | `workflow-run.json`, `github-status.json` |
 | Terraform deployed outputs | `terraform-output.json` |
 | AWS live resource outputs | `aws-outputs.json`, `aws-doctor.json` |
 | Health and API verification | `health.json`, `health-response.txt` |
 | CloudWatch log proof | `cloudwatch-log-groups.json`, `cloudwatch-tail.txt` |
-| Rollback readiness proof | `active-lambda-image.txt`, workflow log references |
+| Rollback readiness proof | `active-lambda-image.txt`, `automatic-rollback-run.json`, `manual-rollback-run.json` |
+| WSL2 compatibility proof | `wsl2-transcript.txt` |
 
 ## Prerequisites
 
 Complete these before dispatching production:
 
-* Install a verified release package. For `v0.14.0`, use the release wheel and
-  `SHA256SUMS` once published.
+* Select the successful `CLI and Terraform CI` run for the candidate commit on
+  `main`. Copy its run ID into `CI_RUN_ID` for the next section.
 * Use a real GitHub repository with `main` protected by pull requests and the
   required `Security and Terraform Validate` and `Terraform Plan` checks.
 * Configure the GitHub Environment `prod` with required reviewers, self-review
@@ -60,26 +66,25 @@ Complete these before dispatching production:
 
 ## 1. Prove Release Install
 
-Capture the installed CLI version and release artifact verification:
+Download the CI candidate and use the same wheel for the cloud walkthrough and
+WSL2 acceptance. The artifact is retained for 30 days.
 
 ```bash
-devsecops --version | tee "${EVIDENCE_DIR}/release-install.txt"
-
-VERSION="${RELEASE_TAG#v}"
-BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${RELEASE_TAG}"
-WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
-
-curl -fsSLo "${EVIDENCE_DIR}/SHA256SUMS" "${BASE_URL}/SHA256SUMS"
-curl -fsSLo "${EVIDENCE_DIR}/${WHEEL}" "${BASE_URL}/${WHEEL}"
-grep " ${WHEEL}$" "${EVIDENCE_DIR}/SHA256SUMS" > "${EVIDENCE_DIR}/${WHEEL}.SHA256SUMS"
+export CANDIDATE_DIR="$(mktemp -d)"
+export WHEEL="devsecops_pipeline_cli-${RELEASE_TAG#v}-py3-none-any.whl"
+gh run download "${CI_RUN_ID:?set the successful candidate CI run ID}" --repo "${RELEASE_REPOSITORY}" \
+  --name release-candidate --dir "${CANDIDATE_DIR}"
 (
-  cd "${EVIDENCE_DIR}"
-  shasum -a 256 -c "${WHEEL}.SHA256SUMS"
+  set -e
+  cd "${CANDIDATE_DIR}"
+  shasum -a 256 -c SHA256SUMS
+  shasum -a 256 "${WHEEL}"
 ) | tee "${EVIDENCE_DIR}/release-checksums.txt"
+python3 -m venv "${CANDIDATE_DIR}/venv"
+. "${CANDIDATE_DIR}/venv/bin/activate"
+python -m pip install --no-deps "${CANDIDATE_DIR}/${WHEEL}"
+devsecops --version | tee "${EVIDENCE_DIR}/release-install.txt"
 ```
-
-For local pre-release validation, replace the download commands with the local
-build and checksum commands from [Release checklist](release-checklist.md).
 
 ## 2. Prove Local Configuration
 
@@ -90,7 +95,6 @@ artifacts, and export both Markdown and JSON evidence:
 devsecops config show --format json > "${EVIDENCE_DIR}/config.json"
 devsecops config validate --strict --format json > "${EVIDENCE_DIR}/config-validate.json"
 devsecops generate
-devsecops status --strict --format json > "${EVIDENCE_DIR}/readiness.json"
 devsecops report --output "${EVIDENCE_DIR}/readiness-report.md"
 devsecops report --format json --output "${EVIDENCE_DIR}/audit-report.json"
 
@@ -100,8 +104,8 @@ cp dist/devsecops/github-variables.env "${EVIDENCE_DIR}/github-variables.env"
 cp dist/devsecops/setup-checklist.md "${EVIDENCE_DIR}/setup-checklist.md"
 ```
 
-The strict config and readiness commands must exit `0` before production
-dispatch.
+Strict config validation must exit `0`. Capture deep readiness after the first
+successful deploy in step 5.
 
 ## 3. Prove GitHub Setup
 
@@ -110,8 +114,8 @@ workflow state:
 
 ```bash
 devsecops github setup --write
-devsecops doctor github --format json > "${EVIDENCE_DIR}/github-doctor.json"
-devsecops doctor branch --branch main --format json > "${EVIDENCE_DIR}/branch-doctor.json"
+devsecops doctor github --strict --format json > "${EVIDENCE_DIR}/github-doctor.json"
+devsecops doctor branch --branch main --strict --format json > "${EVIDENCE_DIR}/branch-doctor.json"
 devsecops github status --format json > "${EVIDENCE_DIR}/github-status-before.json"
 ```
 
@@ -126,7 +130,7 @@ production boundary, and dispatch the protected workflow from `main`:
 ```bash
 devsecops deploy prod --dry-run
 devsecops deploy prod --yes --watch
-devsecops deploy status --format json > "${EVIDENCE_DIR}/workflow-run.json"
+devsecops deploy status --format json > "${EVIDENCE_DIR}/deployment-status.json"
 devsecops deploy logs > "${EVIDENCE_DIR}/workflow-log.txt"
 devsecops github status --format json > "${EVIDENCE_DIR}/github-status.json"
 ```
@@ -171,6 +175,7 @@ succeeds:
 
 ```bash
 terraform -chdir=terraform output -json > "${EVIDENCE_DIR}/terraform-output.json"
+devsecops status --deep --strict --format json > "${EVIDENCE_DIR}/readiness.json"
 devsecops aws outputs --environment prod --format json > "${EVIDENCE_DIR}/aws-outputs.json"
 devsecops doctor aws --environment prod --strict --format json > "${EVIDENCE_DIR}/aws-doctor.json"
 ```
@@ -259,13 +264,64 @@ matches the previously captured digest, `lambda_current_image_uri` in the
 an approved manual rollback to a reviewed digest and attach both run IDs.
 Use the [rollback runbook](runbooks/failed-rollback.md) if recovery fails.
 
+Set `DEPLOY_RUN_ID`, `AUTOMATIC_ROLLBACK_RUN_ID`, and `MANUAL_ROLLBACK_RUN_ID`
+to the three run IDs. Save the GitHub run and job responses for each run:
+
+```bash
+capture_run() {
+  local run_path="repos/${RELEASE_REPOSITORY}/actions/runs/$1"
+  gh api "${run_path}" > "${EVIDENCE_DIR}/run.tmp.json" &&
+  gh api "${run_path}/jobs?per_page=100" > "${EVIDENCE_DIR}/jobs.tmp.json" &&
+  jq -n --slurpfile run "${EVIDENCE_DIR}/run.tmp.json" --slurpfile jobs "${EVIDENCE_DIR}/jobs.tmp.json" \
+    '{run: $run[0], jobs: $jobs[0].jobs}' > "${EVIDENCE_DIR}/$2"
+}
+capture_run "${DEPLOY_RUN_ID:?set the successful deploy run ID}" workflow-run.json
+capture_run "${AUTOMATIC_ROLLBACK_RUN_ID:?set the failed deploy run ID}" automatic-rollback-run.json
+capture_run "${MANUAL_ROLLBACK_RUN_ID:?set the manual rollback run ID}" manual-rollback-run.json
+```
+
+Set `DEPLOY_DIGEST`, `FAILED_DIGEST`, and `MANUAL_ROLLBACK_DIGEST` to the
+three distinct ECR digest URIs from their run summaries. Capture cloud outputs
+and `/health` for the successful deployment before starting the rollback drills.
+
+```bash
+wheel_sha="$(awk -v wheel="${WHEEL}" '$2 == wheel { print $1 }' "${CANDIDATE_DIR}/SHA256SUMS")"
+jq -n --arg tag "${RELEASE_TAG}" --arg commit "${RELEASE_SHA}" --arg repo "${RELEASE_REPOSITORY}" \
+  --argjson ci "${CI_RUN_ID}" --arg image "${DEPLOY_DIGEST}" --arg failed "${FAILED_DIGEST}" \
+  --arg rollback "${MANUAL_ROLLBACK_DIGEST}" --arg sha "${wheel_sha}" \
+  '{schema_version: 1, tag: $tag, commit_sha: $commit, repository: $repo, ci_run_id: $ci,
+    image_uri: $image, failed_image_uri: $failed, manual_rollback_image_uri: $rollback, wheel_sha256: $sha}' \
+  > "${EVIDENCE_DIR}/release-proof.json"
+```
+
+## 8. Prove WSL2 Compatibility
+
+In a clean Ubuntu WSL2 checkout at the same commit, download and verify the
+CI candidate as in step 1. Activate a fresh virtual environment and capture
+the install and the rest of the walkthrough:
+
+```bash
+(
+  set -e
+  printf 'Release commit: %s\n' "$(git rev-parse HEAD)"
+  uname -a
+  python -m pip install --no-deps "${CANDIDATE_DIR}/${WHEEL}"
+  devsecops --version
+  devsecops setup --mode demo --yes --strict
+  devsecops completion bash
+  PYTHONPATH=cli python -m unittest discover -s cli/tests
+) > wsl2-transcript.txt 2>&1
+```
+
+Copy `wsl2-transcript.txt` into the evidence directory.
+
 ## Post-Deploy Checklist
 
 Before accepting the production proof, confirm:
 
 * Release artifact checksum verification passed.
 * `devsecops config validate --strict` passed.
-* `devsecops status --strict` passed before dispatch.
+* `devsecops status --deep --strict` passed after the successful deployment.
 * `doctor github` and `doctor branch` showed no blocking GitHub setup gaps.
 * Production workflow ran from `main` with `mode=deploy` and
   `environment=prod`.
@@ -306,9 +362,31 @@ After all files are present, run the machine-checkable Version 1.0 gate against
 the evidence directory:
 
 ```bash
-devsecops criteria --strict --evidence-dir "${EVIDENCE_DIR}"
-devsecops criteria --format json --evidence-dir "${EVIDENCE_DIR}" > "${EVIDENCE_DIR}/criteria.json"
+devsecops criteria --strict --format json --evidence-dir "${EVIDENCE_DIR}" \
+  --verify-github "${RELEASE_REPOSITORY}" --artifacts-dir "${CANDIDATE_DIR}" > "${EVIDENCE_DIR}/criteria.json"
 ```
 
 The strict command must exit `0` before a stable tag is cut. If it fails, the
 output names the missing file or criterion and the next action to take.
+
+For a stable tag at `v1.0.0` or later, stage the evidence as a separate draft
+release named `evidence-${RELEASE_TAG}` before pushing the stable tag. The
+publisher verifies the draft target, live GitHub runs and logs, and the exact
+candidate wheel. The evidence archive stays on the draft.
+
+```bash
+export EVIDENCE_ARCHIVE="${CANDIDATE_DIR}/release-evidence.zip"
+PYTHONPATH=cli python3 - <<'PY'
+import os
+from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
+from devsecops_cli.release_evidence import PRODUCTION_EVIDENCE_REQUIRED_FILES, WSL2_EVIDENCE_REQUIRED_FILES
+
+source = Path(os.environ["EVIDENCE_DIR"])
+with ZipFile(os.environ["EVIDENCE_ARCHIVE"], "w", ZIP_DEFLATED) as archive:
+    for name in PRODUCTION_EVIDENCE_REQUIRED_FILES + WSL2_EVIDENCE_REQUIRED_FILES:
+        archive.write(source / name, name)
+PY
+gh release create "evidence-${RELEASE_TAG}" "${EVIDENCE_ARCHIVE}" --repo "${RELEASE_REPOSITORY}" \
+  --draft --target "${RELEASE_SHA}" --title "Evidence for ${RELEASE_TAG}" --notes "Private release evidence staging"
+```

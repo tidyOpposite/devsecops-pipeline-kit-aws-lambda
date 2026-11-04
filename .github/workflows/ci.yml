@@ -67,6 +67,27 @@ jobs:
           python -m pip install --no-deps --no-build-isolation .
           devsecops --version
 
+      - name: Stage candidate release assets
+        if: github.ref == 'refs/heads/main' && matrix.python-version == '3.11'
+        run: |
+          cp install.sh dist/install.sh
+          cd dist
+          sha256sum install.sh *.whl *.tar.gz > SHA256SUMS
+
+      - name: Upload candidate release assets
+        if: github.ref == 'refs/heads/main' && matrix.python-version == '3.11'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-candidate
+          path: |
+            dist/install.sh
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
   terraform-validate:
     name: Terraform Format and Validate
     runs-on: ubuntu-latest

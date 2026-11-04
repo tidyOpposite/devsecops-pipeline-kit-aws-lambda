@@ -24,9 +24,10 @@ stay explicit in docs and release notes, but they do not block `v1.0.0`.
 
 These must be closed before tagging `v1.0.0`.
 
-Run `devsecops criteria --strict` before any stable tag decision. It fails
-until the production evidence bundle and WSL2 transcript are present in the
-evidence directory.
+Run `devsecops criteria --strict` before any stable tag decision. It checks
+the contents of the production evidence bundle and WSL2 transcript against
+the release commit. Stable publication also verifies GitHub runs and logs and
+compares the publication wheel with the reviewed CI candidate.
 
 | Blocker | Closure evidence |
 | --- | --- |
