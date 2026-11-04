@@ -11,7 +11,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.request
+import urllib.response
 from contextlib import redirect_stderr, redirect_stdout
+from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
@@ -305,6 +308,76 @@ class ReadinessRegressionTests(unittest.TestCase):
         checks = github.collect_github_checks(ROOT, customer_config(), command_exists_fn=lambda name: True, gh_command_fn=run)
         self.assertIn(["api", "repos/owner/deployment/environments/prod"], commands)
         self.assertEqual(next(c for c in checks if c.name == "GitHub environment approvals").status, "FAIL")
+
+
+class SignedHealthTests(unittest.TestCase):
+    def test_unsafe_signed_urls_are_rejected_before_signing(self):
+        default_host = "abc123.execute-api.us-east-1.amazonaws.com"
+        cases = [
+            (f"http://{default_host}/health", None),
+            (f"https://{default_host}.example.org/health", None),
+            (f"https://user@{default_host}/health", None),
+            (f"https://{default_host}:8443/health", None),
+            ("https://[broken", None),
+            ("https://api.example.org/health", None),
+            ("https://api.example.org/health", "other.example.org"),
+            ("http://api.example.org/health", "api.example.org"),
+        ]
+        with patch.object(aws, "aws_sigv4_headers") as sign, \
+             patch.object(urllib.request, "urlopen") as unsigned_request, \
+             patch.object(urllib.request, "build_opener") as signed_opener:
+            for url, trusted_host in cases:
+                with self.subTest(url=url, trusted_host=trusted_host):
+                    status, detail = aws.fetch_health_url(url, aws_sigv4=True, trusted_host=trusted_host)
+                    self.assertIsNone(status)
+                    self.assertTrue(detail)
+            sign.assert_not_called()
+            unsigned_request.assert_not_called()
+            signed_opener.assert_not_called()
+
+    def test_signed_redirects_fail_without_contacting_target(self):
+        source = "https://abc123.execute-api.us-east-1.amazonaws.com/health"
+        target = "https://redirect.example.org/health"
+        requests = []
+
+        def respond(handler, request):
+            requests.append(request)
+            headers = Message()
+            if request.full_url == source:
+                headers["Location"] = target
+                response = urllib.response.addinfourl(io.BytesIO(b""), headers, request.full_url, 302)
+                response.msg = "Found"
+                return response
+            response = urllib.response.addinfourl(io.BytesIO(b"ok"), headers, request.full_url, 200)
+            response.msg = "OK"
+            return response
+
+        credentials = {"AWS_ACCESS_KEY_ID": "fixture-id", "AWS_SECRET_ACCESS_KEY": "fixture-key",
+                       "AWS_SESSION_TOKEN": "fixture-session", "AWS_REGION": "us-east-1"}
+        with patch.dict(os.environ, credentials, clear=True), \
+             patch.object(urllib.request.HTTPSHandler, "https_open", autospec=True, side_effect=respond):
+            code, output = invoke(ROOT, ["health", "--url", source, "--aws-sigv4", "--format", "json"])
+            self.assertEqual(code, cli.EXIT_VALIDATION_FAILED)
+            response = json.loads(output)["checks"][1]
+            self.assertEqual(response["status"], "FAIL")
+            self.assertIn("HTTP 302", response["detail"])
+            self.assertIn("reject HTTP redirects", response["detail"])
+            self.assertEqual([request.full_url for request in requests], [source])
+            self.assertTrue(requests[0].get_header("Authorization").startswith("AWS4-HMAC-SHA256"))
+            self.assertEqual(requests[0].get_header("X-amz-security-token"), "fixture-session")
+
+            requests.clear()
+            self.assertEqual(aws.fetch_health_url(source), (200, "ok"))
+            self.assertEqual([request.full_url for request in requests], [source, target])
+            self.assertIsNone(requests[-1].get_header("Authorization"))
+            self.assertIsNone(requests[-1].get_header("X-amz-security-token"))
+
+            requests.clear()
+            code, output = invoke(ROOT, ["health", "--url", target, "--aws-sigv4", "--trusted-host",
+                                         "redirect.example.org", "--format", "json"])
+            self.assertEqual(code, cli.EXIT_OK)
+            self.assertEqual([request.full_url for request in requests], [target])
+            self.assertEqual(requests[0].get_header("X-amz-security-token"), "fixture-session")
 
 
 class ValidationAndUiTests(unittest.TestCase):

@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import shutil
 import subprocess
 import urllib.error
@@ -487,7 +488,22 @@ def aws_sigv4_headers(url: str, region: str | None = None, now: dt.datetime | No
     return request_headers, None
 
 
-def fetch_health_url(url: str, timeout: int = 20, aws_sigv4: bool = False, aws_region: str | None = None) -> tuple[int | None, str]:
+class _SignedHealthResponseProcessor(urllib.request.HTTPErrorProcessor):
+    def https_response(self, request, response):
+        # Return redirects before urllib parses Location or opens another URL.
+        if 300 <= response.code < 400:
+            return response
+        return super().https_response(request, response)
+
+
+def fetch_health_url(
+    url: str,
+    timeout: int = 20,
+    aws_sigv4: bool = False,
+    aws_region: str | None = None,
+    *,
+    trusted_host: str | None = None,
+) -> tuple[int | None, str]:
     """Fetch a health endpoint and return its status plus a short detail.
 
     Network failures use ``None`` for the status, whereas HTTP error responses
@@ -495,25 +511,51 @@ def fetch_health_url(url: str, timeout: int = 20, aws_sigv4: bool = False, aws_r
     """
 
     stripped_url = url.strip()
-    parsed = urllib.parse.urlparse(stripped_url)
+    try:
+        parsed = urllib.parse.urlparse(stripped_url)
+    except ValueError:
+        return None, "Invalid health URL. Provide a valid absolute HTTP(S) URL."
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None, "Health URL must be an absolute http or https URL."
-    headers = {"User-Agent": f"devsecops-cli/{VERSION}"}
+    if trusted_host is not None and not aws_sigv4:
+        return None, "--trusted-host requires --aws-sigv4."
+
+    request = urllib.request.Request(stripped_url, headers={"User-Agent": f"devsecops-cli/{VERSION}"})
+    open_url = urllib.request.urlopen
     if aws_sigv4:
+        if parsed.scheme != "https":
+            return None, "AWS SigV4 health checks require HTTPS."
+        host = parsed.hostname or ""
+        if (
+            not re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*", host)
+            or parsed.netloc.lower() not in {host, f"{host}:443"}
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 or char == "\\" for char in stripped_url)
+        ):
+            return None, "AWS SigV4 health checks require a DNS hostname on port 443 without URL user information."
+        if trusted_host is not None:
+            if host != trusted_host.lower():
+                return None, "The health URL hostname must exactly match --trusted-host."
+        elif not re.fullmatch(r"[a-z0-9-]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?", host):
+            return None, "Use an API Gateway hostname or explicitly allow your custom domain with --trusted-host HOST."
+
         signed_headers, error = aws_sigv4_headers(stripped_url, region=aws_region)
         if error:
             return None, error
-        headers.update(signed_headers)
-    request = urllib.request.Request(stripped_url, headers=headers)
+        for name, value in signed_headers.items():
+            request.add_unredirected_header(name, value)
+        open_url = urllib.request.build_opener(_SignedHealthResponseProcessor()).open
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
+        with open_url(request, timeout=timeout) as response:
             # The URL is restricted to HTTP(S) above; only a small response
             # preview is retained to keep CLI output bounded.
-            status = int(getattr(response, "status", response.getcode()))
+            status = response.getcode()
+            if aws_sigv4 and 300 <= status < 400:
+                return status, "Signed health checks reject HTTP redirects. Use the final HTTPS endpoint."
             preview = response.read(200).decode("utf-8", errors="replace").strip()
             return status, preview or f"HTTP {status}"
     except urllib.error.HTTPError as exc:
-        return int(exc.code), str(exc)
+        with exc:
+            return int(exc.code), str(exc)
     except urllib.error.URLError as exc:
         return None, str(exc.reason)
     except TimeoutError:
@@ -528,6 +570,7 @@ def collect_health_checks(
     aws_sigv4: bool = False,
     aws_region: str | None = None,
     *,
+    trusted_host: str | None = None,
     resolve_health_fn: Callable[..., tuple[str, str]] = resolve_health_url,
     fetch_health_fn: Callable[..., tuple[int | None, str]] = fetch_health_url,
 ) -> list[Check]:
@@ -543,8 +586,8 @@ def collect_health_checks(
     ]
     if not health_url:
         return checks
-    status, detail = fetch_health_fn(health_url, timeout=timeout, aws_sigv4=aws_sigv4, aws_region=aws_region)
-    ok_status = status is not None and 200 <= status < 400
+    status, detail = fetch_health_fn(health_url, timeout=timeout, aws_sigv4=aws_sigv4, aws_region=aws_region, trusted_host=trusted_host)
+    ok_status = status is not None and 200 <= status < (300 if aws_sigv4 else 400)
     checks.append(
         Check(
             "Health response",

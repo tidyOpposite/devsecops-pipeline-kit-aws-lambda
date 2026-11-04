@@ -482,6 +482,13 @@ devsecops health --url https://abc123.execute-api.us-east-1.amazonaws.com/health
 devsecops github status --format compact --strict
 ```
 
+Signed health checks require HTTPS and reject redirects. For a custom API
+Gateway domain you control, pass its exact hostname with `--trusted-host`:
+
+```bash
+devsecops health --url https://api.example.com/health --aws-sigv4 --trusted-host api.example.com
+```
+
 `github status` and `doctor actions` show failed jobs, failed steps, concrete
 next actions, and runbook links. Use `devsecops status --deep --strict` in CI when any
 scored gap should fail the command.

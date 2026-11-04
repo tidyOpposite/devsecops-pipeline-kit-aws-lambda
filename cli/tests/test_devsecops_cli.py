@@ -2162,7 +2162,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
 
     def test_health_fetch_requires_sigv4_credentials_when_enabled(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            status, detail = cli.fetch_health_url("https://api.example/health", aws_sigv4=True)
+            status, detail = cli.fetch_health_url("https://abc123.execute-api.us-east-1.amazonaws.com/health", aws_sigv4=True)
         self.assertIsNone(status)
         self.assertIn("AWS SigV4 health checks require", detail)
 

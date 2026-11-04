@@ -316,6 +316,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     health_parser.add_argument("--timeout", type=int, default=20, help="HTTP timeout in seconds.")
     health_parser.add_argument("--aws-sigv4", action="store_true", help="Sign the health request with AWS SigV4 for IAM-protected API Gateway routes.")
     health_parser.add_argument("--aws-region", help="AWS region to use for SigV4 signing. Defaults to AWS_REGION or AWS_DEFAULT_REGION.")
+    health_parser.add_argument("--trusted-host", metavar="HOST", help="Exact custom API Gateway hostname to trust for SigV4. Requires --aws-sigv4.")
     health_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     health_parser.set_defaults(func=handlers.cmd_health)
 

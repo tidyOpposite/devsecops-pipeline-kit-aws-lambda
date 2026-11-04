@@ -600,6 +600,8 @@ def collect_health_checks(
     timeout: int = 20,
     aws_sigv4: bool = False,
     aws_region: str | None = None,
+    *,
+    trusted_host: str | None = None,
 ) -> list[Check]:
     return _aws_adapter.collect_health_checks(
         root,
@@ -608,6 +610,7 @@ def collect_health_checks(
         timeout=timeout,
         aws_sigv4=aws_sigv4,
         aws_region=aws_region,
+        trusted_host=trusted_host,
         resolve_health_fn=resolve_health_url,
         fetch_health_fn=fetch_health_url,
     )
@@ -3810,6 +3813,7 @@ def cmd_health(args: argparse.Namespace) -> int:
         timeout=getattr(args, "timeout", 20),
         aws_sigv4=getattr(args, "aws_sigv4", False),
         aws_region=getattr(args, "aws_region", None),
+        trusted_host=getattr(args, "trusted_host", None),
     )
     emit_check_output(
         "Health",

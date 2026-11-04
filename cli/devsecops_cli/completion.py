@@ -96,7 +96,7 @@ COMPLETION_OPTIONS = {
     "doctor all": ["--help", "--deep", "--branch", "--environment", "--strict", "--format"],
     "dry-run": ["--help", "--preset", "--image-uri", "--environment"],
     "preflight": ["--help", "--image-uri", "--environment", "--format"],
-    "health": ["--help", "--url", "--timeout", "--aws-sigv4", "--aws-region", "--format"],
+    "health": ["--help", "--url", "--timeout", "--aws-sigv4", "--aws-region", "--trusted-host", "--format"],
     "render": ["--help", "--dry-run"],
     "report": ["--help", "--deep", "--format", "--output", "--print"],
     "github": ["--help"],

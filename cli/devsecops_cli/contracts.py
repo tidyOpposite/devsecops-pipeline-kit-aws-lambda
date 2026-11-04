@@ -153,7 +153,7 @@ COMMAND_CONTRACTS: list[dict[str, Any]] = [
         "command": "devsecops health",
         "status": "stable",
         "scope": "operations",
-        "stable_flags": ["--url", "--timeout", "--format"],
+        "stable_flags": ["--url", "--timeout", "--aws-sigv4", "--aws-region", "--trusted-host", "--format"],
         "formats": ["human", "compact", "json"],
         "json_kind": "health",
         "notes": "Read-only deployed /health validation.",
