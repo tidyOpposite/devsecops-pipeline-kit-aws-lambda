@@ -649,7 +649,7 @@ and [Security controls and policy presets](docs/security-controls.md).
 | Push to `main` | n/a | none | No workflow run. Maintainer pushes do not consume Actions minutes. |
 | Manual `workflow_dispatch`, `mode=plan` | selected `dev/staging/prod` | `plan` only | No apply. |
 | Manual `workflow_dispatch`, `mode=deploy`, `environment=prod`, branch `main` | `prod` | `apply` | Scan the image when enabled, deploy Lambda, check `/health`, run DAST when enabled, and roll back on failure when a previous image is available. |
-| Manual `workflow_dispatch`, `mode=rollback`, `environment=prod`, branch `main` | `prod` | `apply` | Restore the explicit immutable image through the protected environment, then run the same validation. |
+| Manual `workflow_dispatch`, `mode=rollback`, `environment=prod`, branch `main` | `prod` | Targeted refresh-only | Restore the selected ECR digest on the existing Lambda, record it in Terraform state, and verify `/health`. |
 | Push tag `v*.*.*` | n/a | n/a | Publish GitHub Release from `docs/release-<tag>.md` or `CHANGELOG.md` with installer, wheel, source distribution, and `SHA256SUMS`. |
 
 ## Deployment Flow
@@ -670,17 +670,18 @@ production-proof release record, use
    prevents planning or applying the Lambda workload without an explicit
    immutable image URI.
 7. Optionally scan the configured Lambda image with Snyk.
-8. Apply KMS and ECR bootstrap targets so supporting resources exist.
-9. Capture the previously deployed Lambda image URI.
+8. Capture the previously deployed Lambda digest and verify it remains available in ECR.
+9. Verify the Lambda matches the selected Terraform state, then apply KMS and ECR bootstrap targets.
 10. Run `devsecops deploy prod`; the CLI checks readiness, prevents overlapping
     production runs, confirms the image, and starts `mode=deploy` with
     `environment=prod` from `main`.
 11. Apply the full Terraform workload with the configured image URI.
 12. Wait for the Lambda update to complete.
-13. Optionally call `/health`; run OWASP ZAP baseline DAST only when
+13. Check `/health`. Run OWASP ZAP baseline DAST only when enabled and
     `API_AUTHORIZATION_TYPE=NONE`.
-14. If deployment validation fails, update Lambda back to the previous image
-    and re-apply Terraform with the previous URI to remove state drift.
+14. If apply or validation fails and a previous digest was captured, restore
+    that Lambda image, reconcile Terraform state in refresh-only mode, and
+    verify the restored endpoint responds to `/health`.
 15. Use `devsecops deploy status`, `devsecops deploy logs`, and, when an
     explicit operator rollback is required, `devsecops deploy rollback` for the
     rest of the deployment lifecycle without constructing `gh` commands.

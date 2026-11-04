@@ -488,12 +488,14 @@ def aws_sigv4_headers(url: str, region: str | None = None, now: dt.datetime | No
     return request_headers, None
 
 
-class _SignedHealthResponseProcessor(urllib.request.HTTPErrorProcessor):
-    def https_response(self, request, response):
+class _NoRedirectResponseProcessor(urllib.request.HTTPErrorProcessor):
+    def http_response(self, request, response):
         # Return redirects before urllib parses Location or opens another URL.
         if 300 <= response.code < 400:
             return response
-        return super().https_response(request, response)
+        return super().http_response(request, response)
+
+    https_response = http_response
 
 
 def fetch_health_url(
@@ -503,6 +505,7 @@ def fetch_health_url(
     aws_region: str | None = None,
     *,
     trusted_host: str | None = None,
+    allow_redirects: bool = True,
 ) -> tuple[int | None, str]:
     """Fetch a health endpoint and return its status plus a short detail.
 
@@ -543,14 +546,16 @@ def fetch_health_url(
             return None, error
         for name, value in signed_headers.items():
             request.add_unredirected_header(name, value)
-        open_url = urllib.request.build_opener(_SignedHealthResponseProcessor()).open
+    if aws_sigv4 or not allow_redirects:
+        open_url = urllib.request.build_opener(_NoRedirectResponseProcessor()).open
     try:
         with open_url(request, timeout=timeout) as response:
             # The URL is restricted to HTTP(S) above; only a small response
             # preview is retained to keep CLI output bounded.
             status = response.getcode()
-            if aws_sigv4 and 300 <= status < 400:
-                return status, "Signed health checks reject HTTP redirects. Use the final HTTPS endpoint."
+            if (aws_sigv4 or not allow_redirects) and 300 <= status < 400:
+                prefix = "Signed health checks" if aws_sigv4 else "Health checks"
+                return status, f"{prefix} reject HTTP redirects. Use the final HTTPS endpoint."
             preview = response.read(200).decode("utf-8", errors="replace").strip()
             return status, preview or f"HTTP {status}"
     except urllib.error.HTTPError as exc:
@@ -657,7 +662,7 @@ def inspect_aws_outputs(
         outputs["lambda_last_update_status"] = str(configuration.get("LastUpdateStatus") or "")
         code = lambda_payload.get("Code", {})
         if isinstance(code, dict):
-            outputs["lambda_image_uri"] = str(code.get("ImageUri") or "")
+            outputs["lambda_image_uri"] = resolved_lambda_image_uri(lambda_payload) or str(code.get("ImageUri") or "")
         outputs["lambda_image_uri"] = outputs["lambda_image_uri"] or str(configuration.get("ImageUri") or "")
         checks.append(Check("Lambda function", lambda_readiness_status(configuration),
                             f"{lambda_function} (state: {outputs['lambda_state'] or 'unknown'}, update: {outputs['lambda_last_update_status'] or 'unknown'})"))
@@ -701,6 +706,13 @@ def inspect_aws_outputs(
     return outputs, checks
 
 
+def resolved_lambda_image_uri(payload: Any) -> str:
+    code = payload.get("Code") if isinstance(payload, dict) else None
+    image_uri = code.get("ResolvedImageUri") if isinstance(code, dict) else None
+    ref = parse_ecr_image_uri(image_uri)
+    return image_uri if ref and ref.digest else ""
+
+
 def inspect_active_lambda_image(
     root: Path,
     cfg: dict[str, Any],
@@ -728,10 +740,9 @@ def inspect_active_lambda_image(
         return "", compact_error(result)
     if not isinstance(payload, dict):
         return "", "Could not parse the deployed Lambda image from AWS."
-    code = payload.get("Code")
-    image_uri = str(code.get("ImageUri") or "") if isinstance(code, dict) else ""
+    image_uri = resolved_lambda_image_uri(payload)
     if not image_uri:
-        return "", "The deployed Lambda function did not report a container image URI."
+        return "", "The deployed Lambda function did not report a resolved ECR image digest."
     return image_uri, None
 
 

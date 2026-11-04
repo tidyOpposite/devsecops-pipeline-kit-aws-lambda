@@ -3010,7 +3010,7 @@ def rollback_deployment_preflight_checks(
             )
         )
     if active_image_uri and active_image_uri == target_image_uri:
-        checks.append(Check("Rollback changes image", "FAIL", "The requested rollback image is already active."))
+        checks.append(Check("Rollback changes image", "INFO", "The requested digest is already active. The workflow will verify it and reconcile Terraform state.", scored=False))
     else:
         checks.append(
             Check(
@@ -3257,6 +3257,11 @@ def cmd_deploy_rollback(args: argparse.Namespace) -> int:
     if not target_image_uri:
         print(fail("No rollback target is available."))
         print("Pass `--image-uri <immutable-ecr-image-uri>` or run a deployment from this CLI first.")
+        return EXIT_VALIDATION_FAILED
+    recorded_image = parse_ecr_image_uri(inferred_image)
+    if not explicit_image and (recorded_image is None or not recorded_image.digest):
+        print(fail("The saved rollback target does not identify an exact digest."))
+        print("Pass a reviewed `--image-uri <repository>@sha256:<digest>`.")
         return EXIT_VALIDATION_FAILED
     if not source_run_id and source_record:
         source_run_id = source_record.get("run_id", "")

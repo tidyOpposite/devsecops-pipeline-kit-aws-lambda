@@ -17,13 +17,14 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from devsecops_cli import deploy
+from devsecops_cli import deploy, recovery
 from devsecops_cli import main as cli
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-new"
 PREVIOUS_IMAGE = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-old"
+PREVIOUS_DIGEST = PREVIOUS_IMAGE.rsplit(":", 1)[0] + "@sha256:" + "a" * 64
 
 
 def deployment_config() -> dict[str, object]:
@@ -188,17 +189,17 @@ class DeploymentCommandTests(unittest.TestCase):
     """Verify CLI orchestration while replacing every external provider call."""
 
     # Provider inspection and public parser surface.
-    def test_active_image_inspection_uses_get_function_code_uri(self) -> None:
+    def test_active_image_inspection_uses_resolved_digest(self) -> None:
         cfg = deployment_config()
         completed = subprocess.CompletedProcess(["aws"], 0, "", "")
         with patch.object(cli, "command_exists", return_value=True), patch.object(
             cli,
             "aws_json",
-            return_value=({"Code": {"ImageUri": PREVIOUS_IMAGE}}, completed),
+            return_value=({"Code": {"ImageUri": PREVIOUS_IMAGE, "ResolvedImageUri": PREVIOUS_DIGEST}}, completed),
         ) as aws_json:
             image_uri, error = cli.inspect_active_lambda_image(Path("/tmp/project"), cfg)
 
-        self.assertEqual(image_uri, PREVIOUS_IMAGE)
+        self.assertEqual(image_uri, PREVIOUS_DIGEST)
         self.assertIsNone(error)
         self.assertEqual(aws_json.call_args.args[1][:2], ["lambda", "get-function"])
 
@@ -456,7 +457,7 @@ class DeploymentCommandTests(unittest.TestCase):
                 {
                     "operation": "deploy",
                     "requested_image_uri": IMAGE,
-                    "previous_image_uri": PREVIOUS_IMAGE,
+                    "previous_image_uri": PREVIOUS_DIGEST,
                     "run_id": "42",
                 },
             )
@@ -474,9 +475,20 @@ class DeploymentCommandTests(unittest.TestCase):
             state = deploy.load_deployment_state(root)
 
         self.assertEqual(result, cli.EXIT_OK)
-        dispatch.assert_called_once_with(root, "rollback", PREVIOUS_IMAGE)
+        dispatch.assert_called_once_with(root, "rollback", PREVIOUS_DIGEST)
         self.assertEqual(state["deployments"][0]["source_run_id"], "42")
         self.assertEqual(state["deployments"][0]["previous_image_uri"], IMAGE)
+
+    def test_implicit_rollback_rejects_legacy_tag_before_provider_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            create_deployment_project(root)
+            deploy.record_deployment(root, {"operation": "deploy", "previous_image_uri": PREVIOUS_IMAGE})
+            with patch.object(cli, "repo_root", return_value=root), patch.object(cli, "list_deployment_runs") as runs, \
+                 redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(cli.main(["deploy", "rollback", "--yes"]), cli.EXIT_VALIDATION_FAILED)
+            runs.assert_not_called()
+            self.assertIn("exact digest", output.getvalue())
 
     def test_deploy_rollback_without_record_or_explicit_image_fails_before_provider_calls(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -504,6 +516,99 @@ class DeploymentCommandTests(unittest.TestCase):
         self.assertIn("not the deployment workflow", buffer.getvalue())
 
 
+class RecoveryTests(unittest.TestCase):
+    function = "devsecops-pipeline-prod-lambda"
+    region = "us-east-1"
+    arn = f"arn:aws:lambda:{region}:123456789012:function:{function}"
+    health_url = "https://abc123.execute-api.us-east-1.amazonaws.com/health"
+
+    def test_only_lambda_resource_not_found_is_first_deployment(self) -> None:
+        missing = subprocess.CompletedProcess([], 254, "", "An error occurred (ResourceNotFoundException) when calling the GetFunction operation: missing")
+        denied = subprocess.CompletedProcess([], 254, "", "An error occurred (AccessDeniedException) when calling the GetFunction operation: denied")
+        with patch.object(recovery, "_aws_json", side_effect=[({}, missing), ({}, denied), ({}, subprocess.CompletedProcess([], 0, "", ""))]):
+            self.assertIsNone(recovery.lambda_image(ROOT_DIR, self.function, self.region))
+            with self.assertRaisesRegex(recovery.RecoveryError, "AccessDeniedException"):
+                recovery.lambda_image(ROOT_DIR, self.function, self.region)
+            with self.assertRaisesRegex(recovery.RecoveryError, "resolved image digest"):
+                recovery.lambda_image(ROOT_DIR, self.function, self.region)
+
+    def test_ecr_resolves_legacy_tag_and_rejects_deleted_recovery_image(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        image = {"images": [{"imageId": {"imageDigest": "sha256:" + "a" * 64}}]}
+        with patch.object(recovery, "_aws_json", side_effect=[(image, completed), ({"images": []}, completed)]) as aws:
+            self.assertEqual(recovery.ecr_digest(ROOT_DIR, PREVIOUS_IMAGE, self.region), PREVIOUS_DIGEST)
+            self.assertIn("imageTag=sha-old", aws.call_args.args[1])
+            self.assertIn("123456789012", aws.call_args.args[1])
+            with self.assertRaisesRegex(recovery.RecoveryError, "unavailable in ECR"):
+                recovery.ecr_digest(ROOT_DIR, PREVIOUS_DIGEST, self.region)
+            self.assertIn("imageDigest=sha256:" + "a" * 64, aws.call_args.args[1])
+
+    def test_restore_updates_only_code_and_requires_state_and_health(self) -> None:
+        active = recovery.LambdaImage(PREVIOUS_DIGEST, PREVIOUS_DIGEST, self.arn, "restored", "Active", "Successful")
+        current = recovery.LambdaImage(IMAGE, IMAGE, self.arn, "current-revision", "Active", "Successful")
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        for recorded, status, error in [(PREVIOUS_DIGEST, 200, None), (PREVIOUS_DIGEST, 302, "/health failed"), (IMAGE, 200, "Terraform state")]:
+            with self.subTest(recorded=recorded, status=status), \
+                 patch.object(recovery, "ecr_digest", return_value=PREVIOUS_DIGEST), \
+                 patch.object(recovery, "lambda_image", side_effect=[current, active]), \
+                 patch.object(recovery, "_aws_command", return_value=completed) as aws, \
+                 patch.object(recovery, "terraform", side_effect=["", recorded]) as tf, \
+                 patch.object(recovery, "fetch_health_url", return_value=(status, "fixture")) as health, \
+                 redirect_stdout(io.StringIO()) as output:
+                args = (ROOT_DIR, self.function, self.arn, PREVIOUS_DIGEST, self.region, self.health_url, "AWS_IAM")
+                if error:
+                    with self.assertRaisesRegex(recovery.RecoveryError, error):
+                        recovery.restore(*args)
+                    self.assertNotIn("Verified Lambda recovery", output.getvalue())
+                else:
+                    recovery.restore(*args)
+                    self.assertIn("Verified Lambda recovery", output.getvalue())
+                update = aws.call_args_list[0].args[1]
+                self.assertEqual(update[:2], ["lambda", "update-function-code"])
+                self.assertEqual(update[update.index("--revision-id") + 1], "current-revision")
+                self.assertEqual(update[update.index("--image-uri") + 1], PREVIOUS_DIGEST)
+                self.assertEqual(tf.call_args_list[0].args[1:4], ("apply", "-refresh-only", f"-target={recovery.LAMBDA_RESOURCE}"))
+                self.assertEqual(health.called, recorded == PREVIOUS_DIGEST)
+
+    def test_recovery_state_rejects_a_different_aws_account(self) -> None:
+        state = {"values": {
+            "outputs": {"lambda_function_name": {"value": self.function},
+                        "api_gateway_health_url": {"value": self.health_url},
+                        "api_gateway_authorization_type": {"value": "AWS_IAM"}},
+            "root_module": {"child_modules": [{"address": "module.lambda", "resources": [
+                {"address": recovery.LAMBDA_RESOURCE, "values": {"arn": self.arn}},
+            ]}]},
+        }}
+        with patch.object(recovery, "terraform", side_effect=["{}", json.dumps(state), json.dumps(state)]):
+            self.assertEqual(recovery.recovery_state(ROOT_DIR, self.function, ""), {})
+            self.assertEqual(recovery.recovery_state(ROOT_DIR, self.function, self.arn),
+                             {"health_url": self.health_url, "auth_type": "AWS_IAM"})
+            with self.assertRaisesRegex(recovery.RecoveryError, "workspace disagree"):
+                recovery.recovery_state(ROOT_DIR, self.function, self.arn.replace("123456789012", "210987654321"))
+
+    def test_manual_rollback_blocks_a_changed_revision_before_aws_write(self) -> None:
+        current = recovery.LambdaImage(IMAGE, IMAGE, self.arn, "new-revision", "Active", "Successful")
+        with patch.object(recovery, "ecr_digest", return_value=PREVIOUS_DIGEST), \
+             patch.object(recovery, "lambda_image", return_value=current), patch.object(recovery, "_aws_command") as aws:
+            with self.assertRaisesRegex(recovery.RecoveryError, "changed after recovery capture"):
+                recovery.restore(ROOT_DIR, self.function, self.arn, PREVIOUS_DIGEST, self.region, self.health_url,
+                                 "AWS_IAM", expected_revision="old-revision")
+            aws.assert_not_called()
+
+    def test_retry_syncs_state_without_rewriting_already_restored_code(self) -> None:
+        active = recovery.LambdaImage(PREVIOUS_DIGEST, PREVIOUS_DIGEST, self.arn, "restored", "Active", "Successful")
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with patch.object(recovery, "ecr_digest", return_value=PREVIOUS_DIGEST), \
+             patch.object(recovery, "lambda_image", return_value=active), \
+             patch.object(recovery, "_aws_command", return_value=completed) as aws, \
+             patch.object(recovery, "terraform", side_effect=["", PREVIOUS_DIGEST]) as tf, \
+             patch.object(recovery, "fetch_health_url", return_value=(200, "ok")), redirect_stdout(io.StringIO()):
+            recovery.restore(ROOT_DIR, self.function, self.arn, PREVIOUS_DIGEST, self.region, self.health_url, "NONE")
+        aws.assert_called_once()
+        self.assertEqual(aws.call_args.args[1][:3], ["lambda", "wait", "function-updated"])
+        self.assertIn("-refresh-only", tf.call_args_list[0].args)
+
+
 class DeploymentWorkflowContractTests(unittest.TestCase):
     """Pin security-sensitive behavior in the tracked deployment workflow."""
 
@@ -519,7 +624,10 @@ class DeploymentWorkflowContractTests(unittest.TestCase):
         self.assertIn("LAMBDA_IMAGE_URI must be a complete Amazon ECR image URI", workflow)
         self.assertIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}", workflow)
         self.assertNotIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}-${{", workflow)
-        self.assertIn("previous_image_uri=\"$(aws lambda get-function \\", workflow)
+        self.assertLess(workflow.index("recovery capture"), workflow.index("- name: Bootstrap KMS and ECR"))
+        self.assertIn("id: apply-workload\n        if: env.DEPLOY_MODE == 'deploy'", workflow)
+        self.assertIn("name: Restore requested Lambda image\n        if: env.DEPLOY_MODE == 'rollback'", workflow)
+        self.assertIn("failure() && env.DEPLOY_MODE == 'deploy' && (steps.apply-workload.outcome", workflow)
         self.assertIn("environment: prod", workflow)
 
     def test_next_action_uses_cli_deployment_surface(self) -> None:

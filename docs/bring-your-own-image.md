@@ -25,6 +25,14 @@ Digest shape:
 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo@sha256:<64-hex-digest>
 ```
 
+Keep the active image and the digests you rely on for rollback in ECR. The kit
+repository leaves image cleanup to the operator. Review any lifecycle policy
+on a bring-your-own repository so those digests remain pullable. An upgrade
+deploy removes the kit's former 30-image expiration policy, and the deploy
+role needs `ecr:DeleteLifecyclePolicy` for that migration.
+Grant the deploy role `ecr:BatchGetImage` on the repository that stores your
+recovery images. For cross-account ECR, allow the role in the repository policy as well.
+
 ## Validate The Image Locally
 
 Validate the image before writing the value into config:

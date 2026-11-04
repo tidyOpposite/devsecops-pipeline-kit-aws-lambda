@@ -270,6 +270,10 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Capture currently deployed Lambda image
+        id: capture-current-image
+        run: PYTHONPATH=cli python3 -m devsecops_cli.recovery capture
+
       # Enabling the optional image scan makes its credentials and result blocking.
       - name: Require Snyk token when scan is enabled
         if: env.ENABLE_SNYK_SCAN == 'true' && env.SNYK_TOKEN == ''
@@ -305,13 +309,26 @@ jobs:
         run: terraform -chdir="${TF_WORKING_DIR}" init -input=false -no-color -backend-config=../dist/devsecops/backend.hcl
 
       - name: Select Terraform workspace
+        env:
+          PREVIOUS_IMAGE_URI: ${{ steps.capture-current-image.outputs.previous_image_uri }}
         run: |
-          terraform -chdir="${TF_WORKING_DIR}" workspace select "${DEPLOY_ENVIRONMENT}" \
-            || terraform -chdir="${TF_WORKING_DIR}" workspace new "${DEPLOY_ENVIRONMENT}"
+          if [ "${DEPLOY_MODE}" = 'deploy' ] && [ -z "${PREVIOUS_IMAGE_URI}" ]; then
+            terraform -chdir="${TF_WORKING_DIR}" workspace select -or-create "${DEPLOY_ENVIRONMENT}"
+          else
+            terraform -chdir="${TF_WORKING_DIR}" workspace select "${DEPLOY_ENVIRONMENT}"
+          fi
+
+      - name: Verify Terraform recovery state
+        id: recovery-state
+        env:
+          RECOVERY_FUNCTION_NAME: ${{ steps.capture-current-image.outputs.function_name }}
+          RECOVERY_FUNCTION_ARN: ${{ steps.capture-current-image.outputs.function_arn }}
+        run: PYTHONPATH=cli python3 -m devsecops_cli.recovery state
 
       # Provision foundational encryption and registry resources before applying
       # a workload that references the selected container image.
       - name: Bootstrap KMS and ECR
+        if: env.DEPLOY_MODE == 'deploy'
         run: |
           terraform -chdir="${TF_WORKING_DIR}" apply \
             -target=module.kms \
@@ -322,22 +339,11 @@ jobs:
             -var="api_authorization_type=${API_AUTHORIZATION_TYPE}" \
             -var="project_name=${PROJECT_NAME}"
 
-      # Preserve the live image URI as the recovery point for any later failure.
-      - name: Capture currently deployed Lambda image
-        id: capture-current-image
-        run: |
-          function_name="$(terraform -chdir="${TF_WORKING_DIR}" output -raw lambda_function_name 2>/dev/null || echo "${PROJECT_NAME}-${DEPLOY_ENVIRONMENT}-lambda")"
-          previous_image_uri="$(aws lambda get-function \
-            --function-name "${function_name}" \
-            --query 'Code.ImageUri' \
-            --output text 2>/dev/null || true)"
-          echo "function_name=${function_name}" >> "${GITHUB_OUTPUT}"
-          echo "previous_image_uri=${previous_image_uri}" >> "${GITHUB_OUTPUT}"
-
       # Pass the exact validated image into Terraform so desired state and the
       # deployed Lambda revision remain aligned.
       - name: Terraform apply workload with configured Lambda image
         id: apply-workload
+        if: env.DEPLOY_MODE == 'deploy'
         run: |
           terraform -chdir="${TF_WORKING_DIR}" apply \
             -auto-approve \
@@ -347,6 +353,17 @@ jobs:
             -var="project_name=${PROJECT_NAME}" \
             -var="lambda_image_uri=${LAMBDA_IMAGE_URI}"
 
+      - name: Restore requested Lambda image
+        if: env.DEPLOY_MODE == 'rollback'
+        env:
+          RECOVERY_FUNCTION_NAME: ${{ steps.capture-current-image.outputs.function_name }}
+          RECOVERY_FUNCTION_ARN: ${{ steps.capture-current-image.outputs.function_arn }}
+          RECOVERY_REVISION_ID: ${{ steps.capture-current-image.outputs.revision_id }}
+          RECOVERY_IMAGE_URI: ${{ env.LAMBDA_IMAGE_URI }}
+          RECOVERY_HEALTH_URL: ${{ steps.recovery-state.outputs.health_url }}
+          RECOVERY_AUTH_TYPE: ${{ steps.recovery-state.outputs.auth_type }}
+        run: PYTHONPATH=cli python3 -m devsecops_cli.recovery restore
+
       - name: Read deployment outputs
         id: deployment-outputs
         run: |
@@ -354,11 +371,13 @@ jobs:
           echo "api_gateway_health_url=$(terraform -chdir="${TF_WORKING_DIR}" output -raw api_gateway_health_url)" >> "${GITHUB_OUTPUT}"
 
       - name: Wait for Lambda update
+        if: env.DEPLOY_MODE == 'deploy'
         run: aws lambda wait function-updated --function-name "${{ steps.capture-current-image.outputs.function_name }}"
 
       # IAM-protected endpoints are signed with the temporary session credentials;
       # explicitly public endpoints use a normal unauthenticated request.
       - name: Smoke test Lambda health endpoint
+        if: env.DEPLOY_MODE == 'deploy'
         run: |
           health_url="${{ steps.deployment-outputs.outputs.api_gateway_health_url }}"
           if [ "${API_AUTHORIZATION_TYPE}" = "AWS_IAM" ]; then
@@ -374,7 +393,7 @@ jobs:
       # The baseline scanner is unauthenticated, so it is safe and useful only for
       # an API intentionally configured as public.
       - name: Run DAST scan with OWASP ZAP
-        if: env.ENABLE_DAST == 'true' && env.API_AUTHORIZATION_TYPE == 'NONE'
+        if: env.ENABLE_DAST == 'true' && ((env.DEPLOY_MODE == 'deploy' && env.API_AUTHORIZATION_TYPE == 'NONE') || (env.DEPLOY_MODE == 'rollback' && steps.recovery-state.outputs.auth_type == 'NONE'))
         uses: zaproxy/action-baseline@7c4deb10e6261301961c86d65d54a516394f9aed # v0.14.0
         with:
           target: ${{ steps.deployment-outputs.outputs.api_gateway_invoke_url }}
@@ -384,25 +403,17 @@ jobs:
           cmd_options: "-a -m 5 -I"
 
       - name: Skip unauthenticated DAST for IAM-protected API
-        if: env.ENABLE_DAST == 'true' && env.API_AUTHORIZATION_TYPE != 'NONE'
+        if: env.ENABLE_DAST == 'true' && ((env.DEPLOY_MODE == 'deploy' && env.API_AUTHORIZATION_TYPE != 'NONE') || (env.DEPLOY_MODE == 'rollback' && steps.recovery-state.outputs.auth_type != 'NONE'))
         run: |
-          echo "ENABLE_DAST is true, but API_AUTHORIZATION_TYPE=${API_AUTHORIZATION_TYPE}. OWASP ZAP baseline is skipped unless the API is explicitly public."
+          echo "OWASP ZAP baseline is skipped unless the deployed API is explicitly public."
 
-      # On any failed apply or validation, restore both the Lambda code and
-      # Terraform's recorded desired image to the captured recovery point.
+      # Restore the captured image only after an attempted workload apply.
       - name: Roll back Lambda image on failed deployment validation
-        if: failure() && steps.capture-current-image.outputs.previous_image_uri != '' && steps.capture-current-image.outputs.previous_image_uri != 'None'
-        run: |
-          previous_image_uri="${{ steps.capture-current-image.outputs.previous_image_uri }}"
-          function_name="${{ steps.capture-current-image.outputs.function_name }}"
-          aws lambda update-function-code \
-            --function-name "${function_name}" \
-            --image-uri "${previous_image_uri}"
-          aws lambda wait function-updated --function-name "${function_name}"
-          terraform -chdir="${TF_WORKING_DIR}" apply \
-            -auto-approve \
-            -input=false \
-            -no-color \
-            -var="api_authorization_type=${API_AUTHORIZATION_TYPE}" \
-            -var="project_name=${PROJECT_NAME}" \
-            -var="lambda_image_uri=${previous_image_uri}"
+        if: failure() && env.DEPLOY_MODE == 'deploy' && (steps.apply-workload.outcome == 'success' || steps.apply-workload.outcome == 'failure') && steps.capture-current-image.outputs.previous_image_uri != ''
+        env:
+          RECOVERY_FUNCTION_NAME: ${{ steps.capture-current-image.outputs.function_name }}
+          RECOVERY_FUNCTION_ARN: ${{ steps.capture-current-image.outputs.function_arn }}
+          RECOVERY_IMAGE_URI: ${{ steps.capture-current-image.outputs.previous_image_uri }}
+          RECOVERY_HEALTH_URL: ${{ steps.recovery-state.outputs.health_url }}
+          RECOVERY_AUTH_TYPE: ${{ steps.recovery-state.outputs.auth_type }}
+        run: PYTHONPATH=cli python3 -m devsecops_cli.recovery restore

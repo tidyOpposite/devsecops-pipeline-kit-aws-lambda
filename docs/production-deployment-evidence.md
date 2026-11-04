@@ -144,6 +144,7 @@ Review the run log for these production steps:
 * `Verify production policy and prepare pipeline configuration`
 * `Require Lambda image URI`
 * `Capture currently deployed Lambda image`
+* `Verify Terraform recovery state`
 * `Terraform apply workload with configured Lambda image`
 * `Read deployment outputs`
 * `Wait for Lambda update`
@@ -242,17 +243,19 @@ new image and contains the rollback step
 Capture the currently active image after the successful deployment:
 
 ```bash
-aws lambda get-function-configuration \
+aws lambda get-function \
   --function-name "${LAMBDA_FUNCTION}" \
-  --query 'Code.ImageUri' \
+  --query 'Code.ResolvedImageUri' \
   --output text > "${EVIDENCE_DIR}/active-lambda-image.txt"
 ```
 
-Review the workflow log to confirm that `Capture currently deployed Lambda
-image` ran before `Terraform apply workload with configured Lambda image`. If a
-validation step fails during a later deployment, use
-[Failed deployment rollback](runbooks/failed-rollback.md) and attach the failed
-run logs to the same evidence bundle.
+In a controlled deployment account with a working image already deployed,
+deploy a test image that fails `/health`. Capture the failed run and verify
+that the recovery step reports `Verified Lambda recovery`, the active digest
+matches the previously captured digest, `lambda_current_image_uri` in the
+`prod` Terraform state matches it, and the endpoint returns 2xx. Repeat with
+an approved manual rollback to a reviewed digest and attach both run IDs.
+Use the [rollback runbook](runbooks/failed-rollback.md) if recovery fails.
 
 ## Post-Deploy Checklist
 
