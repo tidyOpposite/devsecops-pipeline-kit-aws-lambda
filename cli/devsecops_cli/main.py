@@ -231,6 +231,7 @@ from .readiness import (
     check_status_by_name,
     check_to_dict,
     checks_payload,
+    deployment_gate,
     grouped_readiness_checks,
     overall_breakdown_score,
     readiness_action_detail_for_check,
@@ -240,7 +241,6 @@ from .readiness import (
     readiness_category_for_check,
     readiness_gap_dicts,
     readiness_gap_rows,
-    readiness_gate_dicts,
     readiness_gate_rows,
     readiness_score,
     readiness_score_for_category,
@@ -553,13 +553,16 @@ def aws_json(root: Path, args: list[str], timeout: int = 30) -> tuple[Any, subpr
         return {}, result
 
 
-def collect_aws_checks(root: Path, cfg: dict[str, Any], env_name: str = "prod") -> list[Check]:
+def collect_aws_checks(
+    root: Path, cfg: dict[str, Any], env_name: str = "prod", *, include_workload: bool = True
+) -> list[Check]:
     """Collect AWS checks through the provider adapter using current CLI dependencies."""
 
     return _aws_adapter.collect_aws_checks(
         root,
         cfg,
         env_name,
+        include_workload=include_workload,
         command_exists_fn=command_exists,
         aws_json_fn=aws_json,
         aws_command_fn=aws_command,
@@ -801,11 +804,14 @@ def github_setup_precheck(root: Path, cfg: dict[str, Any], args: argparse.Namesp
 
 
 
-def collect_checks(root: Path, cfg: dict[str, Any], deep: bool = False) -> list[Check]:
+def collect_checks(
+    root: Path, cfg: dict[str, Any], deep: bool = False, *, include_workload: bool = True
+) -> list[Check]:
     return _doctor_service.collect_checks(
         root,
         cfg,
         deep,
+        include_workload=include_workload,
         command_exists_fn=command_exists,
         run_command_fn=run_command,
         image_preflight_fn=collect_image_preflight_checks,
@@ -815,7 +821,8 @@ def collect_checks(root: Path, cfg: dict[str, Any], deep: bool = False) -> list[
 
 
 def next_action(root: Path, cfg: dict[str, Any] | None = None, *,
-                observations: list[Check] | None = None, local_only: bool = False) -> dict[str, Any]:
+                observations: list[Check] | None = None, local_only: bool = False,
+                pre_deploy: bool = False) -> dict[str, Any]:
     return _project_context_service.next_action(
         root,
         cfg,
@@ -824,6 +831,7 @@ def next_action(root: Path, cfg: dict[str, Any] | None = None, *,
         aws_checks_fn=collect_aws_checks,
         observations=observations,
         local_only=local_only,
+        pre_deploy=pre_deploy,
     )
 
 
@@ -889,7 +897,7 @@ def print_gap_summary(checks: list[Check], limit: int = 3) -> None:
 
 
 def collect_dashboard_checks(root: Path, cfg: dict[str, Any], mode: str = "full") -> list[Check]:
-    return _doctor_service.collect_dashboard_checks(
+    checks = _doctor_service.collect_dashboard_checks(
         root,
         cfg,
         mode,
@@ -897,6 +905,24 @@ def collect_dashboard_checks(root: Path, cfg: dict[str, Any], mode: str = "full"
         github_checks_fn=collect_github_checks,
         branch_checks_fn=collect_branch_checks,
     )
+    if mode == "full":
+        api = next((check for check in checks if check.name == "API Gateway" and check.status == "OK"), None)
+        if api is not None:
+            if api.detail.startswith("https://"):
+                url = api.detail.rstrip("/") + "/health"
+                status, detail = fetch_health_url(
+                    url,
+                    aws_sigv4=cfg["api_authorization_type"] == "AWS_IAM",
+                    aws_region=cfg["aws_region"],
+                    allow_redirects=False,
+                )
+                checks.append(Check(
+                    "Health response", "OK" if status is not None and 200 <= status < 300 else "FAIL",
+                    f"HTTP {status} from {url}." if status is not None else detail,
+                ))
+            else:
+                checks.append(Check("Health response", "FAIL", "The production API has no HTTPS endpoint."))
+    return checks
 
 
 
@@ -1111,22 +1137,24 @@ def render_dashboard(root: Path, mode: str = "full", clear: bool = False, *,
 
     if clear:
         clear_screen()
-    mode = mode if mode in {"compact", "full"} else "full"
-    full = mode == "full"
+    mode = mode if mode in {"compact", "pre-deploy", "full"} else "full"
     cfg = cfg if cfg is not None else load_config(root)
     checks = checks if checks is not None else collect_dashboard_checks(root, cfg, mode=mode)
-    action = action if action is not None else next_action(root, cfg, observations=checks, local_only=not full)
+    action = action if action is not None else next_action(
+        root, cfg, observations=checks, local_only=mode == "compact", pre_deploy=mode == "pre-deploy",
+    )
     header(cfg)
     print()
     for line in menu_status(root, cfg, checks=checks):
         print(line)
     print()
-    print_readiness_breakdown(checks, compact=not full)
+    print_readiness_breakdown(checks, compact=mode != "full")
     print()
     print_next_action(action)
-    if not full:
-        print()
-        print(info("Run `devsecops status --deep` for GitHub, AWS, and deep Terraform checks."))
+    if mode != "full":
+        if mode == "compact":
+            print()
+            print(info("Run `devsecops status --deep` for GitHub, AWS, and deep Terraform checks."))
         return
     print()
     draw_table(
@@ -1154,10 +1182,10 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
         time.sleep(interval)
 
 
-def status_payload(checks: list[Check], action: dict[str, Any], deep: bool) -> dict[str, Any]:
+def status_payload(checks: list[Check], action: dict[str, Any], deep: bool, *, pre_deploy: bool = False) -> dict[str, Any]:
     """Return the preferred status contract with one unambiguous score."""
 
-    payload = checks_payload("status", checks, context={"deep": deep})
+    payload = checks_payload("status", checks, context={"deep": deep, "pre_deploy": pre_deploy})
     payload["score"] = overall_breakdown_score(checks)
     payload.pop("overall_breakdown_score", None)
     payload["next_action"] = {
@@ -1177,7 +1205,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     """Show one status surface: current state, blockers, and next action."""
 
     root = repo_root()
-    deep = bool(getattr(args, "deep", False))
+    pre_deploy = bool(getattr(args, "pre_deploy", False))
+    deep = bool(getattr(args, "deep", False)) or pre_deploy
+    mode = "pre-deploy" if pre_deploy else "full" if deep else "compact"
     output_format = getattr(args, "format", "human")
     watch = bool(getattr(args, "watch", False))
     if watch and output_format != "human":
@@ -1186,25 +1216,27 @@ def cmd_status(args: argparse.Namespace) -> int:
     interval = max(1, int(getattr(args, "interval", 5)))
     while True:
         if deep and output_format == "human":
-            print(info("Checking Terraform, GitHub approvals, and AWS resources..."), flush=True)
+            scope = "deployment prerequisites" if pre_deploy else "deployment prerequisites and workload health"
+            print(info(f"Checking {scope}..."), flush=True)
         cfg = load_config(root)
-        checks = collect_dashboard_checks(root, cfg, mode="full" if deep else "compact")
-        action = next_action(root, cfg, observations=checks, local_only=not deep)
+        checks = collect_dashboard_checks(root, cfg, mode=mode)
+        action = next_action(root, cfg, observations=checks, local_only=not deep, pre_deploy=pre_deploy)
         if output_format == "json":
-            emit_json(status_payload(checks, action, deep))
+            emit_json(status_payload(checks, action, deep, pre_deploy=pre_deploy))
         elif output_format == "compact":
             print_readiness_breakdown(checks, compact=True)
             print()
             print_next_action(action)
         else:
-            render_dashboard(root, mode="full" if deep else "compact", clear=watch, cfg=cfg, checks=checks, action=action)
+            render_dashboard(root, mode=mode, clear=watch, cfg=cfg, checks=checks, action=action)
 
-        result = strict_exit_code(checks, strict=bool(getattr(args, "strict", False)), fail_on_warn=True)
-        if getattr(args, "strict", False) and result == EXIT_OK and (
-            action["blocked"] or any(gate["status"] != "OK" for gate in readiness_gate_dicts(checks)
-                                     if gate["gate"] == "Production readiness")
-        ):
-            result = EXIT_VALIDATION_FAILED
+        strict = bool(getattr(args, "strict", False))
+        result = strict_exit_code(checks, strict=strict, fail_on_warn=True)
+        if strict and result == EXIT_OK:
+            prerequisites = deployment_gate(checks, pre_deploy=True)[0]
+            workload = deployment_gate(checks, pre_deploy=False)[0]
+            if prerequisites != "OK" or (not pre_deploy and workload != "OK"):
+                result = EXIT_VALIDATION_FAILED
         if not watch:
             return result
         print()
@@ -4295,6 +4327,7 @@ def menu_deploy_hub() -> None:
     print("[6] Roll back production (review and confirmation required)")
     print("[7] Preview production deployment")
     print("[8] Preview production rollback")
+    print("[9] Check production prerequisites")
     print("[0] Back")
     choice = input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
@@ -4325,6 +4358,8 @@ def menu_deploy_hub() -> None:
         cmd_deploy_prod(argparse.Namespace(dry_run=True, yes=False, watch=False, interval=5))
     elif choice == "8":
         cmd_deploy_rollback(argparse.Namespace(dry_run=True, yes=False, watch=False, interval=5, run_id=None, image_uri=None))
+    elif choice == "9":
+        cmd_status(argparse.Namespace(pre_deploy=True, strict=True, format="human"))
     else:
         print(warn("Unknown option."))
     pause_for_menu()

@@ -89,8 +89,13 @@ the workflow. Machine-readable JSON, TOML, Markdown, generated shell, and
 completion output remains unchanged for scripts.
 
 Compact status checks local inputs and marks cloud readiness as unverified.
-Use `devsecops status --deep --strict` for a production gate that checks
-Terraform, GitHub required reviewers, and observable AWS resource health.
+Use `devsecops status --pre-deploy --strict` before the first deploy to verify
+Terraform, GitHub protections, the AWS state backend, and the configured ECR
+image. Then review the pinned inputs with `devsecops deploy prod --dry-run`.
+After deployment, `devsecops status --deep --strict` also checks the workload
+and requires an HTTP 2xx response from `/health`. For IAM-protected APIs,
+provide SigV4 credentials via the standard AWS environment variables.
+Validate the assembled release evidence separately with `devsecops criteria --strict`.
 Generated files are compared with current config; their existence alone does
 not establish readiness. The menu resumes saved setup and supports deployment,
 rollback, and previews with the same confirmation as command-line execution.
@@ -490,8 +495,8 @@ devsecops health --url https://api.example.com/health --aws-sigv4 --trusted-host
 ```
 
 `github status` and `doctor actions` show failed jobs, failed steps, concrete
-next actions, and runbook links. Use `devsecops status --deep --strict` in CI when any
-scored gap should fail the command.
+next actions, and runbook links. Use `devsecops status --deep --strict` for
+post-deployment verification.
 
 For release review or production proof, collect an attachable evidence bundle
 with the commands in

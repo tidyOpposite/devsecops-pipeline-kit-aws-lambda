@@ -64,7 +64,7 @@ COMPLETION_OPTIONS = {
         "--yes",
         "--strict",
     ],
-    "status": ["--help", "--deep", "--strict", "--format", "--watch", "--interval"],
+    "status": ["--help", "--deep", "--pre-deploy", "--strict", "--format", "--watch", "--interval"],
     "deploy": ["--help"],
     "deploy prod": ["--help", "--dry-run", "--yes", "--watch", "--interval"],
     "deploy status": ["--help", "--run-id", "--watch", "--interval", "--format"],

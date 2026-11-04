@@ -70,7 +70,7 @@ but they are hidden from primary help and shell completion.
 | `devsecops` | Stable | First success | Prints compact project status and the shared next action without prompting. |
 | `devsecops menu` | Stable | Interactive CLI | Opens six product sections: Continue setup, Status, Deploy, Diagnose problems, Configuration, and Advanced. Technical tools remain nested under their relevant section. |
 | `devsecops setup` | Stable | First success | Resumable nine-stage onboarding for mode, dependencies, config, image, backend, AWS identity, GitHub/OIDC, dry-run, and summary. AWS checks are read-only. GitHub changes require confirmation or explicit `--apply-github`; `--yes` alone never authorizes them. |
-| `devsecops status` | Stable | First success | Shows one overall score, status by area, blockers, and one next action. Supports `--deep`, `--strict`, `--watch`, and `--format human\|compact\|json`. |
+| `devsecops status` | Stable | First success | Shows one overall score, status by area, blockers, and one next action. Supports `--deep`, `--pre-deploy`, `--strict`, `--watch`, and `--format human\|compact\|json`. |
 | `devsecops dry-run` | Stable | First success | Previews the first-success path without writing files or requiring AWS credentials. |
 | `devsecops image validate` | Stable | First success | Checks Lambda image URI shape, immutability, and region before production deploy. |
 | `devsecops health` | Stable | Operations | Validates the deployed `/health` endpoint outside GitHub Actions. Uses Terraform output unless `--url` is provided. Signed checks require HTTPS without redirects. Use `--aws-sigv4 --trusted-host HOST` to allow the exact hostname of a custom API Gateway domain. |

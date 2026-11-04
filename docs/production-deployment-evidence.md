@@ -128,12 +128,19 @@ Use the CLI to verify readiness, bind the exact immutable image, confirm the
 production boundary, and dispatch the protected workflow from `main`:
 
 ```bash
+devsecops status --pre-deploy --strict --format json > "${EVIDENCE_DIR}/pre-deploy-status.json"
 devsecops deploy prod --dry-run
 devsecops deploy prod --yes --watch
 devsecops deploy status --format json > "${EVIDENCE_DIR}/deployment-status.json"
 devsecops deploy logs > "${EVIDENCE_DIR}/workflow-log.txt"
 devsecops github status --format json > "${EVIDENCE_DIR}/github-status.json"
 ```
+
+The pre-deployment gate verifies Terraform, GitHub protections, AWS identity,
+the state backend, and the configured ECR image. Lambda, API Gateway, and
+workload logs can be absent at this stage. Initialize both Terraform modules
+for validation in a fresh checkout. Review the exact inputs and workflow
+availability in the dry run before dispatch.
 
 The human dispatch output and JSON status include the GitHub run ID and URL.
 The CLI also saves the run ID, requested image, and previously active image in
@@ -171,7 +178,10 @@ devsecops deploy rollback --dry-run \
 ## 5. Prove Terraform And AWS Outputs
 
 Capture Terraform outputs and read-only AWS inspection after the workflow
-succeeds:
+succeeds. Deep status requires HTTP 2xx from the deployed API's `/health`
+route. For `AWS_IAM`, export `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+and `AWS_SESSION_TOKEN` when using temporary credentials. The caller needs
+`execute-api:Invoke` on the route.
 
 ```bash
 terraform -chdir=terraform output -json > "${EVIDENCE_DIR}/terraform-output.json"

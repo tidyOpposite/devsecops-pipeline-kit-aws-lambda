@@ -38,7 +38,7 @@ COMMAND_CONTRACTS: list[dict[str, Any]] = [
         "command": "devsecops status",
         "status": "stable",
         "scope": "first-success",
-        "stable_flags": ["--deep", "--strict", "--format", "--watch", "--interval"],
+        "stable_flags": ["--deep", "--pre-deploy", "--strict", "--format", "--watch", "--interval"],
         "formats": ["human", "compact", "json"],
         "json_kind": "status",
         "notes": "Combines one project score, status areas, blockers, and the single next action.",

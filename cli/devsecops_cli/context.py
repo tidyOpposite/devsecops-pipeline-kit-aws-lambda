@@ -11,12 +11,13 @@ import shutil
 from pathlib import Path
 from typing import Any, Callable
 
-from .aws import collect_aws_checks
+from .aws import LAMBDA_NOT_DEPLOYED, collect_aws_checks
 from .config import config_path, load_config, validate_config
 from .github import collect_github_checks
 from .images import is_immutable_image
 from .models import Check
 from .paths import CONFIG_FILE, DIST_DIR, GENERATED_TFVARS, REQUIRED_PROJECT_FILES
+from .readiness import WORKLOAD_CHECKS, deployment_gate
 from .render import generated_artifact_gaps
 
 PRODUCTION_DEPLOY_COMMAND = "devsecops deploy prod"
@@ -106,6 +107,7 @@ def next_action(
     aws_checks_fn: Callable[..., list[Check]] = collect_aws_checks,
     observations: list[Check] | None = None,
     local_only: bool = False,
+    pre_deploy: bool = False,
 ) -> dict[str, Any]:
     """Return the highest-priority action that advances project readiness.
 
@@ -229,10 +231,10 @@ def next_action(
         )
     if local_only:
         return _next_action(
-            action_id="verify_cloud", title="Local inputs are ready; cloud readiness is unverified",
+            action_id="verify_cloud", title="Deployment prerequisites need verification",
             why="GitHub approvals, Terraform validation, and AWS resources need a fresh inspection.",
             changes="Read-only checks of the deployment repository and AWS account.",
-            command="devsecops status --deep", docs="docs/first-successful-pipeline.md", context=context,
+            command="devsecops status --pre-deploy --strict", docs="docs/first-successful-pipeline.md", context=context,
         )
     github_checks = ([check for check in observations if check.name.startswith(("GitHub", "Branch `", "Required check"))]
                      if observations is not None else github_checks_fn(root, cfg))
@@ -309,28 +311,51 @@ def next_action(
             changes="Previews the backend infrastructure plan; no resources are applied.",
             command="devsecops terraform bootstrap", docs="docs/first-successful-pipeline.md#4-configure-terraform-backend", context=context,
         )
-    deployed_gaps = [check for check in aws_checks if check.scored and check.status != "OK"]
-    if deployed_gaps:
+    if observations is None:
+        return _next_action(
+            action_id="verify_cloud", title="Complete deployment readiness verification",
+            why="Terraform, GitHub and AWS prerequisites need to be checked together.",
+            changes="Read-only checks of the deployment prerequisites.",
+            command="devsecops status --pre-deploy --strict", docs="docs/first-successful-pipeline.md", context=context,
+        )
+    prerequisites, detail = deployment_gate(observations, pre_deploy=True)
+    if prerequisites != "OK":
+        return _next_action(
+            action_id="readiness_gaps", title="Deployment prerequisites need attention",
+            why=detail, changes="Read-only diagnosis of the deployment prerequisites.",
+            command="devsecops status --pre-deploy --strict", docs="docs/troubleshooting.md", context=context,
+        )
+    lambda_absent = any(
+        check.name == "Lambda function" and check.status == "WARN" and check.detail == LAMBDA_NOT_DEPLOYED
+        for check in observations
+    )
+    if pre_deploy or lambda_absent:
         return _next_action(
             action_id="ready_for_deploy",
-            title="Production deployment evidence is missing",
-            why="Local and GitHub setup is ready, but deployed AWS resources still need to be created or verified.",
-            changes="Triggers the protected production GitHub Actions workflow, which may apply Terraform changes in AWS.",
-            command=PRODUCTION_DEPLOY_COMMAND,
+            title="Ready to deploy",
+            why="Local, GitHub and AWS prerequisites are verified. Review the exact inputs and workflow before dispatch.",
+            changes="Read-only preview of the pinned production deployment.",
+            command=PRODUCTION_DEPLOY_COMMAND + " --dry-run",
             docs="docs/first-successful-pipeline.md#7-run-the-production-workflow-dispatch",
             context=context,
+            blocked=False,
         )
-    if observations is not None and any(check.scored and check.status != "OK" for check in observations):
+    deployed, detail = deployment_gate(observations, pre_deploy=False)
+    if deployed != "OK":
+        workload_gaps = [
+            f"{check.name}: {check.detail}"
+            for check in observations if check.name in WORKLOAD_CHECKS and check.status != "OK"
+        ]
         return _next_action(
-            action_id="readiness_gaps", title="Deployment readiness checks remain incomplete",
-            why="Resolve the remaining checks before collecting release evidence.",
-            changes="Read-only diagnosis of local, GitHub, and AWS readiness.",
-            command="devsecops doctor all --deep --strict", docs="docs/troubleshooting.md", context=context,
+            action_id="readiness_gaps", title="Production workload verification is incomplete",
+            why="; ".join(workload_gaps) or detail,
+            changes="Read-only workload inspection and health probe.",
+            command="devsecops status --deep --strict", docs="docs/troubleshooting.md", context=context,
         )
     return _next_action(
         action_id="ready_for_release_evidence",
-        title="Production readiness is complete",
-        why="Local config, generated artifacts, GitHub setup, and deployed AWS evidence are ready for release-candidate collection.",
+        title="Deployed and healthy",
+        why="AWS workload resources were verified and /health returned HTTP 2xx.",
         changes="Writes a local release-candidate evidence bundle under dist/devsecops/; GitHub and AWS are not changed.",
         command="devsecops evidence collect --rc",
         docs="docs/v1.0.0-release-candidate-checklist.md",

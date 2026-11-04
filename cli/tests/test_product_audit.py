@@ -12,14 +12,14 @@ import tempfile
 import unittest
 import urllib.request
 import urllib.response
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
 from devsecops_cli import aws, config, context, deploy, doctor, github, main as cli, render, workflow
 from devsecops_cli.models import Check, ConfigValidationError
-from devsecops_cli.readiness import PRODUCTION_EVIDENCE_CHECKS
+from devsecops_cli.readiness import PRE_DEPLOY_CHECKS, WORKLOAD_CHECKS
 
 ROOT = Path(__file__).resolve().parents[2]
 IMAGE = "123456789012.dkr.ecr.eu-central-1.amazonaws.com/customer-prod-lambda-repo:sha-abc123"
@@ -234,12 +234,12 @@ class ReadinessRegressionTests(unittest.TestCase):
             self.assertNotEqual(result, 0)
             self.assertLess(payload["score"], 100)
             self.assertTrue(payload["next_action"]["blocked"])
-            self.assertNotEqual(next(g for g in payload["gates"] if g["gate"] == "Production readiness")["status"], "OK")
+            self.assertNotEqual(next(g for g in payload["gates"] if g["gate"] == "Ready to deploy")["status"], "OK")
             github_calls.assert_not_called()
             aws_calls.assert_not_called()
 
     def test_human_status_collects_once_and_exits_using_displayed_observations(self):
-        observations = [Check(name, "OK", "Verified") for name in sorted(PRODUCTION_EVIDENCE_CHECKS)]
+        observations = [Check(name, "OK", "Verified") for name in sorted(PRE_DEPLOY_CHECKS | WORKLOAD_CHECKS)]
         observations.append(Check("Terraform validate", "FAIL", "Invalid configuration"))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -253,10 +253,11 @@ class ReadinessRegressionTests(unittest.TestCase):
             aws_check.assert_not_called()
             self.assertNotEqual(result, 0)
             self.assertIn("Invalid configuration", text)
-            self.assertNotIn("Production readiness is complete", text)
+            self.assertEqual(text.count("Readiness Gates"), 1)
+            self.assertNotIn("AWS workload resources were verified", text)
 
     def test_fully_observed_healthy_production_can_pass_strict(self):
-        observations = [Check(name, "OK", "Verified") for name in sorted(PRODUCTION_EVIDENCE_CHECKS)]
+        observations = [Check(name, "OK", "Verified") for name in sorted(PRE_DEPLOY_CHECKS | WORKLOAD_CHECKS)]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             project(root)
@@ -264,6 +265,94 @@ class ReadinessRegressionTests(unittest.TestCase):
                 result, text = invoke(root, ["status", "--deep", "--strict", "--format", "json"])
         self.assertEqual(result, 0, text)
         self.assertEqual(json.loads(text)["score"], 100)
+
+    def test_pre_deploy_checks_prerequisites_without_reading_workload(self):
+        github_checks = [Check(name, "OK", "Verified") for name in PRE_DEPLOY_CHECKS if name.startswith("GitHub")]
+        cloud_responses = {
+            ("sts", "get-caller-identity"): {"Account": "123456789012"},
+            ("dynamodb", "describe-table"): {"Table": {"TableStatus": "ACTIVE"}},
+            ("ecr", "describe-images"): {"imageDetails": [{"imageTags": ["sha-abc123"]}]},
+        }
+
+        def aws_json(root, args):
+            return cloud_responses[tuple(args[:2])], subprocess.CompletedProcess(args, 0, "", "")
+
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as mocks:
+            root = Path(directory)
+            project(root)
+            for name, value in {
+                "command_exists": True,
+                "run_command": subprocess.CompletedProcess([], 0, "main\n", ""),
+                "aws_command": subprocess.CompletedProcess([], 0, "", ""),
+                "collect_github_checks": github_checks,
+                "collect_branch_checks": [Check("Branch `main` protection", "OK", "Verified")],
+            }.items():
+                mocks.enter_context(patch.object(cli, name, return_value=value))
+            mocks.enter_context(patch.object(cli, "aws_json", side_effect=aws_json))
+            health = mocks.enter_context(patch.object(cli, "fetch_health_url"))
+
+            args = ["status", "--pre-deploy", "--strict", "--format", "json"]
+            result, text = invoke(root, args)
+            self.assertEqual(result, 0, text)
+            payload = json.loads(text)
+            gates = {gate["gate"]: gate["status"] for gate in payload["gates"]}
+            self.assertEqual(gates["Ready to deploy"], "OK")
+            self.assertEqual(gates["Deployed and healthy"], "Unverified")
+            self.assertEqual(gates["Release evidence complete"], "Unverified")
+            self.assertEqual(payload["next_action"]["command"], "devsecops deploy prod --dry-run")
+            self.assertTrue(WORKLOAD_CHECKS.isdisjoint(check["name"] for check in payload["checks"]))
+
+            cloud_responses[("ecr", "describe-images")] = {"imageDetails": []}
+            result, text = invoke(root, args)
+            self.assertEqual(result, 1, text)
+            self.assertNotEqual(json.loads(text)["next_action"]["action"], "ready_for_deploy")
+            health.assert_not_called()
+
+    def test_deep_status_requires_http_2xx_and_distinguishes_workload_absence(self):
+        endpoint = "https://api123.execute-api.eu-central-1.amazonaws.com"
+        observations = [
+            Check(name, "OK", endpoint if name == "API Gateway" else "Verified")
+            for name in sorted((PRE_DEPLOY_CHECKS | WORKLOAD_CHECKS) - {"Health response"})
+        ]
+        args = ["status", "--deep", "--strict", "--format", "json"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project(root)
+            with patch.object(cli, "command_exists", return_value=True), patch.object(
+                doctor, "collect_dashboard_checks", side_effect=lambda *a, **k: observations.copy(),
+            ), patch.object(cli, "fetch_health_url") as health:
+                for code, expected in [(204, 0), (302, 1), (500, 1)]:
+                    with self.subTest(code=code):
+                        health.return_value = code, ""
+                        result, text = invoke(root, args)
+                        self.assertEqual(result, expected, text)
+                        payload = json.loads(text)
+                        gates = {gate["gate"]: gate["status"] for gate in payload["gates"]}
+                        self.assertEqual(gates["Ready to deploy"], "OK")
+                        self.assertEqual(gates["Deployed and healthy"], "OK" if code == 204 else "Blocked")
+                        self.assertEqual(gates["Release evidence complete"], "Unverified")
+                        self.assertNotEqual(payload["next_action"]["action"], "ready_for_deploy")
+                health.assert_called_with(endpoint + "/health", aws_sigv4=True, aws_region="eu-central-1",
+                                          allow_redirects=False)
+                health.reset_mock()
+                observations[:] = [check for check in observations if check.name not in WORKLOAD_CHECKS]
+                for detail, expected_action in [(aws.LAMBDA_NOT_DEPLOYED, "ready_for_deploy"),
+                                                ("Access denied", "readiness_gaps")]:
+                    observations.append(Check("Lambda function", "WARN", detail))
+                    result, text = invoke(root, args)
+                    self.assertEqual(result, 1, text)
+                    self.assertEqual(json.loads(text)["next_action"]["action"], expected_action)
+                    observations.pop()
+                health.assert_not_called()
+
+    def test_deploy_menu_exposes_the_read_only_pre_deploy_gate(self):
+        with patch("builtins.input", side_effect=["9", ""]), patch.object(cli, "cmd_status") as status, \
+             patch.object(cli, "cmd_deploy_prod") as deploy_command, redirect_stdout(io.StringIO()):
+            cli.menu_deploy_hub()
+        status.assert_called_once()
+        self.assertTrue(status.call_args.args[0].pre_deploy)
+        self.assertTrue(status.call_args.args[0].strict)
+        deploy_command.assert_not_called()
 
     def test_failed_pending_and_unknown_lambda_are_not_ok(self):
         for state, update, expected in [("Failed", "Failed", "FAIL"), ("Active", "Failed", "FAIL"),

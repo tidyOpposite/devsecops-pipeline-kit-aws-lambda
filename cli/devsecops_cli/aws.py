@@ -175,11 +175,15 @@ def lambda_readiness_status(configuration: dict[str, Any]) -> str:
     return "OK"
 
 
+LAMBDA_NOT_DEPLOYED = "Lambda function not deployed yet."
+
+
 def collect_aws_checks(
     root: Path,
     cfg: dict[str, Any],
     env_name: str = "prod",
     *,
+    include_workload: bool = True,
     command_exists_fn: Callable[[str], bool] = _command_exists,
     aws_json_fn: Callable[..., tuple[Any, subprocess.CompletedProcess[str]]] = _aws_json,
     aws_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _aws_command,
@@ -187,9 +191,9 @@ def collect_aws_checks(
     """Inspect the expected AWS deployment and return non-throwing diagnostics.
 
     The checks follow deployment dependencies: tooling and identity first,
-    followed by backend, workload resources, observability, and the configured
-    image.  Provider failures are reported as warnings so ``doctor`` can still
-    show all locally available information.
+    followed by backend and the configured image. Workload inspection is
+    optional for pre-deployment checks. Provider failures are reported as
+    warnings so ``doctor`` can still show all locally available information.
     """
 
     checks: list[Check] = []
@@ -210,7 +214,7 @@ def collect_aws_checks(
             Check(
                 "AWS CLI",
                 "WARN",
-                "`aws` not found on PATH; skipped AWS identity, backend, ECR, Lambda, API Gateway, CloudWatch, and image checks.",
+                "`aws` not found on PATH; skipped AWS identity and resource checks.",
             ),
         ]
 
@@ -225,14 +229,17 @@ def collect_aws_checks(
             [
                 Check("State bucket", "WARN", "Cannot inspect backend bucket without valid AWS credentials."),
                 Check("Lock table", "WARN", "Cannot inspect DynamoDB lock table without valid AWS credentials."),
+                Check("Configured ECR image", "WARN", "Cannot inspect configured image without valid AWS credentials."),
+            ]
+        )
+        if include_workload:
+            checks.extend([
                 Check("ECR repository", "WARN", "Cannot inspect ECR repository without valid AWS credentials."),
                 Check("Lambda execution role", "WARN", "Cannot inspect IAM role without valid AWS credentials."),
                 Check("Lambda function", "WARN", "Cannot inspect Lambda function without valid AWS credentials."),
                 Check("API Gateway", "WARN", "Cannot inspect API Gateway without valid AWS credentials."),
                 Check("CloudWatch log group", "WARN", "Cannot inspect log group without valid AWS credentials."),
-                Check("Configured ECR image", "WARN", "Cannot inspect configured image without valid AWS credentials."),
-            ]
-        )
+            ])
         return checks
     identity_detail = str(identity_payload.get("Arn") or identity_payload.get("Account") or "AWS credentials are usable.")
     checks.append(Check("AWS identity", "OK", identity_detail))
@@ -264,12 +271,55 @@ def collect_aws_checks(
         checks.append(
             Check(
                 "Lock table",
-                "OK" if table_result.returncode == 0 else "WARN",
-                f"{lock_table} ({table_status or 'found'})"
+                "OK" if table_result.returncode == 0 and table_status == "ACTIVE" else "WARN",
+                f"{lock_table} ({table_status or 'unknown status'})"
                 if table_result.returncode == 0
                 else missing_or_error_detail(table_result, "DynamoDB lock table not found or not accessible."),
             )
         )
+
+    image_uri = str(cfg["lambda_image_uri"])
+    if not image_uri:
+        checks.append(Check("Configured ECR image", "WARN", "Set lambda_image_uri before checking image existence."))
+    else:
+        image_ref = parse_ecr_image_uri(image_uri)
+        if image_ref is None:
+            # Non-ECR registries are valid inputs, but this adapter cannot
+            # prove their image existence through AWS APIs.
+            checks.append(Check("Configured ECR image", "INFO", "Image URI is not an AWS ECR URI; existence check skipped.", scored=False))
+        else:
+            image_id = f"imageTag={image_ref.tag}" if image_ref.tag else f"imageDigest={image_ref.digest}"
+            image_payload, image_result = aws_json_fn(
+                root,
+                [
+                    "ecr",
+                    "describe-images",
+                    "--repository-name",
+                    image_ref.repository,
+                    "--image-ids",
+                    image_id,
+                    "--region",
+                    image_ref.region,
+                ],
+            )
+            image_details = image_payload.get("imageDetails", []) if isinstance(image_payload, dict) else []
+            image_found = image_result.returncode == 0 and bool(image_details)
+            if image_found:
+                image_detail = image_uri
+            elif image_result.returncode == 0:
+                image_detail = "Configured ECR image not found."
+            else:
+                image_detail = missing_or_error_detail(image_result, "Configured ECR image not found.")
+            checks.append(
+                Check(
+                    "Configured ECR image",
+                    "OK" if image_found else "WARN",
+                    image_detail,
+                )
+            )
+
+    if not include_workload:
+        return checks
 
     _, repo_result = aws_json_fn(
         root,
@@ -314,7 +364,7 @@ def collect_aws_checks(
             lambda_readiness_status(lambda_payload) if lambda_result.returncode == 0 and isinstance(lambda_payload, dict) else "WARN",
             f"{lambda_function} (state: {lambda_state or 'unknown'}, update: {lambda_payload.get('LastUpdateStatus') or 'unknown'})"
             if lambda_result.returncode == 0
-            else missing_or_error_detail(lambda_result, "Lambda function not deployed yet."),
+            else missing_or_error_detail(lambda_result, LAMBDA_NOT_DEPLOYED),
         )
     )
 
@@ -351,46 +401,6 @@ def collect_aws_checks(
     elif logs_result.returncode != 0:
         log_detail = compact_error(logs_result)
     checks.append(Check("CloudWatch log group", log_status, log_detail))
-
-    image_uri = str(cfg["lambda_image_uri"])
-    if not image_uri:
-        checks.append(Check("Configured ECR image", "WARN", "Set lambda_image_uri before checking image existence."))
-    else:
-        image_ref = parse_ecr_image_uri(image_uri)
-        if image_ref is None:
-            # Non-ECR registries are valid inputs, but this adapter cannot
-            # prove their image existence through AWS APIs.
-            checks.append(Check("Configured ECR image", "INFO", "Image URI is not an AWS ECR URI; existence check skipped.", scored=False))
-        else:
-            image_id = f"imageTag={image_ref.tag}" if image_ref.tag else f"imageDigest={image_ref.digest}"
-            image_payload, image_result = aws_json_fn(
-                root,
-                [
-                    "ecr",
-                    "describe-images",
-                    "--repository-name",
-                    image_ref.repository,
-                    "--image-ids",
-                    image_id,
-                    "--region",
-                    image_ref.region,
-                ],
-            )
-            image_details = image_payload.get("imageDetails", []) if isinstance(image_payload, dict) else []
-            image_found = image_result.returncode == 0 and bool(image_details)
-            if image_found:
-                image_detail = image_uri
-            elif image_result.returncode == 0:
-                image_detail = "Configured ECR image not found."
-            else:
-                image_detail = missing_or_error_detail(image_result, "Configured ECR image not found.")
-            checks.append(
-                Check(
-                    "Configured ECR image",
-                    "OK" if image_found else "WARN",
-                    image_detail,
-                )
-            )
 
     return checks
 

@@ -117,12 +117,14 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
         help="Show project status and the single recommended next action.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_help_epilog(
-            ("devsecops status", "devsecops status --deep --strict"),
+            ("devsecops status", "devsecops status --pre-deploy --strict", "devsecops status --deep --strict"),
             ("Read-only; deep mode may query Terraform, GitHub, and AWS but never changes them.",),
         ),
     )
-    status_parser.add_argument("--deep", action="store_true", help="Include GitHub, AWS, and deep Terraform checks.")
-    status_parser.add_argument("--strict", action="store_true", help="Exit non-zero when a scored status gap remains.")
+    status_scope = status_parser.add_mutually_exclusive_group()
+    status_scope.add_argument("--deep", action="store_true", help="Verify prerequisites and deployed workload health.")
+    status_scope.add_argument("--pre-deploy", action="store_true", help="Verify prerequisites before the workload exists.")
+    status_parser.add_argument("--strict", action="store_true", help="Exit non-zero when the selected verification is incomplete.")
     status_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     status_parser.add_argument("--watch", action="store_true", help="Auto-refresh human status until interrupted.")
     status_parser.add_argument("--interval", type=int, default=5, help="Seconds between status refreshes in watch mode.")

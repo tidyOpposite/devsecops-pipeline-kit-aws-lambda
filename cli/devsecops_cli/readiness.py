@@ -18,11 +18,14 @@ EXIT_VALIDATION_FAILED = 1
 EXIT_MISSING_EXTERNAL_TOOL = 2
 EXIT_AUTH_FAILED = 3
 READINESS_CATEGORIES = ["Local", "Terraform", "GitHub", "AWS", "Security", "Deployment"]
-PRODUCTION_EVIDENCE_CHECKS = {
+PRE_DEPLOY_CHECKS = {
     "Local config", "Project files", "Config schema", "Rendered tfvars", "Terraform validate",
     "Bootstrap validate", "GitHub auth", "GitHub repository", "GitHub environment approvals",
-    "Branch `main` protection", "AWS identity", "State bucket", "Lock table", "Lambda function",
-    "Configured ECR image",
+    "Branch `main` protection", "AWS identity", "State bucket", "Lock table", "Configured ECR image",
+}
+WORKLOAD_CHECKS = {
+    "ECR repository", "Lambda execution role", "Lambda function", "API Gateway",
+    "CloudWatch log group", "Health response",
 }
 
 
@@ -244,6 +247,7 @@ def readiness_category_for_check(check: Check) -> str:
         "Lambda image URI",
         "Configured ECR image",
         "Lambda function",
+        "Health response",
         "Prod approval environment",
         "Concurrent production run",
         "Rollback changes image",
@@ -387,14 +391,30 @@ def check_status_by_name(checks: list[Check], name: str) -> str | None:
     return match.status if match else None
 
 
+def deployment_gate(checks: list[Check], *, pre_deploy: bool) -> tuple[str, str]:
+    """Evaluate observed prerequisites or post-deployment health."""
+
+    required = PRE_DEPLOY_CHECKS if pre_deploy else WORKLOAD_CHECKS
+    if pre_deploy:
+        relevant = [check for check in checks if check.name not in WORKLOAD_CHECKS]
+    else:
+        relevant = [check for check in checks if check.name in WORKLOAD_CHECKS]
+    gaps = [check for check in relevant if (check.scored or check.name in required) and check.status != "OK"]
+    if gaps:
+        return "Blocked", f"{gaps[0].name}: {gaps[0].detail}"
+    if required - {check.name for check in relevant}:
+        command = "status --pre-deploy" if pre_deploy else "status --deep"
+        return "Unverified", f"Run `devsecops {command}` to complete verification."
+    if pre_deploy:
+        return "OK", "Prerequisites verified. Review the exact deployment with `devsecops deploy prod --dry-run`."
+    return "OK", "Production resources verified and /health returned HTTP 2xx."
+
+
 def readiness_gate_rows(checks: list[Check]) -> list[list[str]]:
-    """Summarize local, source, production, and evidence readiness gates."""
+    """Summarize local checks and the independent deployment phases."""
 
     local_config_ok = check_status_by_name(checks, "Local config") == "OK" and check_status_by_name(checks, "Config schema") != "FAIL"
     project_files_ok = check_status_by_name(checks, "Project files") == "OK"
-    production_gaps = [check for check in checks if check.scored and check.status != "OK"]
-    missing_evidence = sorted(PRODUCTION_EVIDENCE_CHECKS - {check.name for check in checks})
-    release_ready = not production_gaps and not missing_evidence
     return [
         [
             "Local config",
@@ -408,21 +428,12 @@ def readiness_gate_rows(checks: list[Check]) -> list[list[str]]:
             if project_files_ok
             else "Run inside the DevSecOps pipeline repo/template or restore required files.",
         ],
+        ["Ready to deploy", *deployment_gate(checks, pre_deploy=True)],
+        ["Deployed and healthy", *deployment_gate(checks, pre_deploy=False)],
         [
-            "Production readiness",
-            "OK" if release_ready else "Unverified" if not production_gaps and missing_evidence else "Blocked",
-            "No scored readiness gaps."
-            if release_ready
-            else "Run `devsecops status --deep`; production evidence is incomplete."
-            if not production_gaps and missing_evidence
-            else f"{len(production_gaps)} scored gap(s) remain before production deploy.",
-        ],
-        [
-            "Release evidence",
-            "Ready" if release_ready else "Blocked",
-            "Run `devsecops evidence collect --rc`."
-            if release_ready
-            else "Collect RC evidence only after production readiness is unblocked.",
+            "Release evidence complete",
+            "Unverified",
+            "Run `devsecops criteria --strict` against the release evidence bundle.",
         ],
     ]
 

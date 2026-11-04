@@ -26,7 +26,7 @@ devsecops inventory --status stable --format markdown
 
 | Workflow | Stable commands and flags |
 | --- | --- |
-| First success | `devsecops`, `devsecops setup --mode --preset --image-uri --backend-bucket --backend-region --backend-lock-table --apply-github --deploy-role-arn --plan-role-arn --snyk-token --generate --yes --strict`, `devsecops status --deep --strict --format --watch --interval`, `devsecops dry-run --preset --image-uri --environment`, `devsecops image validate --image-uri --environment --format` |
+| First success | `devsecops`, `devsecops setup --mode --preset --image-uri --backend-bucket --backend-region --backend-lock-table --apply-github --deploy-role-arn --plan-role-arn --snyk-token --generate --yes --strict`, `devsecops status --deep --pre-deploy --strict --format --watch --interval`, `devsecops dry-run --preset --image-uri --environment`, `devsecops image validate --image-uri --environment --format` |
 | Deployment | `devsecops deploy prod --dry-run --yes --watch --interval`, `devsecops deploy status --run-id --watch --interval --format`, `devsecops deploy logs --run-id --failed`, `devsecops deploy rollback --run-id --image-uri --dry-run --yes --watch --interval` |
 | Troubleshooting | `devsecops doctor local --deep --strict --format`, `devsecops doctor github --strict --format`, `devsecops doctor aws --environment --strict --format`, `devsecops doctor branch --branch --strict --format`, `devsecops doctor actions --limit --strict --format`, `devsecops doctor all --deep --branch --environment --strict --format` |
 | Configuration and generation | `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops generate --dry-run`, `devsecops report --deep --format --output --print` |
@@ -85,9 +85,12 @@ without a deprecation window.
 
 Config syntax and structure errors in JSON commands return a `command-error`
 envelope with `kind`, `schema_version`, `command`, `error`, and `exit_code`.
-They use exit code 1 rather than an unexpected-runtime code. Production gating
-requires `status --deep --strict`; compact status explicitly leaves provider
-checks unverified. Informational checks are excluded from both scores and gaps.
+They use exit code 1 rather than an unexpected-runtime code.
+`status --pre-deploy --strict` verifies deployment prerequisites.
+`status --deep --strict` also requires a healthy deployed workload. The flags
+`--pre-deploy` and `--deep` are mutually exclusive. Compact status leaves
+provider checks unverified. Informational checks are excluded from both scores
+and gaps. Use `criteria --strict` to verify release evidence.
 
 ## Deprecation Policy
 

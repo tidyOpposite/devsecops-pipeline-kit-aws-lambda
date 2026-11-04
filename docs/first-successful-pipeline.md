@@ -208,9 +208,13 @@ devsecops doctor branch --branch main
 
 ## 6. Generate, Report, And Review
 
+In a fresh checkout, initialize the workload module for local validation.
+The bootstrap command in step 4 already initializes the bootstrap module.
+
 ```bash
 devsecops generate
-devsecops status --deep
+terraform -chdir=terraform init -backend=false -input=false
+devsecops status --pre-deploy --strict
 devsecops report
 ```
 

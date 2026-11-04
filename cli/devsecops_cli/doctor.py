@@ -51,6 +51,7 @@ def collect_checks(
     cfg: dict[str, Any],
     deep: bool = False,
     *,
+    include_workload: bool = True,
     command_exists_fn: Callable[[str], bool] = _command_exists,
     run_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _run_command,
     image_preflight_fn: Callable[..., list[Check]] = collect_image_preflight_checks,
@@ -269,7 +270,7 @@ def collect_checks(
     if deep:
         # The AWS adapter degrades authentication and missing-resource errors
         # into checks, so deep diagnostics remain a complete report.
-        checks.extend(aws_checks_fn(root, cfg, env_name="prod"))
+        checks.extend(aws_checks_fn(root, cfg, env_name="prod", include_workload=include_workload))
 
     return checks
 
@@ -286,12 +287,13 @@ def collect_dashboard_checks(
 ) -> list[Check]:
     """Collect the check set appropriate for compact or full dashboards.
 
-    Full mode adds deep local/AWS checks plus GitHub and branch protection;
-    lighter modes avoid those external calls for faster refresh cycles.
+    Pre-deployment mode runs deep checks of prerequisites. Full mode also
+    inspects the workload. Compact mode avoids provider calls.
     """
 
-    checks = collect_checks_fn(root, cfg, deep=mode == "full")
-    if mode == "full":
+    deep = mode in {"full", "pre-deploy"}
+    checks = collect_checks_fn(root, cfg, deep=deep, include_workload=mode != "pre-deploy")
+    if deep:
         checks.extend(github_checks_fn(root, cfg))
         checks.extend(branch_checks_fn(root))
     else:

@@ -782,7 +782,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
                 "collect_aws_checks",
                 return_value=[cli.Check("Lambda function", "WARN", "not deployed")],
             ):
-                self.assertEqual(cli.next_action(root, cfg)["id"], "ready_for_deploy")
+                self.assertEqual(cli.next_action(root, cfg)["id"], "verify_cloud")
 
             with patch.object(cli, "command_exists", return_value=True), patch.object(
                 cli,
@@ -797,7 +797,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
                 "collect_aws_checks",
                 return_value=[cli.Check("AWS identity", "OK", "ok"), cli.Check("Lambda function", "OK", "deployed")],
             ):
-                self.assertEqual(cli.next_action(root, cfg)["id"], "ready_for_release_evidence")
+                self.assertEqual(cli.next_action(root, cfg)["id"], "verify_cloud")
 
     def test_next_command_json_reports_context_and_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
