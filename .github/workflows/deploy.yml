@@ -44,6 +44,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  PIPELINE_CONFIG_JSON: ${{ vars.PIPELINE_CONFIG_JSON }}
   PROJECT_NAME: ${{ vars.PROJECT_NAME || 'devsecops-pipeline' }}
   TF_VERSION: "1.10.5"
   TF_IN_AUTOMATION: "true"
@@ -114,6 +115,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Prepare user pipeline configuration
+        run: PYTHONPATH=cli python3 -m devsecops_cli.workflow
+
       # Fail closed instead of silently granting a plan the more powerful deploy role.
       - name: Require separate AWS plan role
         env:
@@ -128,7 +132,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
@@ -137,7 +141,7 @@ jobs:
           terraform_wrapper: false
 
       - name: Terraform init
-        run: terraform -chdir="${TF_WORKING_DIR}" init -input=false -no-color
+        run: terraform -chdir="${TF_WORKING_DIR}" init -input=false -no-color -backend-config=../dist/devsecops/backend.hcl
 
       - name: Select Terraform workspace
         run: |
@@ -207,20 +211,22 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'deploy' || github.event.inputs.mode == 'rollback') && github.event.inputs.environment == 'prod' && github.ref == 'refs/heads/main'
     # The protected GitHub environment performs its approval before this job can
     # obtain an OIDC token or read environment-scoped secrets.
-    environment: ${{ vars.PROD_APPROVAL_ENVIRONMENT || 'prod' }}
+    environment: prod
     permissions:
       contents: read
       id-token: write
     env:
       DEPLOY_ENVIRONMENT: prod
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      AWS_REGION: ${{ secrets.AWS_REGION }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+
+      - name: Prepare user pipeline configuration
+        run: PYTHONPATH=cli python3 -m devsecops_cli.workflow
 
       # Rollback always requires an explicit target, and mutable bootstrap/latest
       # tags are rejected before AWS credentials are configured.
@@ -238,7 +244,7 @@ jobs:
             echo "LAMBDA_IMAGE_URI must be a complete Amazon ECR image URI with an immutable tag or sha256 digest." >&2
             exit 1
           fi
-          if printf '%s' "${LAMBDA_IMAGE_URI}" | grep -Eq ':(latest|bootstrap)$'; then
+          if printf '%s' "${LAMBDA_IMAGE_URI}" | grep -Eiq ':(latest|bootstrap)$'; then
             echo "LAMBDA_IMAGE_URI must use an immutable tag or digest, not latest/bootstrap." >&2
             exit 1
           fi
@@ -259,7 +265,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       # Enabling the optional image scan makes its credentials and result blocking.
       - name: Require Snyk token when scan is enabled
@@ -293,7 +299,7 @@ jobs:
           terraform_wrapper: false
 
       - name: Terraform init
-        run: terraform -chdir="${TF_WORKING_DIR}" init -input=false -no-color
+        run: terraform -chdir="${TF_WORKING_DIR}" init -input=false -no-color -backend-config=../dist/devsecops/backend.hcl
 
       - name: Select Terraform workspace
         run: |

@@ -142,8 +142,10 @@ Review the plan. Apply only after confirming the account and names:
 devsecops terraform bootstrap --apply
 ```
 
-Copy or adapt the reviewed backend block from `dist/devsecops/backend.tf` into
-`terraform/backend.tf`, then open a pull request so CI can validate it.
+The CLI generates ignored `dist/devsecops/backend.hcl`. Local plan commands
+pass this file to Terraform explicitly. GitHub Actions generates its own copy
+from your repository configuration. Leave the tracked `terraform/backend.tf`
+template unchanged; your backend names do not need to be committed.
 
 ## 5. Configure GitHub Repository Settings
 
@@ -183,6 +185,17 @@ Applied GitHub repository variables/secrets available from config and arguments.
 
 Then check GitHub readiness:
 
+This setup also synchronizes `PIPELINE_CONFIG_JSON`: your complete non-secret
+configuration, including region, environment runtime settings, CORS, log
+retention, and backend names. The cloud workflow requires this variable and
+does not silently fall back to template defaults. Run the setup command again
+after changing local settings. Never put credentials or tokens in this variable.
+
+In repository Settings > Environments > `prod`, configure at least one
+required reviewer. A named environment without required reviewers is not an
+approval gate. Diagnostics fail when the rules cannot be inspected, including
+when the account plan or token permissions do not expose them.
+
 ```bash
 devsecops doctor github --strict
 devsecops doctor branch --branch main
@@ -192,7 +205,7 @@ devsecops doctor branch --branch main
 
 ```bash
 devsecops generate
-devsecops status
+devsecops status --deep
 devsecops report
 ```
 
@@ -227,6 +240,9 @@ local config into the dispatch, refuses to overlap an active production run,
 and records only non-secret run metadata in the ignored
 `.devsecops/deployments.json` journal. Use `--yes` only for already reviewed
 non-interactive execution.
+
+The Deploy menu offers the same preflight and confirmation flow, plus separate
+preview options; you can complete deployment and rollback without exiting it.
 
 Expected successful outcome:
 

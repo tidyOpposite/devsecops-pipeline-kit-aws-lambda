@@ -34,6 +34,7 @@ SNAPSHOT_FILES = [
     Path(CONFIG_FILE),
     GENERATED_TFVARS,
     DIST_DIR / "backend.tf",
+    DIST_DIR / "backend.hcl",
     DIST_DIR / "github-variables.env",
     DIST_DIR / "github-setup.sh",
     DIST_DIR / "setup-checklist.md",

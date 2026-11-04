@@ -49,6 +49,11 @@ jobs:
       - name: Run CLI test suite
         run: PYTHONPATH=cli python -m unittest discover -s cli/tests
 
+      - name: Verify optional terminal renderer
+        run: |
+          python -m pip install 'rich>=13.7'
+          PYTHONPATH=cli:cli/tests python -m unittest test_product_audit.ValidationAndUiTests.test_real_rich_renderer_with_readiness_gaps
+
       - name: Build root package artifacts
         # Building sdist and wheel catches packaging omissions that editable
         # source-tree tests cannot detect.

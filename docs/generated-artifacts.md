@@ -20,7 +20,8 @@ devsecops inventory --format json
 | `.devsecops/setup-state.json` | CLI-owned local workflow state | No | Rerun `devsecops setup`; the CLI atomically reconciles saved progress with config, tools, AWS identity, and GitHub. Move the file aside only when intentionally discarding setup history. |
 | `.devsecops/deployments.json` | CLI-owned local deployment journal | No | Created after successful `devsecops deploy prod` or `devsecops deploy rollback` dispatches. Keep it to let status, logs, and rollback select the same run; it contains no credentials or tokens. |
 | `terraform/generated.auto.tfvars` | CLI-owned generated artifact | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
-| `dist/devsecops/backend.tf` | CLI-owned generated template | No | Update backend settings, then run `devsecops generate`. Copy or adapt into `terraform/backend.tf` only after review. |
+| `dist/devsecops/backend.tf` | CLI-owned compatibility template | No | Optional reference for manual Terraform use; normal CLI and workflow paths use `backend.hcl`. |
+| `dist/devsecops/backend.hcl` | CLI-owned backend inputs | No | Update backend settings and run `devsecops generate`; CLI plan passes this explicitly to Terraform init. |
 | `dist/devsecops/github-variables.env` | CLI-owned generated helper | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
 | `dist/devsecops/github-setup.sh` | CLI-owned generated helper | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate` or `devsecops github-setup --write`. |
 | `dist/devsecops/setup-checklist.md` | CLI-owned generated checklist | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
@@ -68,6 +69,15 @@ non-secret values such as project names, regions, repository variable values,
 and placeholder commands for secrets. They are ignored by Git because they are
 environment-specific and can be regenerated.
 
+`devsecops github setup --apply` sends schema-owned settings to the non-secret
+repository variable `PIPELINE_CONFIG_JSON` in the user's deployment repository.
+The workflow reconstructs `terraform/generated.auto.tfvars` and
+`dist/devsecops/backend.hcl` on its runner, including every environment setting
+and the configured AWS region. An explicit deployment image overrides only the
+image selection. Neither personal source config nor generated inputs need to
+be pushed to the public kit/template repository. Secret fields are
+excluded from export; credentials continue to use Secrets and OIDC.
+
 `dist/devsecops/audit-report.json` is intended to be attached to pull requests,
 workflow artifacts, or release records. It summarizes readiness checks,
 strict config validation, control catalog state, policy preset posture, and
@@ -86,7 +96,8 @@ release notes say the artifact contract changed.
 | `.devsecops/deployments.json` | Schema-versioned local runtime state | A successful protected deploy or rollback is dispatched | One non-secret deployment record is prepended; history remains bounded. |
 | `terraform/generated.auto.tfvars` | Stable Terraform variables | Config values, schema migration output, or Terraform variable contract changes | HCL assignment values and `environment_config` entries. |
 | `dist/devsecops/backend.tf` | Stable review template | `backend.*` config values or backend template policy changes | S3 backend attributes such as bucket, key, region, lock table, or workspace prefix. |
-| `dist/devsecops/github-variables.env` | Stable helper | Repository variable source config changes | `PROJECT_NAME`, `LAMBDA_IMAGE_URI`, `API_AUTHORIZATION_TYPE`, `ENABLE_*`, or `PROD_APPROVAL_ENVIRONMENT` values. |
+| `dist/devsecops/backend.hcl` | Stable backend inputs | `backend.*` values change | Partial backend assignments used with `-backend-config`. |
+| `dist/devsecops/github-variables.env` | Stable helper | Repository variable source config changes | `PIPELINE_CONFIG_JSON` and compatibility mirror values. |
 | `dist/devsecops/github-setup.sh` | Stable helper script | GitHub variable or required secret contract changes | `gh variable` commands, API auth value, Snyk token requirement, or CLI-owned header changes. |
 | `dist/devsecops/setup-checklist.md` | Stable checklist | GitHub, backend, or branch-protection checklist contract changes | Checklist item values or required item additions. |
 | `dist/devsecops/readiness-report.md` | Stable report | Readiness checks, config values, or environment state changes | Generated timestamp, score/check/action rows, controls, and environment rows. |
@@ -98,15 +109,14 @@ If a regeneration diff only contains expected value changes, review and continue
 Unexpected new files, missing CLI-owned headers, or changed GitHub/AWS mutation
 commands should be treated as release-review findings before applying them.
 
-## Backend Template Exception
+## Backend Configuration
 
-The repository contains `terraform/backend.tf` as the Terraform backend file
-used by the root module. The CLI also generates `dist/devsecops/backend.tf` as a
-reviewable template. Treat the generated file as a helper, not as an automatic
-replacement for the tracked Terraform backend file.
-
-When you are ready to switch backend values, review the generated template and
-copy or adapt the backend block intentionally.
+The tracked `terraform/backend.tf` remains a template. Normal CLI plan and
+GitHub Actions paths pass ignored `dist/devsecops/backend.hcl` to Terraform
+init. The generated `backend.tf` remains available for manual compatibility;
+copying it over tracked source is unnecessary. Existing initialized projects
+must review Terraform's migration/reconfiguration prompt when changing backend
+settings; the CLI does not silently migrate state.
 
 ## Rollback Boundary
 

@@ -17,7 +17,8 @@ from .config import PROJECT_NAME_RE, config_path, prod_approval_environment, val
 from .github import collect_branch_checks, collect_github_checks
 from .images import collect_image_preflight_checks, is_immutable_image
 from .models import Check
-from .paths import CONFIG_FILE, GENERATED_TFVARS, REQUIRED_PROJECT_FILES
+from .paths import CONFIG_FILE, REQUIRED_PROJECT_FILES
+from .render import generated_artifact_gaps
 
 
 # Process helpers are injectable at collector boundaries, keeping diagnostics
@@ -168,12 +169,13 @@ def collect_checks(
         )
     )
 
-    generated_tfvars = root / GENERATED_TFVARS
+    artifact_gaps = generated_artifact_gaps(root, cfg) if not config_failures else ["Fix invalid config before comparing artifacts."]
     checks.append(
         Check(
             "Rendered tfvars",
-            "OK" if generated_tfvars.exists() else "WARN",
-            str(generated_tfvars) if generated_tfvars.exists() else "Run `devsecops render`.",
+            "OK" if not artifact_gaps else "WARN",
+            "Deployment files match current config." if not artifact_gaps else
+            "Run `devsecops generate`: " + ", ".join(artifact_gaps),
         )
     )
 
@@ -292,6 +294,12 @@ def collect_dashboard_checks(
     if mode == "full":
         checks.extend(github_checks_fn(root, cfg))
         checks.extend(branch_checks_fn(root))
+    else:
+        checks.extend([
+            Check("GitHub verification", "WARN", "Not checked. Run `devsecops status --deep`."),
+            Check("AWS verification", "WARN", "Not checked. Run `devsecops status --deep`."),
+            Check("Terraform verification", "WARN", "Not checked. Run `devsecops status --deep`."),
+        ])
     return checks
 
 

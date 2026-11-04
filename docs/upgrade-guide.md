@@ -20,6 +20,40 @@ If the local config has a future `schema_version` greater than this CLI
 supports, the CLI refuses to load it before rendering or changing CLI-owned
 files. Upgrade the CLI first.
 
+## Upcoming Product Audit Fixes
+
+Config schema remains version 1. The deployment workflow now requires the
+complete `PIPELINE_CONFIG_JSON` repository variable instead of falling back to
+Terraform template values. Update the workflow and CLI together in each user's
+deployment repository, review the local configuration, then run:
+
+```bash
+devsecops config validate
+devsecops generate
+devsecops github setup --apply
+devsecops doctor github --strict
+devsecops status --deep --strict
+```
+
+The `--apply` command updates that repository's settings; it is not a deploy.
+Existing role secrets can be kept by omitting role arguments. Secrets and
+personal configuration must not be committed to the public kit. The new ignored
+`dist/devsecops/backend.hcl` replaces the need to copy backend names into tracked
+source. Review any state migration requested by Terraform after a backend change.
+
+Configure required reviewers in Settings > Environments > `prod`. Production
+jobs always select `prod`; disabling a local demo approval flag cannot redirect
+the production workflow to an unprotected environment. Inspection failures
+remain blockers until the protection can be verified.
+
+Compact status explicitly leaves cloud readiness unverified, so production
+scripts must use `status --deep --strict`. Invalid image dry-runs and setup
+outside a project now return non-zero. Invalid config writes are rejected;
+expected config errors in JSON mode use the `command-error` envelope.
+Generated output drift now requires regeneration. Informational checks no longer
+reduce category scores. The menu resumes saved setup and supports confirmed
+production deployment and rollback directly.
+
 ## Standard Upgrade Flow
 
 Before upgrading:

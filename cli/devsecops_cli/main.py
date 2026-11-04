@@ -178,7 +178,7 @@ from .images import (
     is_immutable_image,
     parse_ecr_image_uri,
 )
-from .models import ActionsStatus, Check, ConfigMigrationError, Control, EcrImageRef, InputCancelled
+from .models import ActionsStatus, Check, ConfigMigrationError, ConfigValidationError, Control, EcrImageRef, InputCancelled
 from .paths import (
     AUDIT_REPORT,
     CONFIG_FILE,
@@ -203,6 +203,7 @@ from .render import (
     hcl_attribute_line,
     hcl_value,
     render_outputs,
+    generated_artifact_gaps,
     shell_quote,
     terraform_tfvars,
 )
@@ -415,9 +416,10 @@ def rollback_boundary_lines() -> list[str]:
 
 
 def draw_box(title: str, lines: list[str], width: int = 74) -> None:
+    width = max(16, min(width, shutil.get_terminal_size((80, 24)).columns))
     print("+" + "-" * (width - 2) + "+")
-    title_text = f" {title} "
-    print("|" + title_text.ljust(width - 2) + "|")
+    for part in textwrap.wrap(title, width=width - 4) or [""]:
+        print("| " + part.ljust(width - 4) + " |")
     print("+" + "-" * (width - 2) + "+")
     for line in lines:
         for wrapped in textwrap.wrap(line, width=width - 4) or [""]:
@@ -431,8 +433,18 @@ def draw_table(headers: list[str], rows: list[list[str]], title: str | None = No
         for index, cell in enumerate(row):
             widths[index] = max(widths[index], len(cell))
     border = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
+    available = max(16, shutil.get_terminal_size((80, 24)).columns)
     if title:
         print(info(title))
+    if len(border) > available:
+        # Keep long diagnostics readable without truncating commands or URLs.
+        for row_index, row in enumerate(rows):
+            if row_index:
+                print("-" * available)
+            for label, cell in zip(headers, row):
+                print("\n".join(textwrap.wrap(f"{label}: {cell}", width=available,
+                                              subsequent_indent="  ") or [f"{label}:"]))
+        return
     print(border)
     print("|" + "|".join(f" {headers[index].ljust(widths[index])} " for index in range(len(headers))) + "|")
     print(border)
@@ -741,6 +753,10 @@ def github_actions_status(
 
 
 def apply_github_setup(root: Path, cfg: dict[str, Any], args: argparse.Namespace) -> int:
+    failures = [check for check in validate_config(cfg) if check.status == "FAIL"]
+    if failures:
+        emit_check_output("GitHub settings were not changed", failures, output_format="compact")
+        return EXIT_VALIDATION_FAILED
     if not command_exists("gh"):
         print(fail("`gh` not found on PATH."))
         return 1
@@ -812,13 +828,16 @@ def collect_checks(root: Path, cfg: dict[str, Any], deep: bool = False) -> list[
 
 
 
-def next_action(root: Path, cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+def next_action(root: Path, cfg: dict[str, Any] | None = None, *,
+                observations: list[Check] | None = None, local_only: bool = False) -> dict[str, Any]:
     return _project_context_service.next_action(
         root,
         cfg,
         command_exists_fn=command_exists,
         github_checks_fn=collect_github_checks,
         aws_checks_fn=collect_aws_checks,
+        observations=observations,
+        local_only=local_only,
     )
 
 
@@ -923,22 +942,13 @@ def print_readiness_details(root: Path, deep: bool = False) -> None:
 
 
 def print_checks(checks: list[Check], title: str = "Readiness") -> None:
-    score = readiness_score(checks)
-    print(info(f"{title}: ") + progress_bar(score))
+    print(info(f"{title}: ") + progress_bar(readiness_score(checks)))
     print()
-    name_width = max(len(check.name) for check in checks) + 2
+    rows = []
     for check in checks:
-        if check.status == "OK":
-            label = ok("OK")
-        elif check.status == "FAIL":
-            label = fail("FAIL")
-        elif check.status == "INFO":
-            label = info("INFO")
-        else:
-            label = warn("WARN")
-        print(f"{check.name.ljust(name_width)} {label.ljust(12)} {check.detail}")
-        if check.scored and check.status != "OK":
-            print(f"{''.ljust(name_width)} {'Fix'.ljust(12)} {readiness_action_for_check(check)}")
+        fix = readiness_action_for_check(check) if check.scored and check.status != "OK" else ""
+        rows.append([check.name, check.status, check.detail, fix])
+    draw_table(["Check", "Status", "Detail", "Fix"], rows)
 
 
 def print_readiness_gates(checks: list[Check]) -> None:
@@ -1108,16 +1118,18 @@ def cmd_inventory(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def render_dashboard(root: Path, mode: str = "full", clear: bool = False) -> None:
+def render_dashboard(root: Path, mode: str = "full", clear: bool = False, *,
+                     cfg: dict[str, Any] | None = None, checks: list[Check] | None = None,
+                     action: dict[str, Any] | None = None) -> None:
     """Render the unified status surface at compact or full detail."""
 
     if clear:
         clear_screen()
     mode = mode if mode in {"compact", "full"} else "full"
     full = mode == "full"
-    cfg = load_config(root)
-    checks = collect_dashboard_checks(root, cfg, mode=mode)
-    action = next_action(root, cfg)
+    cfg = cfg if cfg is not None else load_config(root)
+    checks = checks if checks is not None else collect_dashboard_checks(root, cfg, mode=mode)
+    action = action if action is not None else next_action(root, cfg, observations=checks, local_only=not full)
     header(cfg)
     print()
     for line in menu_status(root, cfg, checks=checks):
@@ -1183,14 +1195,15 @@ def cmd_status(args: argparse.Namespace) -> int:
     output_format = getattr(args, "format", "human")
     watch = bool(getattr(args, "watch", False))
     if watch and output_format != "human":
-        print(fail("--watch is available only with human output."))
-        return EXIT_VALIDATION_FAILED
+        return emit_command_error(args, "--watch is available only with human output.", EXIT_VALIDATION_FAILED)
 
     interval = max(1, int(getattr(args, "interval", 5)))
     while True:
+        if deep and output_format == "human":
+            print(info("Checking Terraform, GitHub approvals, and AWS resources..."), flush=True)
         cfg = load_config(root)
         checks = collect_dashboard_checks(root, cfg, mode="full" if deep else "compact")
-        action = next_action(root, cfg)
+        action = next_action(root, cfg, observations=checks, local_only=not deep)
         if output_format == "json":
             emit_json(status_payload(checks, action, deep))
         elif output_format == "compact":
@@ -1198,9 +1211,14 @@ def cmd_status(args: argparse.Namespace) -> int:
             print()
             print_next_action(action)
         else:
-            render_dashboard(root, mode="full" if deep else "compact", clear=watch)
+            render_dashboard(root, mode="full" if deep else "compact", clear=watch, cfg=cfg, checks=checks, action=action)
 
         result = strict_exit_code(checks, strict=bool(getattr(args, "strict", False)), fail_on_warn=True)
+        if getattr(args, "strict", False) and result == EXIT_OK and (
+            action["blocked"] or any(gate["status"] != "OK" for gate in readiness_gate_dicts(checks)
+                                     if gate["gate"] == "Production readiness")
+        ):
+            result = EXIT_VALIDATION_FAILED
         if not watch:
             return result
         print()
@@ -1227,7 +1245,7 @@ def render_rich_tui(root: Path) -> bool:
 
     cfg = load_config(root)
     checks = collect_dashboard_checks(root, cfg, mode="compact")
-    action = next_action(root, cfg)
+    action = next_action(root, cfg, observations=checks, local_only=True)
     console = Console()
     console.print(
         Panel(
@@ -1248,8 +1266,8 @@ def render_rich_tui(root: Path) -> bool:
     gap_table.add_column("Check")
     gap_table.add_column("Status")
     gap_table.add_column("Fix")
-    for check_name, status, _detail, action in readiness_gap_rows(checks)[:5]:
-        gap_table.add_row(check_name, status, action)
+    for check_name, status, _detail, fix in readiness_gap_rows(checks)[:5]:
+        gap_table.add_row(check_name, status, fix)
     if gap_table.row_count:
         console.print(gap_table)
     else:
@@ -1277,7 +1295,7 @@ def cmd_next(args: argparse.Namespace) -> int:
 
     root = repo_root()
     cfg = load_config(root)
-    action = next_action(root, cfg)
+    action = next_action(root, cfg, local_only=True)
     if getattr(args, "format", "human") == "json":
         emit_json(
             {
@@ -1822,7 +1840,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
     if context["missing_project_files"]:
         print()
         print_next = argparse.Namespace(format="human")
-        return cmd_next(print_next)
+        cmd_next(print_next)
+        return EXIT_VALIDATION_FAILED
 
     state = load_setup_state(root)
     try:
@@ -2485,6 +2504,10 @@ def cmd_set(args: argparse.Namespace) -> int:
     except (KeyError, ValueError) as exc:
         print(fail(str(exc)))
         return 1
+    failures = [check for check in validate_config(cfg) if check.status == "FAIL"]
+    if failures:
+        emit_check_output("Setting was not saved", failures, output_format="compact")
+        return EXIT_VALIDATION_FAILED
     snapshot_before_change(root, "set", f"Before setting {args.key} to {args.value}.")
     write_config(root, cfg)
     print(ok("Updated ") + f"{CONFIG_FILE}: {args.key} = {toml_value(value)}")
@@ -2866,15 +2889,14 @@ def production_deployment_preflight_checks(
     )
     checks.extend(collect_image_preflight_checks(cfg, env_name=DEPLOYMENT_ENVIRONMENT))
 
-    generated = [GENERATED_TFVARS, DIST_DIR / "github-setup.sh"]
-    missing_generated = [str(path) for path in generated if not (root / path).exists()]
+    missing_generated = generated_artifact_gaps(root, cfg)
     checks.append(
         Check(
             "Generated deployment helpers",
             "OK" if not missing_generated else "FAIL",
-            "Current generated inputs are present."
+            "Generated inputs match current local configuration."
             if not missing_generated
-            else "Run `devsecops generate`; missing: " + ", ".join(missing_generated),
+            else "Run `devsecops generate`: " + ", ".join(missing_generated),
         )
     )
     github_checks = exact_image_dispatch_github_checks(collect_github_checks(root, cfg))
@@ -2917,7 +2939,10 @@ def exact_image_dispatch_github_checks(checks: list[Check]) -> list[Check]:
 
     adjusted: list[Check] = []
     for check in checks:
-        if check.name == "GitHub variable LAMBDA_IMAGE_URI":
+        if check.name == "GitHub variable LAMBDA_IMAGE_URI" or (
+            check.name == "GitHub variable PIPELINE_CONFIG_JSON"
+            and check.detail.startswith("Only lambda_image_uri differs")
+        ):
             adjusted.append(
                 Check(
                     check.name,
@@ -3714,7 +3739,8 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     print_gap_summary(readiness_checks, limit=8)
     print()
     print(info("Next documented path: docs/first-successful-pipeline.md"))
-    return EXIT_OK
+    validation = validate_config(cfg)
+    return EXIT_VALIDATION_FAILED if any(check.status == "FAIL" for check in [*image_checks, *validation]) else EXIT_OK
 
 
 def display_path(root: Path, path: Path) -> str:
@@ -3951,12 +3977,14 @@ def run_plan(root: Path, env_name: str, no_init: bool = False, create_workspace:
     if env_name not in cfg["environments"]:
         print(fail("Unknown environment: ") + env_name)
         return 1
-    if not (root / GENERATED_TFVARS).exists():
-        print(warn("Missing generated tfvars. Generating deployment files first."))
-        run_render(root)
+    if generated_artifact_gaps(root, cfg):
+        print(warn("Deployment files are missing or outdated. Generating them first."))
+        rendered = run_render(root)
+        if rendered != EXIT_OK:
+            return rendered
 
     if not no_init:
-        init_command = ["terraform", "-chdir=terraform", "init", "-input=false", "-no-color"]
+        init_command = ["terraform", "-chdir=terraform", "init", "-input=false", "-no-color", "-backend-config=../dist/devsecops/backend.hcl"]
         print(info("$ " + " ".join(init_command)))
         init_result = subprocess.run(init_command, cwd=root, check=False)  # nosec B603
         if init_result.returncode != 0:
@@ -4129,8 +4157,7 @@ def cmd_config(args: argparse.Namespace) -> int:
 
     path = config_path(root)
     if not path.exists():
-        print(warn(f"{CONFIG_FILE} does not exist. Run `devsecops config new --preset balanced`."))
-        return 1
+        return emit_command_error(args, f"{CONFIG_FILE} does not exist. Run `devsecops setup`.", EXIT_VALIDATION_FAILED)
     output_format = getattr(args, "format", "toml")
     if output_format == "json":
         print(json.dumps(load_config(root), indent=2, sort_keys=True))
@@ -4184,9 +4211,9 @@ MAIN_MENU_ITEMS = [
 
 def print_main_menu(root: Path) -> None:
     cfg = load_config(root)
-    checks = collect_checks(root, cfg, deep=False)
+    checks = collect_dashboard_checks(root, cfg, mode="compact")
     breakdown_score = overall_breakdown_score(checks)
-    action = next_action(root, cfg)
+    action = next_action(root, cfg, observations=checks, local_only=True)
     image_state = "set" if cfg["lambda_image_uri"] else "missing"
     backend_state = "set" if not cfg["backend"]["bucket"].startswith("replace-with") else "missing"
     health_state = "on" if cfg["enable_http_validation"] else "off"
@@ -4210,55 +4237,12 @@ def open_menu_section(title: str, handler: Any, *args: Any) -> None:
     pause_for_menu()
 
 
-def continue_setup_destination(action: dict[str, Any]) -> str:
-    """Map the shared next-action contract to an interactive menu destination."""
-
-    action_id = str(action["id"])
-    command = str(action["command"])
-    if action_id == "missing_project_files":
-        return "blocked"
-    if action_id == "missing_config" and command.startswith(("devsecops setup", "devsecops config new")):
-        return "setup"
-    if action_id in {"missing_config", "missing_image", "missing_backend"}:
-        return "configuration"
-    if action_id == "missing_github_setup" and command in {"devsecops generate", "devsecops render"}:
-        return "deployment_files"
-    if action_id in {"missing_github_cli", "missing_github_auth", "missing_github_setup"}:
-        return "github"
-    if action_id == "missing_aws_evidence":
-        return "diagnostics"
-    if action_id == "ready_for_deploy":
-        return "deploy"
-    if action_id == "ready_for_release_evidence":
-        return "reports"
-    return "blocked"
-
-
 def menu_continue_setup(root: Path) -> None:
-    """Route the operator to the menu section that resolves the current gap."""
+    """Resume the saved setup mode and stage directly from the main menu."""
 
-    action = next_action(root, load_config(root))
-    destination = continue_setup_destination(action)
-    if destination == "setup":
-        clear_screen()
-        cmd_setup(argparse.Namespace(preset="balanced", render=False, yes=False))
-        pause_for_menu()
-    elif destination == "configuration":
-        menu_config_hub(root)
-    elif destination == "deployment_files":
-        menu_generated_files_hub(root)
-    elif destination == "github":
-        menu_github_hub()
-    elif destination == "diagnostics":
-        menu_doctor_hub(root)
-    elif destination == "deploy":
-        menu_deploy_hub()
-    elif destination == "reports":
-        menu_reports_hub()
-    else:
-        clear_screen()
-        print_next_action(action)
-        pause_for_menu()
+    clear_screen()
+    cmd_setup(argparse.Namespace(render=False, yes=False))
+    pause_for_menu()
 
 
 def show_production_deploy_command() -> None:
@@ -4305,11 +4289,13 @@ def menu_deploy_hub() -> None:
     )
     print()
     print("[1] Current deployment status")
-    print("[2] Show production deploy command")
+    print("[2] Deploy production (review and confirmation required)")
     print("[3] Deployment logs")
     print("[4] Deployed AWS resources")
     print("[5] Validate production health endpoint")
-    print("[6] Show production rollback command")
+    print("[6] Roll back production (review and confirmation required)")
+    print("[7] Preview production deployment")
+    print("[8] Preview production rollback")
     print("[0] Back")
     choice = input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
@@ -4319,7 +4305,7 @@ def menu_deploy_hub() -> None:
     if choice == "1":
         cmd_deploy_status(argparse.Namespace(run_id=None, format="human", watch=False, interval=5))
     elif choice == "2":
-        show_production_deploy_command()
+        cmd_deploy_prod(argparse.Namespace(dry_run=False, yes=False, watch=False, interval=5))
     elif choice == "3":
         cmd_deploy_logs(argparse.Namespace(run_id=None, failed=False))
     elif choice == "4":
@@ -4335,7 +4321,11 @@ def menu_deploy_hub() -> None:
             )
         )
     elif choice == "6":
-        show_production_rollback_command()
+        cmd_deploy_rollback(argparse.Namespace(dry_run=False, yes=False, watch=False, interval=5, run_id=None, image_uri=None))
+    elif choice == "7":
+        cmd_deploy_prod(argparse.Namespace(dry_run=True, yes=False, watch=False, interval=5))
+    elif choice == "8":
+        cmd_deploy_rollback(argparse.Namespace(dry_run=True, yes=False, watch=False, interval=5, run_id=None, image_uri=None))
     else:
         print(warn("Unknown option."))
     pause_for_menu()
@@ -4360,7 +4350,7 @@ def menu_config_hub(root: Path) -> None:
         clear_screen()
         return
     if choice == "1":
-        cmd_setup(argparse.Namespace(preset="balanced", render=False, yes=False))
+        cmd_setup(argparse.Namespace(render=False, yes=False))
     elif choice == "2":
         cmd_config(argparse.Namespace(config_command="show", format="toml"))
     elif choice == "3":
@@ -4766,7 +4756,18 @@ def print_next_postlude() -> None:
 
     root = repo_root()
     print()
-    print_next_action(next_action(root, load_config(root)), title="Recommended Next Step")
+    print_next_action(next_action(root, load_config(root), local_only=True), title="Recommended Next Step")
+
+
+def emit_command_error(args: argparse.Namespace, message: str, code: int) -> int:
+    """Keep expected and boundary errors machine-readable when JSON is requested."""
+
+    if getattr(args, "format", None) == "json":
+        emit_json({"kind": "command-error", "schema_version": CONTRACT_SCHEMA_VERSION,
+                   "command": getattr(args, "command", None), "error": message, "exit_code": code})
+    else:
+        print(fail(message))
+    return code
 
 
 
@@ -4783,24 +4784,26 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = int(args.func(args))
         if should_print_next_postlude(args):
-            print_next_postlude()
+            try:
+                print_next_postlude()
+            except (ConfigValidationError, ConfigMigrationError, OSError, subprocess.SubprocessError):
+                # Guidance must not undo a completed command or contact providers.
+                print(warn("Next step unavailable. Run `devsecops config validate` for details."))
         return result
     except KeyboardInterrupt:
-        print()
-        print(warn("Interrupted."))
-        return EXIT_INTERRUPTED
+        return emit_command_error(args, "Interrupted.", EXIT_INTERRUPTED)
     except SetupStateError as exc:
-        print(fail("Setup state error: ") + str(exc))
-        return EXIT_VALIDATION_FAILED
+        return emit_command_error(args, "Setup state error: " + str(exc), EXIT_VALIDATION_FAILED)
     except DeploymentStateError as exc:
-        print(fail("Deployment state error: ") + str(exc))
-        return EXIT_VALIDATION_FAILED
+        return emit_command_error(args, "Deployment state error: " + str(exc), EXIT_VALIDATION_FAILED)
     except ConfigMigrationError as exc:
-        print(fail("Config migration error: ") + str(exc))
-        return EXIT_VALIDATION_FAILED
+        return emit_command_error(args, "Config migration error: " + str(exc), EXIT_VALIDATION_FAILED)
+    except ConfigValidationError as exc:
+        return emit_command_error(args, str(exc), EXIT_VALIDATION_FAILED)
+    except subprocess.TimeoutExpired:
+        return emit_command_error(args, "External check timed out. Check connectivity and retry the command.", EXIT_VALIDATION_FAILED)
     except Exception as exc:  # pragma: no cover - defensive CLI boundary
-        print(fail("Unexpected error: ") + str(exc))
-        return EXIT_UNEXPECTED_ERROR
+        return emit_command_error(args, "Unexpected error: " + str(exc), EXIT_UNEXPECTED_ERROR)
 
 
 if __name__ == "__main__":

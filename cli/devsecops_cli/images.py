@@ -16,8 +16,9 @@ from .models import Check, EcrImageRef
 # ECR references must identify exactly one tag or digest; accepting both would
 # make downstream ``describe-images`` lookup semantics ambiguous.
 ECR_IMAGE_RE = re.compile(
-    r"^(?P<registry>\d{12}\.dkr\.ecr\.(?P<region>[^.]+)\.amazonaws\.com)/"
-    r"(?P<repository>[^:@]+)(?::(?P<tag>[^@]+)|@(?P<digest>sha256:[A-Fa-f0-9]{64}))$"
+    r"(?P<registry>\d{12}\.dkr\.ecr\.(?P<region>[a-z0-9-]+)\.amazonaws\.com)/"
+    r"(?P<repository>[a-z0-9](?:[a-z0-9._/-]*[a-z0-9])?)"
+    r"(?::(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})|@(?P<digest>sha256:[A-Fa-f0-9]{64}))"
 )
 
 
@@ -28,20 +29,18 @@ def is_immutable_image(image_uri: str) -> bool:
     are treated as operator-managed immutable release identifiers.
     """
 
-    if not image_uri:
+    if not isinstance(image_uri, str):
         return False
-    if "@sha256:" in image_uri:
+    if re.fullmatch(r"[^\s@]+@sha256:[A-Fa-f0-9]{64}", image_uri):
         return True
-    if ":" not in image_uri:
-        return False
-    tag = image_uri.rsplit(":", 1)[1]
-    return tag not in {"latest", "bootstrap"}
+    match = re.fullmatch(r"[^\s@]+:(?P<tag>[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})", image_uri)
+    return match is not None and match.group("tag").lower() not in {"latest", "bootstrap"}
 
 
 def parse_ecr_image_uri(image_uri: str) -> EcrImageRef | None:
     """Parse a complete private ECR image URI into its typed components."""
 
-    match = ECR_IMAGE_RE.match(image_uri)
+    match = ECR_IMAGE_RE.fullmatch(image_uri) if isinstance(image_uri, str) else None
     if not match:
         return None
     return EcrImageRef(

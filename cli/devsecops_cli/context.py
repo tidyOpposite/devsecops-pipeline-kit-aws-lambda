@@ -17,6 +17,7 @@ from .github import collect_github_checks
 from .images import is_immutable_image
 from .models import Check
 from .paths import CONFIG_FILE, DIST_DIR, GENERATED_TFVARS, REQUIRED_PROJECT_FILES
+from .render import generated_artifact_gaps
 
 PRODUCTION_DEPLOY_COMMAND = "devsecops deploy prod"
 
@@ -103,6 +104,8 @@ def next_action(
     command_exists_fn: Callable[[str], bool] = _command_exists,
     github_checks_fn: Callable[..., list[Check]] = collect_github_checks,
     aws_checks_fn: Callable[..., list[Check]] = collect_aws_checks,
+    observations: list[Check] | None = None,
+    local_only: bool = False,
 ) -> dict[str, Any]:
     """Return the highest-priority action that advances project readiness.
 
@@ -193,16 +196,27 @@ def next_action(
             docs="docs/troubleshooting.md#config-validation-fails",
             context=context,
         )
-    if not context["generated_tfvars"] or not context["generated_github_setup"]:
+    if generated_artifact_gaps(root, cfg):
         return _next_action(
             action_id="missing_github_setup",
-            title="Generated deployment helpers are missing",
-            why="Terraform inputs and the GitHub setup script must be generated from the validated local configuration.",
+            title="Generated deployment helpers are missing or outdated",
+            why="Deployment files must match the current local configuration.",
             changes="Creates or updates only CLI-owned files under terraform/ and dist/devsecops/.",
             command="devsecops generate",
             docs="docs/first-successful-pipeline.md#5-configure-github-repository-settings",
             context=context,
         )
+    if observations is not None:
+        local_gaps = [check for check in observations if check.scored and check.status != "OK" and check.name in {
+            "Terraform validate", "Bootstrap validate", "Git branch", "`terraform` CLI", "`git` CLI", "Config schema",
+        }]
+        if local_gaps:
+            return _next_action(
+                action_id="local_checks_failed", title="Local deployment checks need attention",
+                why="; ".join(f"{check.name}: {check.detail}" for check in local_gaps),
+                changes="Read-only diagnostics for the failed local prerequisites.",
+                command="devsecops doctor local --deep --strict", docs="docs/troubleshooting.md", context=context,
+            )
     if not command_exists_fn("gh"):
         return _next_action(
             action_id="missing_github_cli",
@@ -213,7 +227,15 @@ def next_action(
             docs="docs/troubleshooting.md#github-doctor-cannot-inspect-the-repository",
             context=context,
         )
-    github_checks = github_checks_fn(root, cfg)
+    if local_only:
+        return _next_action(
+            action_id="verify_cloud", title="Local inputs are ready; cloud readiness is unverified",
+            why="GitHub approvals, Terraform validation, and AWS resources need a fresh inspection.",
+            changes="Read-only checks of the deployment repository and AWS account.",
+            command="devsecops status --deep", docs="docs/first-successful-pipeline.md", context=context,
+        )
+    github_checks = ([check for check in observations if check.name.startswith(("GitHub", "Branch `", "Required check"))]
+                     if observations is not None else github_checks_fn(root, cfg))
     github_by_name = {check.name: check for check in github_checks}
     github_auth = github_by_name.get("GitHub auth")
     if github_auth is not None and github_auth.status != "OK":
@@ -230,6 +252,21 @@ def next_action(
     # explicitly included in readiness scoring become actionable gaps.
     github_gaps = [check for check in github_checks if check.scored and check.status != "OK"]
     if github_gaps:
+        approval_gap = next((check for check in github_gaps if check.name == "GitHub environment approvals"), None)
+        if approval_gap:
+            return _next_action(
+                action_id="missing_github_approvals", title="Production reviewer approval is not verified",
+                why=approval_gap.detail, changes="Read-only inspection; configure required reviewers in GitHub Settings > Environments > prod.",
+                command="devsecops doctor github --strict", docs="docs/first-successful-pipeline.md#5-configure-github-repository-settings", context=context,
+            )
+        branch_gaps = [check for check in github_gaps if check.name.startswith(("Branch `", "Required check"))]
+        if branch_gaps:
+            return _next_action(
+                action_id="missing_branch_protection", title="Production branch protection is incomplete",
+                why="; ".join(check.detail for check in branch_gaps),
+                changes="Read-only inspection of branch rules; configure the reported requirements in GitHub.",
+                command="devsecops doctor branch --strict", docs="docs/troubleshooting.md#branch-protection-doctor-reports-missing-checks", context=context,
+            )
         return _next_action(
             action_id="missing_github_setup",
             title="GitHub repository setup is incomplete",
@@ -249,7 +286,10 @@ def next_action(
             docs="docs/troubleshooting.md#aws-doctor-cannot-inspect-resources",
             context=context,
         )
-    aws_checks = aws_checks_fn(root, cfg, env_name="prod")
+    aws_names = {"AWS CLI", "AWS identity", "State bucket", "Lock table", "ECR repository", "Lambda execution role",
+                 "Lambda function", "API Gateway", "CloudWatch log group", "Configured ECR image"}
+    aws_checks = ([check for check in observations if check.name in aws_names]
+                  if observations is not None else aws_checks_fn(root, cfg, env_name="prod"))
     aws_identity = next((check for check in aws_checks if check.name == "AWS identity"), None)
     if aws_identity is not None and aws_identity.status != "OK":
         return _next_action(
@@ -261,6 +301,14 @@ def next_action(
             docs="docs/troubleshooting.md#aws-doctor-cannot-inspect-resources",
             context=context,
         )
+    backend_gaps = [check for check in aws_checks if check.name in {"State bucket", "Lock table"} and check.status != "OK"]
+    if backend_gaps:
+        return _next_action(
+            action_id="missing_backend_resources", title="Terraform backend is not ready",
+            why="; ".join(check.detail for check in backend_gaps),
+            changes="Previews the backend infrastructure plan; no resources are applied.",
+            command="devsecops terraform bootstrap", docs="docs/first-successful-pipeline.md#4-configure-terraform-backend", context=context,
+        )
     deployed_gaps = [check for check in aws_checks if check.scored and check.status != "OK"]
     if deployed_gaps:
         return _next_action(
@@ -271,6 +319,13 @@ def next_action(
             command=PRODUCTION_DEPLOY_COMMAND,
             docs="docs/first-successful-pipeline.md#7-run-the-production-workflow-dispatch",
             context=context,
+        )
+    if observations is not None and any(check.scored and check.status != "OK" for check in observations):
+        return _next_action(
+            action_id="readiness_gaps", title="Deployment readiness checks remain incomplete",
+            why="Resolve the remaining checks before collecting release evidence.",
+            changes="Read-only diagnosis of local, GitHub, and AWS readiness.",
+            command="devsecops doctor all --deep --strict", docs="docs/troubleshooting.md", context=context,
         )
     return _next_action(
         action_id="ready_for_release_evidence",

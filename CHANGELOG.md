@@ -5,6 +5,23 @@ semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+* Transfer each user's complete non-secret config through `PIPELINE_CONFIG_JSON`
+  and materialize Terraform/backend inputs on the Actions runner; personal
+  configuration and generated files remain ignored by Git.
+* Require observable production environment reviewers, report failed Lambda
+  states accurately, and keep unverified cloud checks out of production success.
+* Compare generated files with current settings, recommend backend bootstrap
+  before deployment, and reject invalid config/image/CORS inputs and false
+  successful dry-run/setup exits.
+* Collect status observations once, preserve JSON error output, and route failed
+  health/DAST steps to the correct recovery guide.
+* Fix the optional Rich renderer, wrap terminal tables, resume the saved setup
+  wizard from the menu, and support confirmed deploy/rollback and previews there.
+* Add audit regression coverage and an optional-renderer CI check. See the
+  upgrade guide before updating an existing deployment repository.
+
 ## v0.14.0 - 2026-09-01
 
 ### Added

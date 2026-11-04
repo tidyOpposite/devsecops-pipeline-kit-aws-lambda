@@ -660,6 +660,11 @@ DEPRECATION_POLICY = {
 # same schema version, but should not rename or remove the documented keys.
 JSON_OUTPUT_CONTRACTS = [
     {
+        "kind": "command-error",
+        "commands": ["Any JSON command encountering an invalid config or boundary error"],
+        "stable_keys": ["kind", "schema_version", "command", "error", "exit_code"],
+    },
+    {
         "kind": "status",
         "commands": ["devsecops status --format json"],
         "stable_keys": ["kind", "schema_version", "score", "breakdown", "gaps", "checks", "context", "next_action"],
@@ -759,6 +764,13 @@ JSON_OUTPUT_CONTRACTS = [
 # Generated artifacts declare both their producer and the changes that should
 # legitimately cause a re-render, making unexpected drift easier to review.
 GENERATED_ARTIFACT_CONTRACTS = [
+    {
+        "path": str(DIST_DIR / "backend.hcl"),
+        "producer": "devsecops generate",
+        "compatibility": "stable-helper",
+        "rerender_required_when": ["backend.* config values change"],
+        "expected_diffs": ["Partial S3 backend settings passed explicitly to terraform init"],
+    },
     {
         "path": str(DEPLOYMENT_STATE_FILE),
         "producer": "devsecops deploy prod or devsecops deploy rollback",

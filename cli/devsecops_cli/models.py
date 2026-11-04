@@ -82,10 +82,15 @@ class Check:
     scored: bool = True
 
 
+class ConfigValidationError(ValueError):
+    """An expected config syntax, shape, or value error with repair guidance."""
+
+
 __all__ = [
     "ActionsStatus",
     "Check",
     "ConfigMigrationError",
+    "ConfigValidationError",
     "Control",
     "EcrImageRef",
     "InputCancelled",

@@ -26,6 +26,7 @@ GOLDEN_DIR = Path(__file__).with_name("golden")
 RENDERED_ARTIFACTS = [
     cli.GENERATED_TFVARS,
     cli.DIST_DIR / "backend.tf",
+    cli.DIST_DIR / "backend.hcl",
     cli.DIST_DIR / "github-variables.env",
     cli.DIST_DIR / "github-setup.sh",
     cli.DIST_DIR / "setup-checklist.md",
@@ -735,11 +736,9 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             cli.write_config(root, cfg)
             self.assertEqual(cli.next_action(root, cfg)["id"], "missing_github_setup")
 
-            (root / cli.GENERATED_TFVARS).parent.mkdir(parents=True, exist_ok=True)
-            (root / cli.GENERATED_TFVARS).write_text("project_name = \"devsecops-pipeline\"\n", encoding="utf-8")
-            setup = root / cli.DIST_DIR / "github-setup.sh"
-            setup.parent.mkdir(parents=True, exist_ok=True)
-            setup.write_text("# setup\n", encoding="utf-8")
+            for path, content in cli.render_outputs(root, cfg).items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
             with patch.object(cli, "command_exists", return_value=False), patch.object(
                 cli, "collect_github_checks"
             ) as github_checks:
@@ -1827,7 +1826,8 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertEqual(by_area["Terraform"][1], "100%")
         self.assertEqual(by_area["GitHub"][1], "50%")
         self.assertEqual(by_area["AWS"][1], "0%")
-        self.assertEqual(by_area["Security"][1], "50%")
+        self.assertEqual(by_area["Security"][1], "n/a")
+        self.assertEqual(by_area["Security"][2], "0")
         self.assertEqual(by_area["Deployment"][2], "1")
 
     def test_dashboard_renders_compact_and_full_modes(self) -> None:
@@ -1955,7 +1955,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("Require separate AWS plan role", deploy_workflow)
         self.assertIn("role-to-assume: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}", deploy_workflow)
         self.assertNotIn("AWS_PLAN_ROLE_TO_ASSUME_ARN || secrets.AWS_ROLE_TO_ASSUME_ARN", deploy_workflow)
-        self.assertIn("environment: ${{ vars.PROD_APPROVAL_ENVIRONMENT || 'prod' }}", deploy_workflow)
+        self.assertIn("environment: prod", deploy_workflow)
         self.assertIn("LAMBDA_IMAGE_URI must use an immutable tag or digest", deploy_workflow)
         self.assertIn("Smoke test Lambda health endpoint", deploy_workflow)
         self.assertIn("if: env.ENABLE_HTTP_VALIDATION == 'true'", deploy_workflow)
@@ -2227,7 +2227,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             if "iam get-role" in command_text:
                 return completed(command, json.dumps({"Role": {"Arn": "arn:aws:iam::123456789012:role/devsecops-pipeline-prod-lambda-exec-role"}}))
             if "lambda get-function-configuration" in command_text:
-                return completed(command, json.dumps({"FunctionName": "devsecops-pipeline-prod-lambda", "State": "Active"}))
+                return completed(command, json.dumps({"FunctionName": "devsecops-pipeline-prod-lambda", "State": "Active", "LastUpdateStatus": "Successful"}))
             if "apigatewayv2 get-apis" in command_text:
                 return completed(
                     command,
@@ -2565,15 +2565,14 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
                     cli.menu_advanced_hub(root)
                     handler.assert_called_once()
 
-    def test_deploy_menu_explains_side_effects_without_starting_workflow(self) -> None:
+    def test_deploy_menu_routes_to_confirmed_command(self) -> None:
         buffer = io.StringIO()
-        with patch("builtins.input", side_effect=["2", ""]), redirect_stdout(buffer):
+        with patch("builtins.input", side_effect=["2", ""]), patch.object(cli, "cmd_deploy_prod") as deploy, redirect_stdout(buffer):
             cli.menu_deploy_hub()
-
-        output = buffer.getvalue()
-        self.assertIn("Opening this section does not change GitHub or AWS", output)
-        self.assertIn("does not execute it automatically", output)
-        self.assertIn(cli.PRODUCTION_DEPLOY_COMMAND, output)
+        deploy.assert_called_once()
+        self.assertFalse(deploy.call_args.args[0].yes)
+        self.assertFalse(deploy.call_args.args[0].dry_run)
+        self.assertIn("confirmation required", buffer.getvalue())
 
     def test_main_menu_routes_each_primary_choice(self) -> None:
         route_patches = {
@@ -2602,29 +2601,14 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
                 self.assertEqual(cli.cmd_menu(argparse.Namespace()), cli.EXIT_OK)
                 self.assertEqual(section.call_args.args[0], "Status")
 
-    def test_continue_setup_routes_from_the_shared_next_action(self) -> None:
-        cases = [
-            ("missing_project_files", "cd /project", "blocked"),
-            ("missing_config", "devsecops setup --preset balanced --yes", "setup"),
-            ("missing_config", "devsecops config new --preset balanced", "setup"),
-            ("missing_config", "devsecops config validate", "configuration"),
-            ("missing_image", "devsecops config set lambda_image_uri value", "configuration"),
-            ("missing_backend", "devsecops config set backend.bucket value", "configuration"),
-            ("missing_github_setup", "devsecops generate", "deployment_files"),
-            ("missing_github_setup", "devsecops render", "deployment_files"),
-            ("missing_github_cli", "gh auth login", "github"),
-            ("missing_github_auth", "gh auth login", "github"),
-            ("missing_github_setup", "devsecops github setup --apply", "github"),
-            ("missing_aws_evidence", "aws sts get-caller-identity", "diagnostics"),
-            ("ready_for_deploy", cli.PRODUCTION_DEPLOY_COMMAND, "deploy"),
-            ("ready_for_release_evidence", "devsecops evidence collect --rc", "reports"),
-        ]
-        for action_id, command, expected in cases:
-            with self.subTest(action_id=action_id, command=command):
-                self.assertEqual(
-                    cli.continue_setup_destination({"id": action_id, "command": command}),
-                    expected,
-                )
+    def test_continue_setup_resumes_wizard_without_overriding_saved_mode(self) -> None:
+        with patch.object(cli, "cmd_setup") as setup, patch.object(cli, "clear_screen"), patch.object(cli, "pause_for_menu"):
+            cli.menu_continue_setup(Path("/test-project"))
+        setup.assert_called_once()
+        args = setup.call_args.args[0]
+        self.assertFalse(args.yes)
+        self.assertIsNone(getattr(args, "preset", None))
+        self.assertIsNone(getattr(args, "mode", None))
 
     def test_pause_for_menu_clears_screen_before_returning_to_main_menu(self) -> None:
         with patch("builtins.input", return_value=""), patch.object(cli, "clear_screen") as clear_screen:

@@ -88,6 +88,19 @@ the same recommendation, so the setup path can be resumed without memorizing
 the workflow. Machine-readable JSON, TOML, Markdown, generated shell, and
 completion output remains unchanged for scripts.
 
+Compact status checks local inputs and marks cloud readiness as unverified.
+Use `devsecops status --deep --strict` for a production gate that checks
+Terraform, GitHub required reviewers, and observable AWS resource health.
+Generated files are compared with current config; their existence alone does
+not establish readiness. The menu resumes saved setup and supports deployment,
+rollback, and previews with the same confirmation as command-line execution.
+
+User configuration stays outside Git. `devsecops github setup --apply`
+synchronizes schema-owned, non-secret settings to `PIPELINE_CONFIG_JSON` in
+the user's deployment repository. Each cloud workflow materializes Terraform
+inputs and backend settings from that variable. Secrets remain in GitHub
+Secrets/OIDC; personal configuration must not be committed to the public kit.
+
 Continue with the step-by-step
 [First successful pipeline](docs/first-successful-pipeline.md) guide when you
 are ready to connect GitHub and AWS.
@@ -470,7 +483,7 @@ devsecops github status --format compact --strict
 ```
 
 `github status` and `doctor actions` show failed jobs, failed steps, concrete
-next actions, and runbook links. Use `devsecops status --strict` in CI when any
+next actions, and runbook links. Use `devsecops status --deep --strict` in CI when any
 scored gap should fail the command.
 
 For release review or production proof, collect an attachable evidence bundle
@@ -546,22 +559,11 @@ devsecops bootstrap --apply
 `devsecops bootstrap` plans by default. Use `--apply` only after reviewing the
 target AWS account, bucket name, and lock table name.
 
-The generated backend template is written to `dist/devsecops/backend.tf`. Copy
-or adapt it into `terraform/backend.tf` when you are ready to initialize the
-root Terraform module:
-
-```hcl
-terraform {
-  backend "s3" {
-    bucket               = "<globally-unique-state-bucket>"
-    key                  = "serverless-lambda/terraform.tfstate"
-    region               = "us-east-1"
-    encrypt              = true
-    dynamodb_table       = "devsecops-pipeline-terraform-locks"
-    workspace_key_prefix = "environments"
-  }
-}
-```
+The CLI writes `dist/devsecops/backend.hcl` and passes it explicitly to
+Terraform init. After `devsecops github setup --apply`, GitHub Actions creates
+the same inputs on its runner. Your bucket names and regions stay out of the
+tracked `terraform/backend.tf` template. The generated `backend.tf` remains an
+optional reference for manual Terraform use.
 
 ## Environment Workflow
 
@@ -600,20 +602,21 @@ Required repository secrets:
 | --- | --- |
 | `AWS_ROLE_TO_ASSUME_ARN` | Deployment role used by manual production deploy runs from `main`. |
 | `AWS_PLAN_ROLE_TO_ASSUME_ARN` | Required least-privilege role for Terraform plan workflows. Plans do not fall back to the deploy role. |
-| `AWS_REGION` | AWS region, for example `us-east-1`. |
+| `AWS_REGION` | Legacy compatibility value written by setup. Updated workflows use the region from `PIPELINE_CONFIG_JSON`. |
 | `SNYK_TOKEN` | Required when `ENABLE_SNYK_SCAN=true`; otherwise optional. |
 
 Repository variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `PROJECT_NAME` | `devsecops-pipeline` | Prefix for AWS resources and ECR repository names. |
+| `PIPELINE_CONFIG_JSON` | required | Complete schema-owned, non-secret user configuration. Updated cloud workflows use this as their settings source. |
+| `PROJECT_NAME` | `devsecops-pipeline` | Compatibility mirror of the resource prefix in pipeline configuration. |
 | `LAMBDA_IMAGE_URI` | none | Required for manual production deploy. Immutable image URI deployed to Lambda. |
 | `API_AUTHORIZATION_TYPE` | `AWS_IAM` | API Gateway route authorization. Use `NONE` only for demo or intentionally public non-sensitive APIs. |
 | `ENABLE_SNYK_SCAN` | `false` | When `true` and `SNYK_TOKEN` is present, CI scans the configured image with Snyk. |
 | `ENABLE_HTTP_VALIDATION` | `false` | When `true`, CI calls the API Gateway `/health` URL after deployment. |
 | `ENABLE_DAST` | `false` | When `true`, CI runs OWASP ZAP baseline scan only when `API_AUTHORIZATION_TYPE=NONE`. |
-| `PROD_APPROVAL_ENVIRONMENT` | `prod` | GitHub environment used by the production deploy job. Composer sets `devsecops-no-approval` when approval is disabled. |
+| `PROD_APPROVAL_ENVIRONMENT` | `prod` | Compatibility posture value. Production jobs always use `prod`, and CLI preflight verifies its required reviewers. |
 
 Recommended branch protection for `main`:
 

@@ -10,10 +10,11 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
 
-from .config import prod_approval_environment
+from .config import PIPELINE_CONFIG_VARIABLE, pipeline_config_json, prod_approval_environment
 from .deploy import DEPLOYMENT_WORKFLOW_NAME
 from .images import is_immutable_image
 from .models import ActionsStatus, Check
@@ -22,6 +23,7 @@ from .models import ActionsStatus, Check
 # Repository variables are non-secret deployment inputs whose values can be
 # compared with local configuration.  Secret contracts are name-only.
 REQUIRED_GH_VARIABLES = [
+    PIPELINE_CONFIG_VARIABLE,
     "PROJECT_NAME",
     "LAMBDA_IMAGE_URI",
     "API_AUTHORIZATION_TYPE",
@@ -88,6 +90,7 @@ def github_expected_variables(cfg: dict[str, Any]) -> dict[str, str]:
     """Map normalized local settings to their GitHub variable representation."""
 
     return {
+        PIPELINE_CONFIG_VARIABLE: pipeline_config_json(cfg),
         "PROJECT_NAME": str(cfg["project_name"]),
         "LAMBDA_IMAGE_URI": str(cfg["lambda_image_uri"]),
         "API_AUTHORIZATION_TYPE": str(cfg["api_authorization_type"]),
@@ -170,6 +173,24 @@ def github_variable_checks(cfg: dict[str, Any], variables: dict[str, str]) -> li
             checks.append(Check(f"GitHub variable {name}", "WARN", "Missing."))
         elif name == "LAMBDA_IMAGE_URI" and not wanted:
             checks.append(Check(f"GitHub variable {name}", "WARN", "Local config has no expected image URI."))
+        elif name == PIPELINE_CONFIG_VARIABLE:
+            try:
+                remote_config = json.loads(actual)
+                wanted_config = json.loads(wanted)
+                matches = remote_config == wanted_config
+                only_image_differs = isinstance(remote_config, dict) and (
+                    {key: value for key, value in remote_config.items() if key != "lambda_image_uri"}
+                    == {key: value for key, value in wanted_config.items() if key != "lambda_image_uri"}
+                )
+            except (json.JSONDecodeError, TypeError):
+                matches = False
+                only_image_differs = False
+            checks.append(Check(
+                f"GitHub variable {name}", "OK" if matches else "WARN",
+                "Matches local Terraform settings." if matches else
+                "Only lambda_image_uri differs from local settings; an exact-image dispatch can override it." if only_image_differs else
+                "Expected current local settings. Run `devsecops github setup --apply` to synchronize configuration.",
+            ))
         elif actual != wanted:
             checks.append(Check(f"GitHub variable {name}", "WARN", f"Expected `{wanted}`, found `{actual}`."))
         elif name == "LAMBDA_IMAGE_URI" and not is_immutable_image(actual):
@@ -432,13 +453,16 @@ def failed_job_rows(workflow_name: str, stdout: str) -> list[list[str]]:
 def runbook_for_failure(workflow_name: str, job_name: str, step_name: str, conclusion: str = "") -> str:
     """Select the most specific troubleshooting runbook for a failed location.
 
-    Matching order is intentional: rollback and missing-image failures often
-    contain generic words such as "deploy" or "validation" and must win first.
+    The failed step takes precedence over broad job and workflow titles.
+    Rollback steps can mention failed validation and must still select rollback.
     """
 
-    text = " ".join([workflow_name, job_name, step_name, conclusion]).lower()
-    if "rollback" in text:
+    # Prefer the failed step; broad job names contain both deploy and rollback.
+    text = (step_name or job_name or workflow_name).lower()
+    if "rollback" in text or "roll back" in text:
         return RUNBOOK_FAILED_ROLLBACK
+    if any(marker in text for marker in ["health", "smoke", "dast", "zap", "validate", "fmt", "trivy"]):
+        return RUNBOOK_FAILED_VALIDATION
     if "require lambda image" in text or "lambda_image_uri" in text or "image uri" in text or "snyk" in text:
         return RUNBOOK_MISSING_IMAGE
     if "apply" in text or "deploy" in text:
@@ -447,8 +471,6 @@ def runbook_for_failure(workflow_name: str, job_name: str, step_name: str, concl
         return RUNBOOK_MISSING_IMAGE
     if "plan" in text:
         return RUNBOOK_FAILED_PLAN
-    if any(marker in text for marker in ["validate", "fmt", "trivy", "health", "smoke", "dast", "zap"]):
-        return RUNBOOK_FAILED_VALIDATION
     return "docs/troubleshooting.md#actions-status-cannot-show-workflow-runs"
 
 
@@ -559,7 +581,32 @@ def collect_github_checks(
     else:
         checks.extend(github_secret_checks(cfg, parse_gh_items(secrets_result.stdout)))
 
+    if cfg["use_prod_approval_environment"]:
+        if repo.returncode == 0 and repo.stdout.strip():
+            environment = urllib.parse.quote(prod_approval_environment(cfg), safe="")
+            result = gh_command_fn(root, ["api", f"repos/{repo.stdout.strip()}/environments/{environment}"])
+            if result.returncode == 0:
+                checks.extend(environment_approval_checks(parse_json_object(result.stdout)))
+            else:
+                checks.append(Check("GitHub environment approvals", "FAIL",
+                                    "Cannot verify production environment required reviewers: " + compact_error(result)))
+        else:
+            checks.append(Check("GitHub environment approvals", "FAIL", "Cannot verify required reviewers without repository access."))
+
     return checks
+
+
+def environment_approval_checks(environment: dict[str, Any]) -> list[Check]:
+    """Require observable human approval, not merely a named environment."""
+
+    rules = environment.get("protection_rules")
+    reviewers = []
+    if isinstance(rules, list):
+        reviewers = [reviewer for rule in rules if isinstance(rule, dict) and rule.get("type") == "required_reviewers"
+                     for reviewer in (rule.get("reviewers") or []) if isinstance(reviewer, dict) and reviewer.get("reviewer")]
+    return [Check("GitHub environment approvals", "OK" if reviewers else "FAIL",
+                  "Production environment requires reviewer approval." if reviewers else
+                  "Configure at least one required reviewer in repository Settings > Environments > prod.")]
 
 
 def collect_branch_checks(

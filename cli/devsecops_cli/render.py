@@ -7,11 +7,12 @@ the orchestration layer.  Stable ordering makes preview and golden diffs useful.
 
 from __future__ import annotations
 
+import json
 import textwrap
 from pathlib import Path
 from typing import Any
 
-from .config import prod_approval_environment
+from .config import PIPELINE_CONFIG_VARIABLE, pipeline_config_json, prod_approval_environment
 from .paths import CONFIG_FILE, DIST_DIR, GENERATED_ARTIFACT_DOC, GENERATED_TFVARS
 
 
@@ -24,7 +25,7 @@ def hcl_value(value: Any) -> str:
         return str(value)
     if isinstance(value, list):
         return "[" + ", ".join(hcl_value(item) for item in value) + "]"
-    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return json.dumps(str(value)).replace("${", "$${").replace("%{", "%%{")
 
 
 def hcl_attribute_line(key: str, value: Any, width: int) -> str:
@@ -88,7 +89,7 @@ def backend_tf(cfg: dict[str, Any]) -> str:
 
     backend = cfg["backend"]
     lines = cli_owned_comment("devsecops render").splitlines() + [
-        "# Review and copy into terraform/backend.tf when ready.",
+        "# Optional reference. CLI/workflows use ignored backend.hcl; no source edit is needed.",
         "terraform {",
         '  backend "s3" {',
         f'    bucket               = {hcl_value(backend["bucket"])}',
@@ -102,6 +103,20 @@ def backend_tf(cfg: dict[str, Any]) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def backend_hcl(cfg: dict[str, Any]) -> str:
+    """Partial backend config passed explicitly to Terraform, never committed."""
+
+    backend = cfg["backend"]
+    values = {
+        "bucket": backend["bucket"], "key": backend["key"], "region": backend["region"],
+        "encrypt": True, "dynamodb_table": backend["lock_table"],
+        "workspace_key_prefix": backend["workspace_key_prefix"],
+    }
+    return cli_owned_comment("devsecops generate") + "\n" + "\n".join(
+        hcl_attribute_line(key, value, 20) for key, value in values.items()
+    ) + "\n"
 
 
 def github_variables(cfg: dict[str, Any]) -> str:
@@ -119,6 +134,7 @@ def github_variables(cfg: dict[str, Any]) -> str:
         f'ENABLE_HTTP_VALIDATION={str(cfg["enable_http_validation"]).lower()}',
         f'ENABLE_DAST={str(cfg["enable_dast"]).lower()}',
         f"PROD_APPROVAL_ENVIRONMENT={prod_approval_environment(cfg)}",
+        f"{PIPELINE_CONFIG_VARIABLE}={shell_quote(pipeline_config_json(cfg))}",
         "",
     ]
     return "\n".join(lines)
@@ -150,6 +166,8 @@ def checklist(cfg: dict[str, Any]) -> str:
         - [ ] `ENABLE_HTTP_VALIDATION` = `{str(cfg["enable_http_validation"]).lower()}`
         - [ ] `ENABLE_DAST` = `{str(cfg["enable_dast"]).lower()}`
         - [ ] `PROD_APPROVAL_ENVIRONMENT` = `{prod_approval_environment(cfg)}`
+        - [ ] `{PIPELINE_CONFIG_VARIABLE}` synchronized with local config using `devsecops github setup --apply`
+        - [ ] GitHub Environment `prod` has at least one required reviewer
 
         ## Terraform Backend
 
@@ -192,6 +210,7 @@ def github_setup_script(cfg: dict[str, Any]) -> str:
         f'gh variable set ENABLE_HTTP_VALIDATION --body {shell_quote(str(cfg["enable_http_validation"]).lower())}',
         f'gh variable set ENABLE_DAST --body {shell_quote(str(cfg["enable_dast"]).lower())}',
         f"gh variable set PROD_APPROVAL_ENVIRONMENT --body {shell_quote(prod_approval_environment(cfg))}",
+        f"gh variable set {PIPELINE_CONFIG_VARIABLE} --body {shell_quote(pipeline_config_json(cfg))}",
         "",
         f'gh secret set AWS_REGION --body {shell_quote(cfg["aws_region"])}',
         'gh secret set AWS_ROLE_TO_ASSUME_ARN --body "<deploy-role-arn>"',
@@ -216,18 +235,34 @@ def render_outputs(root: Path, cfg: dict[str, Any]) -> dict[Path, str]:
     return {
         root / GENERATED_TFVARS: terraform_tfvars(cfg),
         dist / "backend.tf": backend_tf(cfg),
+        dist / "backend.hcl": backend_hcl(cfg),
         dist / "github-variables.env": github_variables(cfg),
         dist / "github-setup.sh": github_setup_script(cfg),
         dist / "setup-checklist.md": checklist(cfg),
     }
 
 
+def generated_artifact_gaps(root: Path, cfg: dict[str, Any]) -> list[str]:
+    """Compare every deterministic deployment artifact with current settings."""
+
+    gaps = []
+    for path, expected in render_outputs(root, cfg).items():
+        try:
+            if path.read_text(encoding="utf-8") != expected:
+                gaps.append(f"{path.relative_to(root)} (outdated)")
+        except FileNotFoundError:
+            gaps.append(f"{path.relative_to(root)} (missing)")
+    return gaps
+
+
 
 __all__ = [
+    "backend_hcl",
     "backend_tf",
     "checklist",
     "cli_owned_comment",
     "cli_owned_markdown_notice",
+    "generated_artifact_gaps",
     "github_setup_script",
     "github_variables",
     "hcl_attribute_line",

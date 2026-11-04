@@ -9,13 +9,15 @@ never credentials; secret values remain in their provider-specific stores.
 from __future__ import annotations
 
 import difflib
+import json
 import re
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
 from .formatting import markdown_table
-from .images import is_immutable_image
-from .models import Check, ConfigMigrationError, Control
+from .images import is_immutable_image, parse_ecr_image_uri
+from .models import Check, ConfigMigrationError, ConfigValidationError, Control
 from .paths import CONFIG_FILE
 
 try:
@@ -619,9 +621,51 @@ def load_config(root: Path) -> dict[str, Any]:
         return default_config()
     if tomllib is None:
         raise RuntimeError("Python 3.11+ is required to read TOML config files.")
-    with path.open("rb") as handle:
-        loaded = tomllib.load(handle)
-    return normalize_config(loaded)
+    try:
+        with path.open("rb") as handle:
+            loaded = tomllib.load(handle)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigValidationError(f"Fix {CONFIG_FILE}: {exc}") from exc
+    cfg = normalize_config(loaded)
+    shape_errors = config_shape_errors(cfg)
+    if shape_errors:
+        raise ConfigValidationError("Fix config fields: " + "; ".join(shape_errors))
+    return cfg
+
+
+def config_shape_errors(cfg: Any, template: Any = None, prefix: str = "") -> list[str]:
+    """Check types before domain validation accesses nested config fields."""
+
+    template = default_config() if template is None else template
+    if isinstance(template, dict):
+        if not isinstance(cfg, dict):
+            return [f"{prefix or 'config'} must be a table"]
+        errors = [f"{prefix}{key}: unknown setting" for key in sorted(cfg.keys() - template.keys())]
+        for key, value in template.items():
+            if key not in cfg:
+                errors.append(f"{prefix}{key}: missing setting")
+            else:
+                errors.extend(config_shape_errors(cfg[key], value, f"{prefix}{key}."))
+        return errors
+    if type(cfg) is not type(template):
+        return [f"{prefix.rstrip('.')}: expected {type(template).__name__}"]
+    return []
+
+
+PIPELINE_CONFIG_VARIABLE = "PIPELINE_CONFIG_JSON"
+
+
+def pipeline_config_json(cfg: dict[str, Any]) -> str:
+    """Export schema-owned settings only, never arbitrary fields or credentials."""
+
+    def owned(value: dict[str, Any], template: dict[str, Any]) -> dict[str, Any]:
+        return {key: owned(value[key], child) if isinstance(child, dict) else value[key]
+                for key, child in template.items()}
+
+    payload = json.dumps(owned(cfg, default_config()), sort_keys=True, separators=(",", ":"))
+    if len(payload.encode("utf-8")) > 48 * 1024:
+        raise ConfigValidationError(f"{PIPELINE_CONFIG_VARIABLE} exceeds the GitHub variable size limit.")
+    return payload
 
 
 def toml_value(value: Any) -> str:
@@ -633,7 +677,7 @@ def toml_value(value: Any) -> str:
         return str(value)
     if isinstance(value, list):
         return "[" + ", ".join(toml_value(item) for item in value) + "]"
-    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return json.dumps(str(value), ensure_ascii=False)
 
 
 def dump_config_toml(cfg: dict[str, Any]) -> str:
@@ -869,6 +913,9 @@ def validate_config(cfg: dict[str, Any]) -> list[Check]:
     can still be represented and inspected explicitly.
     """
 
+    shape_errors = config_shape_errors(cfg)
+    if shape_errors:
+        return [Check("Config structure", "FAIL", error) for error in shape_errors]
     checks: list[Check] = []
     schema_version = cfg.get("schema_version")
     checks.append(
@@ -883,14 +930,14 @@ def validate_config(cfg: dict[str, Any]) -> list[Check]:
     checks.append(
         Check(
             "Config project name",
-            "OK" if PROJECT_NAME_RE.match(cfg["project_name"]) else "FAIL",
+            "OK" if PROJECT_NAME_RE.fullmatch(cfg["project_name"]) else "FAIL",
             cfg["project_name"],
         )
     )
     checks.append(
         Check(
             "Config AWS region",
-            "OK" if AWS_REGION_RE.match(cfg["aws_region"]) else "WARN",
+            "OK" if AWS_REGION_RE.fullmatch(cfg["aws_region"]) else "FAIL",
             cfg["aws_region"],
         )
     )
@@ -917,6 +964,8 @@ def validate_config(cfg: dict[str, Any]) -> list[Check]:
                 image_uri if is_immutable_image(image_uri) else "Use an immutable tag or digest; latest/bootstrap are not allowed.",
             )
         )
+        if parse_ecr_image_uri(image_uri) is None:
+            checks.append(Check("Lambda image shape", "FAIL", "Expected a complete ECR image URI with a release tag or sha256 digest."))
     else:
         checks.append(Check("Lambda image immutability policy", "WARN", "Required before production deploy."))
     for env_name, env_cfg in cfg["environments"].items():
@@ -930,7 +979,7 @@ def validate_config(cfg: dict[str, Any]) -> list[Check]:
         for setting, limits in numeric_rules.items():
             value = env_cfg[setting]
             lower, upper = limits
-            status = "OK" if isinstance(value, int) and lower <= value <= upper else "FAIL"
+            status = "OK" if type(value) is int and lower <= value <= upper else "FAIL"
             checks.append(
                 Check(
                     f"{env_name}.{setting}",
@@ -939,12 +988,24 @@ def validate_config(cfg: dict[str, Any]) -> list[Check]:
                 )
             )
         origins = env_cfg["cors_allowed_origins"]
-        valid_origins = isinstance(origins, list) and all(isinstance(item, str) and item for item in origins)
+        def valid_origin(item: Any) -> bool:
+            if not isinstance(item, str) or item != item.strip() or any(char.isspace() for char in item):
+                return False
+            if item == "*":
+                return True
+            try:
+                parsed = urllib.parse.urlsplit(item)
+                return bool(parsed.hostname) and parsed.scheme in {"http", "https"} and not (
+                    parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment
+                ) and (parsed.port is None or 1 <= parsed.port <= 65535)
+            except ValueError:
+                return False
+        valid_origins = bool(origins) and all(valid_origin(item) for item in origins)
         checks.append(
             Check(
                 f"{env_name}.cors_allowed_origins",
                 "OK" if valid_origins else "FAIL",
-                ",".join(origins) if valid_origins else "Expected non-empty list of strings.",
+                ",".join(origins) if valid_origins else "Expected a non-empty list of HTTP(S) origins without paths, or '*'.",
             )
         )
     prod_origins = cfg["environments"].get("prod", {}).get("cors_allowed_origins", [])
@@ -1015,6 +1076,7 @@ __all__ = [
     "CONTROL_CATALOG",
     "ENVIRONMENTS",
     "NO_APPROVAL_ENVIRONMENT",
+    "PIPELINE_CONFIG_VARIABLE",
     "PRESETS",
     "PRESET_DESCRIPTIONS",
     "PRESET_ORDER",
@@ -1032,6 +1094,7 @@ __all__ = [
     "config_preset_diff",
     "config_schema",
     "config_schema_markdown",
+    "config_shape_errors",
     "control_by_id",
     "control_catalog",
     "control_state",
@@ -1047,6 +1110,7 @@ __all__ = [
     "normalize_config",
     "normalize_control_topic",
     "parse_config_value",
+    "pipeline_config_json",
     "preset_config",
     "prod_approval_environment",
     "toml_value",

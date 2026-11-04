@@ -135,6 +135,18 @@ def missing_or_error_detail(result: subprocess.CompletedProcess[str], missing_de
     return missing_detail if is_resource_missing(result) else compact_error(result)
 
 
+def lambda_readiness_status(configuration: dict[str, Any]) -> str:
+    """API success does not establish function or update health."""
+
+    state = configuration.get("State")
+    update = configuration.get("LastUpdateStatus")
+    if state == "Failed" or update == "Failed":
+        return "FAIL"
+    if state != "Active" or update != "Successful":
+        return "WARN"
+    return "OK"
+
+
 def collect_aws_checks(
     root: Path,
     cfg: dict[str, Any],
@@ -271,8 +283,8 @@ def collect_aws_checks(
     checks.append(
         Check(
             "Lambda function",
-            "OK" if lambda_result.returncode == 0 else "WARN",
-            f"{lambda_function} ({lambda_state or 'found'})"
+            lambda_readiness_status(lambda_payload) if lambda_result.returncode == 0 and isinstance(lambda_payload, dict) else "WARN",
+            f"{lambda_function} (state: {lambda_state or 'unknown'}, update: {lambda_payload.get('LastUpdateStatus') or 'unknown'})"
             if lambda_result.returncode == 0
             else missing_or_error_detail(lambda_result, "Lambda function not deployed yet."),
         )
@@ -604,7 +616,8 @@ def inspect_aws_outputs(
         if isinstance(code, dict):
             outputs["lambda_image_uri"] = str(code.get("ImageUri") or "")
         outputs["lambda_image_uri"] = outputs["lambda_image_uri"] or str(configuration.get("ImageUri") or "")
-        checks.append(Check("Lambda function", "OK", f"{lambda_function} ({outputs['lambda_state'] or 'found'})"))
+        checks.append(Check("Lambda function", lambda_readiness_status(configuration),
+                            f"{lambda_function} (state: {outputs['lambda_state'] or 'unknown'}, update: {outputs['lambda_last_update_status'] or 'unknown'})"))
     else:
         checks.append(Check("Lambda function", "WARN", missing_or_error_detail(lambda_result, "Lambda function not deployed yet.")))
 

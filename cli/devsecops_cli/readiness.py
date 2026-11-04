@@ -18,6 +18,12 @@ EXIT_VALIDATION_FAILED = 1
 EXIT_MISSING_EXTERNAL_TOOL = 2
 EXIT_AUTH_FAILED = 3
 READINESS_CATEGORIES = ["Local", "Terraform", "GitHub", "AWS", "Security", "Deployment"]
+PRODUCTION_EVIDENCE_CHECKS = {
+    "Local config", "Project files", "Config schema", "Rendered tfvars", "Terraform validate",
+    "Bootstrap validate", "GitHub auth", "GitHub repository", "GitHub environment approvals",
+    "Branch `main` protection", "AWS identity", "State bucket", "Lock table", "Lambda function",
+    "Configured ECR image",
+}
 
 
 def readiness_score(checks: list[Check]) -> int:
@@ -200,6 +206,8 @@ def readiness_category_for_check(check: Check) -> str:
     """
 
     name = check.name
+    if name in {"AWS verification", "Terraform verification"}:
+        return name.split()[0]
     if name.startswith("GitHub") or name.startswith("Branch `") or name.startswith("Required check"):
         return "GitHub"
     if name == "Protection details":
@@ -259,12 +267,9 @@ def grouped_readiness_checks(checks: list[Check]) -> dict[str, list[Check]]:
 
 
 def readiness_score_for_category(checks: list[Check]) -> int | None:
-    """Score all visible checks in one category, or return ``None`` if empty.
+    """Score participating checks consistently with gaps and strict exits."""
 
-    Category summaries intentionally include informational, unscored checks;
-    strict exits and the direct readiness score continue to honor ``scored``.
-    """
-
+    checks = [check for check in checks if check.scored]
     if not checks:
         return None
     points = 0
@@ -286,7 +291,7 @@ def readiness_breakdown_rows(checks: list[Check], compact: bool = False) -> list
         score = readiness_score_for_category(category_checks)
         score_text = "n/a" if score is None else f"{score}%"
         if compact:
-            gaps = sum(1 for check in category_checks if check.status != "OK")
+            gaps = sum(1 for check in category_checks if check.scored and check.status != "OK")
             rows.append([category, score_text, str(gaps)])
         else:
             status_counts = {
@@ -312,7 +317,7 @@ def overall_breakdown_score(checks: list[Check]) -> int:
     """Return the macro-average of non-empty category scores."""
 
     scores = [score for score in (readiness_score_for_category(group) for group in grouped_readiness_checks(checks).values()) if score is not None]
-    return round(sum(scores) / len(scores)) if scores else 100
+    return round(sum(scores) / len(scores)) if scores else 0
 
 
 
@@ -388,7 +393,8 @@ def readiness_gate_rows(checks: list[Check]) -> list[list[str]]:
     local_config_ok = check_status_by_name(checks, "Local config") == "OK" and check_status_by_name(checks, "Config schema") != "FAIL"
     project_files_ok = check_status_by_name(checks, "Project files") == "OK"
     production_gaps = [check for check in checks if check.scored and check.status != "OK"]
-    release_ready = not production_gaps
+    missing_evidence = sorted(PRODUCTION_EVIDENCE_CHECKS - {check.name for check in checks})
+    release_ready = not production_gaps and not missing_evidence
     return [
         [
             "Local config",
@@ -404,9 +410,11 @@ def readiness_gate_rows(checks: list[Check]) -> list[list[str]]:
         ],
         [
             "Production readiness",
-            "OK" if not production_gaps else "Blocked",
+            "OK" if release_ready else "Unverified" if not production_gaps and missing_evidence else "Blocked",
             "No scored readiness gaps."
-            if not production_gaps
+            if release_ready
+            else "Run `devsecops status --deep`; production evidence is incomplete."
+            if not production_gaps and missing_evidence
             else f"{len(production_gaps)} scored gap(s) remain before production deploy.",
         ],
         [

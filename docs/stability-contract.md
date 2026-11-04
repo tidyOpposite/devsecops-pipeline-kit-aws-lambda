@@ -83,6 +83,12 @@ without a deprecation window.
 | `control-catalog` | `devsecops controls --format json` | `kind`, `schema_version`, `controls` |
 | `command-inventory` | `devsecops inventory --format json` | `kind`, `schema_version`, `commands`, `deprecation_policy`, `json_outputs`, `generated_artifacts` |
 
+Config syntax and structure errors in JSON commands return a `command-error`
+envelope with `kind`, `schema_version`, `command`, `error`, and `exit_code`.
+They use exit code 1 rather than an unexpected-runtime code. Production gating
+requires `status --deep --strict`; compact status explicitly leaves provider
+checks unverified. Informational checks are excluded from both scores and gaps.
+
 ## Deprecation Policy
 
 Aliases remain callable through at least `v1.0.0`. They can be hidden from
@@ -140,6 +146,7 @@ release note that explicitly changes the artifact contract.
 | `.devsecops/deployments.json` | Schema-versioned local runtime state | A protected deploy or rollback dispatch succeeds | One non-secret run/image record is prepended; bounded history only |
 | `terraform/generated.auto.tfvars` | Stable Terraform variables | Config values, schema migration output, or Terraform variable contract changes | HCL assignment values and `environment_config` values |
 | `dist/devsecops/backend.tf` | Stable review template | `backend.*` values or backend template policy changes | S3 backend attribute values |
+| `dist/devsecops/backend.hcl` | Stable backend inputs | `backend.*` values change | Partial backend assignments for `terraform init -backend-config` |
 | `dist/devsecops/github-variables.env` | Stable helper | Repository variable source config changes | `PROJECT_NAME`, `LAMBDA_IMAGE_URI`, `ENABLE_*`, or `PROD_APPROVAL_ENVIRONMENT` values |
 | `dist/devsecops/github-setup.sh` | Stable helper script | GitHub variable or required secret contract changes | `gh variable` commands, Snyk token requirement, header changes |
 | `dist/devsecops/setup-checklist.md` | Stable checklist | GitHub, backend, or branch-protection checklist contract changes | Checklist item values or required item additions |

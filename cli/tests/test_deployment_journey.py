@@ -45,10 +45,9 @@ def create_deployment_project(root: Path) -> dict[str, object]:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# project file\n", encoding="utf-8")
-    for relative in (cli.GENERATED_TFVARS, cli.DIST_DIR / "github-setup.sh"):
-        path = root / relative
+    for path, content in cli.render_outputs(root, cfg).items():
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("# generated\n", encoding="utf-8")
+        path.write_text(content, encoding="utf-8")
     return cfg
 
 
@@ -521,7 +520,7 @@ class DeploymentWorkflowContractTests(unittest.TestCase):
         self.assertIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}", workflow)
         self.assertNotIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}-${{", workflow)
         self.assertIn("previous_image_uri=\"$(aws lambda get-function \\", workflow)
-        self.assertIn("environment: ${{ vars.PROD_APPROVAL_ENVIRONMENT || 'prod' }}", workflow)
+        self.assertIn("environment: prod", workflow)
 
     def test_next_action_uses_cli_deployment_surface(self) -> None:
         self.assertEqual(cli.PRODUCTION_DEPLOY_COMMAND, "devsecops deploy prod")
