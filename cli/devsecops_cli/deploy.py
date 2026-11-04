@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,18 @@ class DeploymentStateError(ValueError):
     """Raised when the local deployment journal cannot be trusted."""
 
 
+@dataclass(frozen=True)
+class DeploymentIntent:
+    repository: str
+    commit_sha: str
+    config_sha256: str
+    image_uri: str
+
+
+def is_commit_sha(value: str) -> bool:
+    return re.fullmatch(r"[a-f0-9]{40}", value) is not None
+
+
 def utc_now() -> str:
     """Return a stable, second-precision UTC timestamp for journal records."""
 
@@ -71,6 +84,9 @@ def _clean_record(record: dict[str, Any]) -> dict[str, str]:
         "operation": operation,
         "environment": str(record.get("environment") or DEPLOYMENT_ENVIRONMENT),
         "ref": str(record.get("ref") or DEPLOYMENT_REF),
+        "repository": str(record.get("repository") or ""),
+        "commit_sha": str(record.get("commit_sha") or ""),
+        "config_sha256": str(record.get("config_sha256") or ""),
         "requested_image_uri": str(record.get("requested_image_uri") or ""),
         "previous_image_uri": str(record.get("previous_image_uri") or ""),
         "source_run_id": str(record.get("source_run_id") or ""),
@@ -167,7 +183,7 @@ def rollback_target(root: Path, source_run_id: str | None = None) -> tuple[str, 
     return record["previous_image_uri"], record
 
 
-def workflow_dispatch_args(operation: str, image_uri: str) -> list[str]:
+def workflow_dispatch_args(operation: str, intent: DeploymentIntent) -> list[str]:
     """Build ``gh`` arguments for the protected production workflow dispatch."""
 
     if operation not in DEPLOYMENT_OPERATIONS:
@@ -178,12 +194,18 @@ def workflow_dispatch_args(operation: str, image_uri: str) -> list[str]:
         DEPLOYMENT_WORKFLOW,
         "--ref",
         DEPLOYMENT_REF,
+        "--repo",
+        intent.repository,
         "--raw-field",
         f"mode={operation}",
         "--raw-field",
         f"environment={DEPLOYMENT_ENVIRONMENT}",
         "--raw-field",
-        f"image_uri={image_uri}",
+        f"image_uri={intent.image_uri}",
+        "--raw-field",
+        f"commit_sha={intent.commit_sha}",
+        "--raw-field",
+        f"config_sha256={intent.config_sha256}",
     ]
 
 
@@ -410,6 +432,7 @@ __all__ = [
     "DEPLOYMENT_WORKFLOW",
     "DEPLOYMENT_WORKFLOW_PATH",
     "DEPLOYMENT_WORKFLOW_NAME",
+    "DeploymentIntent",
     "DeploymentStateError",
     "active_deployment_runs",
     "deployment_exit_code",
@@ -419,6 +442,7 @@ __all__ = [
     "display_gh_command",
     "empty_deployment_state",
     "is_deployment_run",
+    "is_commit_sha",
     "latest_deployment",
     "load_deployment_state",
     "newest_deployment_run",

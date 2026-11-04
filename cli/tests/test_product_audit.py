@@ -6,7 +6,6 @@ import importlib.util
 import io
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -18,12 +17,14 @@ from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
-from devsecops_cli import aws, config, context, doctor, github, main as cli, render, workflow
+from devsecops_cli import aws, config, context, deploy, doctor, github, main as cli, render, workflow
 from devsecops_cli.models import Check, ConfigValidationError
 from devsecops_cli.readiness import PRODUCTION_EVIDENCE_CHECKS
 
 ROOT = Path(__file__).resolve().parents[2]
 IMAGE = "123456789012.dkr.ecr.eu-central-1.amazonaws.com/customer-prod-lambda-repo:sha-abc123"
+IMAGE_DIGEST = IMAGE.rsplit(":", 1)[0] + "@sha256:" + "b" * 64
+COMMIT_SHA = "c" * 40
 
 
 def customer_config():
@@ -33,6 +34,12 @@ def customer_config():
     cfg["environments"]["prod"].update(lambda_memory_size=4096, lambda_timeout=300,
                                     log_retention_days=731, cors_allowed_origins=["https://customer.example"])
     return cfg
+
+
+def reviewed_environment(cfg, image=IMAGE_DIGEST):
+    return {config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(cfg), "DEPLOY_MODE": "deploy",
+            "GITHUB_REPOSITORY": "owner/deployment", "DISPATCH_IMAGE_URI": image, "GITHUB_SHA": COMMIT_SHA,
+            "DISPATCH_COMMIT_SHA": COMMIT_SHA, "DISPATCH_CONFIG_SHA256": config.deployment_config_sha256(cfg, image)}
 
 
 def project(root, cfg=None):
@@ -92,12 +99,10 @@ class PipelineTransportTests(unittest.TestCase):
     def test_runner_exports_matching_region_flags_and_exact_dispatch_image(self):
         cfg = customer_config()
         cfg["lambda_image_uri"] = ""
-        target = IMAGE.replace("sha-abc123", "sha-reviewed")
+        target = IMAGE_DIGEST
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            environment = {config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(cfg),
-                                       "GITHUB_ENV": str(root / "github-env"), "DISPATCH_IMAGE_URI": target,
-                                       "DEPLOY_MODE": "deploy", "GITHUB_REPOSITORY": "owner/deployment"}
+            environment = reviewed_environment(cfg, target) | {"GITHUB_ENV": str(root / "github-env")}
             with patch.dict(os.environ, environment, clear=True), patch.object(workflow.Path, "cwd", return_value=root), \
                  patch.object(workflow, "production_environment_check", return_value=Check("Approval", "OK", "Protected")) as approval, \
                  redirect_stdout(io.StringIO()):
@@ -116,10 +121,8 @@ class PipelineTransportTests(unittest.TestCase):
                 root = Path(directory)
                 cfg = customer_config()
                 cfg.update(enable_http_validation=False, use_separate_aws_plan_role=False)
-                environment = os.environ | {"PYTHONPATH": str(ROOT / "cli"),
-                    config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(cfg),
-                    "GITHUB_ENV": str(root / "github-env"), "DISPATCH_IMAGE_URI": IMAGE,
-                    "DEPLOY_MODE": mode, "GITHUB_REPOSITORY": "owner/deployment"}
+                environment = os.environ | reviewed_environment(cfg) | {"PYTHONPATH": str(ROOT / "cli"),
+                    "GITHUB_ENV": str(root / "github-env"), "DEPLOY_MODE": mode}
                 result = subprocess.run([sys.executable, "-m", "devsecops_cli.workflow"], cwd=root,
                                         env=environment, text=True, capture_output=True, check=False)
                 self.assertEqual(result.returncode, 1)
@@ -131,8 +134,7 @@ class PipelineTransportTests(unittest.TestCase):
         cfg = customer_config()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            environment = {config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(cfg),
-                           "DEPLOY_MODE": "deploy", "GITHUB_REPOSITORY": "owner/deployment"}
+            environment = reviewed_environment(cfg)
             with patch.dict(os.environ, environment, clear=True), patch.object(workflow.Path, "cwd", return_value=root), \
                  patch.object(workflow, "production_environment_check", return_value=Check("Approval", "FAIL", "No reviewers")) as approval, \
                  redirect_stderr(io.StringIO()) as errors, redirect_stdout(io.StringIO()):
@@ -146,6 +148,46 @@ class PipelineTransportTests(unittest.TestCase):
                 self.assertEqual(workflow.main(), 0)
                 approval.assert_not_called()
                 self.assertTrue((root / cli.GENERATED_TFVARS).exists())
+
+    def test_runner_rejects_drift_before_writing_or_inspecting_protection(self):
+        cfg = customer_config()
+        changed_backend = copy.deepcopy(cfg)
+        changed_backend["backend"]["bucket"] = "different-state-bucket"
+        changed_image = IMAGE_DIGEST.replace("b" * 64, "a" * 64)
+        for override, message in [
+            ({"GITHUB_SHA": "a" * 40}, "commit_sha"),
+            ({"DISPATCH_COMMIT_SHA": ""}, "commit_sha"),
+            ({config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(changed_backend)}, "config_sha256"),
+            ({"DISPATCH_IMAGE_URI": changed_image}, "config_sha256"),
+            ({"DISPATCH_IMAGE_URI": IMAGE}, "explicit ECR image @sha256 digest"),
+            ({"DISPATCH_IMAGE_URI": ""}, "explicit ECR image @sha256 digest"),
+        ]:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                environment = reviewed_environment(cfg) | {"GITHUB_ENV": str(root / "github-env")} | override
+                with patch.dict(os.environ, environment, clear=True), patch.object(workflow.Path, "cwd", return_value=root), \
+                     patch.object(workflow, "production_environment_check") as approval, redirect_stderr(io.StringIO()) as errors:
+                    self.assertEqual(workflow.main(), 1)
+                    self.assertIn(message, errors.getvalue())
+                approval.assert_not_called()
+                self.assertEqual(list(root.iterdir()), [])
+
+    def test_preapproval_verifies_effective_config_without_rendering(self):
+        cfg = customer_config()
+        remote = dict(cfg, lambda_image_uri="")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            summary = root / "summary"
+            environment = reviewed_environment(cfg) | {config.PIPELINE_CONFIG_VARIABLE: json.dumps(remote, indent=2),
+                                                        "GITHUB_STEP_SUMMARY": str(summary)}
+            with patch.dict(os.environ, environment, clear=True), patch.object(workflow.Path, "cwd", return_value=root), \
+                 patch.object(sys, "argv", ["workflow", "--verify-intent"]), \
+                 patch.object(workflow, "production_environment_check") as approval, redirect_stdout(io.StringIO()):
+                self.assertEqual(workflow.main(), 0)
+            approval.assert_not_called()
+            self.assertEqual(list(root.iterdir()), [summary])
+            for value in (COMMIT_SHA, IMAGE_DIGEST, environment["DISPATCH_CONFIG_SHA256"]):
+                self.assertIn(value, summary.read_text())
 
     def test_workflow_materializes_settings_before_cloud_access(self):
         source = (ROOT / ".github/workflows/deploy.yml").read_text()
@@ -389,13 +431,14 @@ class ValidationAndUiTests(unittest.TestCase):
                 self.assertEqual(result, cli.EXIT_VALIDATION_FAILED)
             self.assertEqual(list(root.iterdir()), [])
 
-    def test_cli_and_workflow_reject_the_same_malformed_image_shapes(self):
-        source = (ROOT / ".github/workflows/deploy.yml").read_text()
-        pattern = re.search(r"grep -Eq '([^']+)'", source).group(1)
-        for candidate in [IMAGE, IMAGE.replace("customer-prod", "App Repo"), IMAGE.replace("sha-abc123", "sha bad"),
-                          IMAGE + "\n", IMAGE + "@sha256:" + "a" * 64, IMAGE.rsplit(":", 1)[0] + "@sha256:" + "b" * 64]:
+    def test_production_intent_rejects_malformed_or_unpinned_images(self):
+        payload = config.pipeline_config_json(customer_config())
+        for candidate in [IMAGE, IMAGE_DIGEST.replace("customer-prod", "App Repo"),
+                          IMAGE_DIGEST + "\n", IMAGE + "@sha256:" + "a" * 64]:
             with self.subTest(candidate=candidate):
-                self.assertEqual(cli.parse_ecr_image_uri(candidate) is not None, re.fullmatch(pattern, candidate) is not None)
+                intent = deploy.DeploymentIntent("owner/deployment", COMMIT_SHA, "", candidate)
+                with self.assertRaisesRegex(ConfigValidationError, "explicit ECR image @sha256 digest"):
+                    workflow.verify_production_intent(payload, intent, COMMIT_SHA)
 
     def test_empty_and_invalid_cors_are_rejected_before_generation(self):
         for origins in [[], [""], [" "], ["not-an-origin"], ["https://customer.example/path"]]:

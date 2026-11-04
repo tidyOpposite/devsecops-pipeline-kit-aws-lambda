@@ -43,6 +43,7 @@ from .aws import (
     fetch_health_url,
     is_resource_missing,
     missing_or_error_detail,
+    resolve_ecr_image_digest,
 )
 from .deploy import (
     DEPLOYMENT_ENVIRONMENT,
@@ -51,6 +52,7 @@ from .deploy import (
     DEPLOYMENT_WORKFLOW,
     DEPLOYMENT_WORKFLOW_NAME,
     DEPLOYMENT_WORKFLOW_PATH,
+    DeploymentIntent,
     DeploymentStateError,
     active_deployment_runs,
     deployment_exit_code,
@@ -60,6 +62,7 @@ from .deploy import (
     display_gh_command,
     empty_deployment_state,
     is_deployment_run,
+    is_commit_sha,
     latest_deployment,
     load_deployment_state,
     newest_deployment_run,
@@ -82,6 +85,7 @@ from .config import (
     CONFIG_SET_PATHS,
     ENVIRONMENTS,
     NO_APPROVAL_ENVIRONMENT,
+    PIPELINE_CONFIG_VARIABLE,
     PRESETS,
     PRESET_DESCRIPTIONS,
     PRESET_ORDER,
@@ -104,6 +108,7 @@ from .config import (
     control_to_dict,
     deep_merge,
     default_config,
+    deployment_config_sha256,
     dump_config_toml,
     has_wildcard_cors,
     load_config,
@@ -120,6 +125,7 @@ from .config import (
     toml_value,
     write_config,
 )
+from .workflow import decode_pipeline_config
 from .completion import (
     COMPLETION_COMMANDS,
     COMPLETION_OPTIONS,
@@ -707,11 +713,11 @@ def view_deployment_run(root: Path, run_id: str) -> tuple[dict[str, Any], str | 
 def dispatch_deployment_workflow(
     root: Path,
     operation: str,
-    image_uri: str,
+    intent: DeploymentIntent,
 ) -> subprocess.CompletedProcess[str]:
     return _github_adapter.dispatch_workflow(
         root,
-        workflow_dispatch_args(operation, image_uri),
+        workflow_dispatch_args(operation, intent),
         command_exists_fn=command_exists,
         gh_command_fn=gh_command,
     )
@@ -3091,20 +3097,60 @@ def confirm_cloud_deployment(operation: str) -> bool:
     return answer == expected
 
 
+def review_deployment_intent(
+    root: Path, image_uri: str, cfg: dict[str, Any] | None = None,
+) -> tuple[DeploymentIntent, dict[str, Any]]:
+    """Pin the destination, remote commit, effective configuration, and image before confirmation."""
+
+    repository = gh_command(root, ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])
+    if repository.returncode != 0 or not repository.stdout.strip():
+        raise ConfigValidationError(f"Cannot identify the deployment repository: {compact_error(repository)}")
+    name = repository.stdout.strip()
+    ref = gh_command(root, ["api", f"repos/{name}/git/ref/heads/{DEPLOYMENT_REF}", "--jq", ".object.sha"])
+    commit_sha = ref.stdout.strip()
+    if ref.returncode != 0 or not is_commit_sha(commit_sha):
+        raise ConfigValidationError(f"Cannot verify the remote {DEPLOYMENT_REF} commit in {name}.")
+
+    if cfg is None:
+        remote = gh_command(root, ["api", f"repos/{name}/actions/variables/{PIPELINE_CONFIG_VARIABLE}", "--jq", ".value"])
+        if remote.returncode != 0:
+            raise ConfigValidationError(f"Cannot read the repository configuration for rollback: {compact_error(remote)}")
+        cfg = decode_pipeline_config(remote.stdout, production=True, image_uri=image_uri)
+
+    image = parse_ecr_image_uri(image_uri)
+    if image is None or image.region != cfg["aws_region"] or not is_immutable_image(image_uri):
+        raise ConfigValidationError("Select an immutable ECR image in the deployment region.")
+    if image.digest:
+        digest_uri = f"{image.registry}/{image.repository}@{image.digest.lower()}"
+    else:
+        if not command_exists("aws"):
+            raise ConfigValidationError("Install and authenticate AWS CLI to resolve the ECR tag, or select a reviewed @sha256 digest.")
+        digest_uri = resolve_ecr_image_digest(root, image_uri, cfg["aws_region"], aws_json_fn=aws_json)
+    intent = DeploymentIntent(name, commit_sha, deployment_config_sha256(cfg, digest_uri), digest_uri)
+    return intent, cfg
+
+
 def print_deployment_intent(
     operation: str,
-    image_uri: str,
+    intent: DeploymentIntent,
+    cfg: dict[str, Any],
     previous_image_uri: str,
     source_run_id: str = "",
 ) -> None:
-    """Show the exact protected ref, image transition, and underlying command."""
+    """Show the pinned deployment inputs before the operator confirms them."""
 
     title = "Production Deployment" if operation == "deploy" else "Production Rollback"
+    backend = cfg["backend"]
     lines = [
         f"Operation: {operation}",
+        f"Repository: {intent.repository}",
         f"Environment: {DEPLOYMENT_ENVIRONMENT}",
         f"Protected ref: {DEPLOYMENT_REF}",
-        f"Target image: {image_uri}",
+        f"Commit SHA: {intent.commit_sha}",
+        f"Config SHA-256: {intent.config_sha256}",
+        f"Project and region: {cfg['project_name']} ({cfg['aws_region']})",
+        f"State: s3://{backend['bucket']}/{backend['workspace_key_prefix']}/{DEPLOYMENT_ENVIRONMENT}/{backend['key']} ({backend['region']})",
+        f"Target image: {intent.image_uri}",
         f"Current image: {previous_image_uri or '(not observed locally)'}",
         "Execution: protected GitHub Actions environment with OIDC and Terraform state",
     ]
@@ -3112,13 +3158,13 @@ def print_deployment_intent(
         lines.insert(1, f"Deployment being reversed: run {source_run_id}")
     draw_box(title, lines)
     print("Underlying GitHub command:")
-    print("  " + display_gh_command(workflow_dispatch_args(operation, image_uri)))
+    print("  " + display_gh_command(workflow_dispatch_args(operation, intent)))
 
 
 def dispatch_cloud_deployment(
     root: Path,
     operation: str,
-    image_uri: str,
+    intent: DeploymentIntent,
     previous_image_uri: str,
     source_run_id: str,
     *,
@@ -3143,7 +3189,7 @@ def dispatch_cloud_deployment(
         )
         return EXIT_VALIDATION_FAILED
     before_runs = current_runs
-    result = dispatch_deployment_workflow(root, operation, image_uri)
+    result = dispatch_deployment_workflow(root, operation, intent)
     if result.returncode != 0:
         print(fail("GitHub workflow dispatch failed: ") + compact_error(result))
         return deployment_error_exit_code(compact_error(result))
@@ -3159,7 +3205,10 @@ def dispatch_cloud_deployment(
         "operation": operation,
         "environment": DEPLOYMENT_ENVIRONMENT,
         "ref": DEPLOYMENT_REF,
-        "requested_image_uri": image_uri,
+        "repository": intent.repository,
+        "commit_sha": intent.commit_sha,
+        "config_sha256": intent.config_sha256,
+        "requested_image_uri": intent.image_uri,
         "previous_image_uri": previous_image_uri,
         "source_run_id": source_run_id,
         "run_id": run_id,
@@ -3216,14 +3265,14 @@ def cmd_deploy_prod(args: argparse.Namespace) -> int:
         active_image_error,
     )
     image_uri = str(cfg.get("lambda_image_uri") or "")
-    print_deployment_intent("deploy", image_uri or "(not configured)", active_image_uri)
-    print()
     emit_check_output("Production Deployment Preflight", checks)
     blockers = [check for check in checks if check.scored and check.status != "OK"]
     if blockers:
         print()
         print(fail(f"Deployment blocked by {len(blockers)} preflight check(s)."))
         return deployment_preflight_exit_code(checks)
+    intent, cfg = review_deployment_intent(root, image_uri, cfg)
+    print_deployment_intent("deploy", intent, cfg, active_image_uri)
     if getattr(args, "dry_run", False):
         print()
         print(info("Dry run only. No workflow was dispatched and AWS was not changed."))
@@ -3234,7 +3283,7 @@ def cmd_deploy_prod(args: argparse.Namespace) -> int:
     return dispatch_cloud_deployment(
         root,
         "deploy",
-        image_uri,
+        intent,
         active_image_uri,
         "",
         watch=getattr(args, "watch", False),
@@ -3246,7 +3295,6 @@ def cmd_deploy_rollback(args: argparse.Namespace) -> int:
     """Resolve, preflight, and optionally dispatch a production image rollback."""
 
     root = repo_root()
-    cfg = load_config(root)
     if getattr(args, "interval", 5) < 3:
         print(fail("--interval must be at least 3 seconds."))
         return EXIT_VALIDATION_FAILED
@@ -3266,25 +3314,25 @@ def cmd_deploy_rollback(args: argparse.Namespace) -> int:
     if not source_run_id and source_record:
         source_run_id = source_record.get("run_id", "")
 
+    intent, cfg = review_deployment_intent(root, target_image_uri)
     runs, runs_error = list_deployment_runs(root)
     active_image_uri, active_image_error = inspect_active_lambda_image(root, cfg)
     checks = rollback_deployment_preflight_checks(
         root,
         cfg,
-        target_image_uri,
+        intent.image_uri,
         runs,
         runs_error,
         active_image_uri,
         active_image_error,
     )
-    print_deployment_intent("rollback", target_image_uri, active_image_uri, source_run_id)
-    print()
     emit_check_output("Production Rollback Preflight", checks)
     blockers = [check for check in checks if check.scored and check.status != "OK"]
     if blockers:
         print()
         print(fail(f"Rollback blocked by {len(blockers)} preflight check(s)."))
         return deployment_preflight_exit_code(checks)
+    print_deployment_intent("rollback", intent, cfg, active_image_uri, source_run_id)
     if getattr(args, "dry_run", False):
         print()
         print(info("Dry run only. No rollback workflow was dispatched and AWS was not changed."))
@@ -3295,7 +3343,7 @@ def cmd_deploy_rollback(args: argparse.Namespace) -> int:
     return dispatch_cloud_deployment(
         root,
         "rollback",
-        target_image_uri,
+        intent,
         active_image_uri,
         source_run_id,
         watch=getattr(args, "watch", False),

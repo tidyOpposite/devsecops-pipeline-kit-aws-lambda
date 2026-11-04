@@ -9,6 +9,7 @@ never credentials; secret values remain in their provider-specific stores.
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import re
 import urllib.parse
@@ -668,6 +669,13 @@ def pipeline_config_json(cfg: dict[str, Any]) -> str:
     return payload
 
 
+def deployment_config_sha256(cfg: dict[str, Any], image_uri: str) -> str:
+    """Fingerprint the schema-owned settings the runner will use, including the dispatch image."""
+
+    payload = pipeline_config_json(dict(cfg, lambda_image_uri=image_uri))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def toml_value(value: Any) -> str:
     """Serialize the limited scalar/list value types used by this schema."""
 
@@ -1117,6 +1125,7 @@ __all__ = [
     "control_to_dict",
     "deep_merge",
     "default_config",
+    "deployment_config_sha256",
     "dump_config_toml",
     "has_wildcard_cors",
     "load_config",

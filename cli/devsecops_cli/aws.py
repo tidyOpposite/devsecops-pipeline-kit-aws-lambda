@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import VERSION
-from .images import parse_ecr_image_uri
-from .models import Check
+from .images import is_immutable_image, parse_ecr_image_uri
+from .models import Check, ConfigValidationError
 
 
 # Keep process execution behind small adapters so collectors can be exercised
@@ -74,6 +74,33 @@ def compact_error(result: subprocess.CompletedProcess[str]) -> str:
 
     output = (result.stderr or result.stdout or "").strip().splitlines()
     return output[-1] if output else f"Command exited with {result.returncode}."
+
+
+def resolve_ecr_image_digest(
+    root: Path, image_uri: str, region: str, *,
+    aws_json_fn: Callable[..., tuple[Any, subprocess.CompletedProcess[str]]] = _aws_json,
+) -> str:
+    """Return the exact ECR digest, using the account that owns the referenced registry."""
+
+    ref = parse_ecr_image_uri(image_uri)
+    if not ref or ref.region != region or not is_immutable_image(image_uri):
+        raise ConfigValidationError("An immutable ECR image in the deployment region is required.")
+    image_id = f"imageDigest={ref.digest.lower()}" if ref.digest else f"imageTag={ref.tag}"
+    payload, result = aws_json_fn(root, [
+        "ecr", "batch-get-image", "--registry-id", ref.registry.split(".", 1)[0],
+        "--repository-name", ref.repository, "--image-ids", image_id, "--region", region,
+    ])
+    if result.returncode != 0:
+        raise ConfigValidationError(f"Cannot read image from ECR: {compact_error(result)}")
+    images = payload.get("images") if isinstance(payload, dict) else None
+    if not isinstance(images, list) or len(images) != 1:
+        raise ConfigValidationError(f"Image is unavailable in ECR: {image_uri}")
+    image = images[0]
+    identity = image.get("imageId") if isinstance(image, dict) else None
+    digest = identity.get("imageDigest") if isinstance(identity, dict) else None
+    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", digest) or (ref.digest and ref.digest.lower() != digest):
+        raise ConfigValidationError("ECR did not return the expected image digest.")
+    return f"{ref.registry}/{ref.repository}@{digest}"
 
 
 # Terraform and the CLI share this naming contract.  Centralizing it prevents
@@ -765,5 +792,6 @@ __all__ = [
     "is_resource_missing",
     "missing_or_error_detail",
     "parse_ecr_image_uri",
+    "resolve_ecr_image_digest",
     "resolve_health_url",
 ]

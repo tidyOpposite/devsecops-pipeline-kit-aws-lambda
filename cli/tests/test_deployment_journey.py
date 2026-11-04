@@ -17,14 +17,16 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from devsecops_cli import deploy, recovery
+from devsecops_cli import config, deploy, recovery
 from devsecops_cli import main as cli
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 IMAGE = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-new"
+IMAGE_DIGEST = IMAGE.rsplit(":", 1)[0] + "@sha256:" + "b" * 64
 PREVIOUS_IMAGE = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-old"
 PREVIOUS_DIGEST = PREVIOUS_IMAGE.rsplit(":", 1)[0] + "@sha256:" + "a" * 64
+COMMIT_SHA = "a" * 40
 
 
 def deployment_config() -> dict[str, object]:
@@ -35,6 +37,12 @@ def deployment_config() -> dict[str, object]:
     cfg["backend"]["bucket"] = "devsecops-pipeline-tfstate"
     cfg["backend"]["lock_table"] = "devsecops-pipeline-locks"
     return cfg
+
+
+def fixture_intent(image_uri, cfg=None):
+    cfg = cfg if cfg is not None else deployment_config()
+    digest_uri = IMAGE_DIGEST if image_uri == IMAGE else image_uri
+    return deploy.DeploymentIntent("acme/pipeline", COMMIT_SHA, config.deployment_config_sha256(cfg, digest_uri), digest_uri), cfg
 
 
 def create_deployment_project(root: Path) -> dict[str, object]:
@@ -89,13 +97,17 @@ class DeploymentDomainTests(unittest.TestCase):
     """Verify provider-independent dispatch, journal, and run-selection rules."""
 
     def test_dispatch_contract_binds_exact_image_and_protected_ref(self) -> None:
-        args = deploy.workflow_dispatch_args("deploy", IMAGE)
+        intent, _ = fixture_intent(IMAGE)
+        args = deploy.workflow_dispatch_args("deploy", intent)
 
         self.assertEqual(args[:5], ["workflow", "run", "deploy.yml", "--ref", "main"])
         self.assertEqual(deploy.DEPLOYMENT_WORKFLOW_PATH, ".github/workflows/deploy.yml")
         self.assertIn("mode=deploy", args)
         self.assertIn("environment=prod", args)
-        self.assertIn(f"image_uri={IMAGE}", args)
+        self.assertIn(f"image_uri={IMAGE_DIGEST}", args)
+        self.assertIn(f"commit_sha={intent.commit_sha}", args)
+        self.assertIn(f"config_sha256={intent.config_sha256}", args)
+        self.assertEqual(args[args.index("--repo") + 1], intent.repository)
         self.assertIn("gh workflow run", deploy.display_gh_command(args))
         list_args = deploy.workflow_run_list_args()
         self.assertEqual(list_args[list_args.index("--event") + 1], "workflow_dispatch")
@@ -187,6 +199,11 @@ class DeploymentDomainTests(unittest.TestCase):
 
 class DeploymentCommandTests(unittest.TestCase):
     """Verify CLI orchestration while replacing every external provider call."""
+
+    def setUp(self):
+        review = patch.object(cli, "review_deployment_intent", side_effect=lambda root, image, cfg=None: fixture_intent(image, cfg))
+        review.start()
+        self.addCleanup(review.stop)
 
     # Provider inspection and public parser surface.
     def test_active_image_inspection_uses_resolved_digest(self) -> None:
@@ -286,7 +303,11 @@ class DeploymentCommandTests(unittest.TestCase):
             state = deploy.load_deployment_state(root)
 
         self.assertEqual(result, cli.EXIT_OK)
-        dispatch.assert_called_once_with(root, "deploy", IMAGE)
+        intent, _ = fixture_intent(IMAGE)
+        dispatch.assert_called_once_with(root, "deploy", intent)
+        self.assertEqual(state["deployments"][0]["requested_image_uri"], IMAGE_DIGEST)
+        self.assertEqual(state["deployments"][0]["commit_sha"], intent.commit_sha)
+        self.assertEqual(state["deployments"][0]["config_sha256"], intent.config_sha256)
         self.assertEqual(state["deployments"][0]["previous_image_uri"], PREVIOUS_IMAGE)
         self.assertEqual(state["deployments"][0]["run_id"], "42")
         self.assertIn("Underlying GitHub command", buffer.getvalue())
@@ -475,7 +496,7 @@ class DeploymentCommandTests(unittest.TestCase):
             state = deploy.load_deployment_state(root)
 
         self.assertEqual(result, cli.EXIT_OK)
-        dispatch.assert_called_once_with(root, "rollback", PREVIOUS_DIGEST)
+        dispatch.assert_called_once_with(root, "rollback", fixture_intent(PREVIOUS_DIGEST)[0])
         self.assertEqual(state["deployments"][0]["source_run_id"], "42")
         self.assertEqual(state["deployments"][0]["previous_image_uri"], IMAGE)
 
@@ -516,6 +537,35 @@ class DeploymentCommandTests(unittest.TestCase):
         self.assertIn("not the deployment workflow", buffer.getvalue())
 
 
+class DeploymentIntentTests(unittest.TestCase):
+    def test_review_resolves_tag_before_producing_dispatch_inputs(self) -> None:
+        cfg = deployment_config()
+        registry_image = {"images": [{"imageId": {"imageDigest": "sha256:" + "b" * 64}}]}
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        gh_reads = [subprocess.CompletedProcess([], 0, text, "") for text in ("acme/pipeline\n", COMMIT_SHA + "\n")]
+        with patch.object(cli, "gh_command", side_effect=gh_reads) as gh, \
+             patch.object(cli, "command_exists", return_value=True), \
+             patch.object(cli, "aws_json", return_value=(registry_image, completed)) as aws:
+            intent, reviewed = cli.review_deployment_intent(ROOT_DIR, IMAGE, cfg)
+        self.assertEqual(intent, fixture_intent(IMAGE, cfg)[0])
+        self.assertIs(reviewed, cfg)
+        self.assertIn("repos/acme/pipeline/git/ref/heads/main", gh.call_args.args[1])
+        self.assertIn("imageTag=sha-new", aws.call_args.args[1])
+        self.assertIn(f"image_uri={IMAGE_DIGEST}", deploy.workflow_dispatch_args("deploy", intent))
+
+    def test_rollback_uses_remote_settings_for_the_reviewed_digest(self) -> None:
+        remote = deployment_config()
+        remote["backend"]["key"] = "state-from-github.tfstate"
+        values = ("acme/pipeline", COMMIT_SHA, config.pipeline_config_json(remote))
+        gh_reads = [subprocess.CompletedProcess([], 0, value, "") for value in values]
+        with patch.object(cli, "gh_command", side_effect=gh_reads) as gh, patch.object(cli, "aws_json") as aws:
+            intent, reviewed = cli.review_deployment_intent(ROOT_DIR, PREVIOUS_DIGEST)
+        aws.assert_not_called()
+        self.assertEqual(intent, fixture_intent(PREVIOUS_DIGEST, remote)[0])
+        self.assertEqual(reviewed["backend"]["key"], "state-from-github.tfstate")
+        self.assertIn("repos/acme/pipeline/actions/variables/PIPELINE_CONFIG_JSON", gh.call_args.args[1])
+
+
 class RecoveryTests(unittest.TestCase):
     function = "devsecops-pipeline-prod-lambda"
     region = "us-east-1"
@@ -535,12 +585,12 @@ class RecoveryTests(unittest.TestCase):
     def test_ecr_resolves_legacy_tag_and_rejects_deleted_recovery_image(self) -> None:
         completed = subprocess.CompletedProcess([], 0, "", "")
         image = {"images": [{"imageId": {"imageDigest": "sha256:" + "a" * 64}}]}
-        with patch.object(recovery, "_aws_json", side_effect=[(image, completed), ({"images": []}, completed)]) as aws:
-            self.assertEqual(recovery.ecr_digest(ROOT_DIR, PREVIOUS_IMAGE, self.region), PREVIOUS_DIGEST)
+        with patch.object(cli, "aws_json", side_effect=[(image, completed), ({"images": []}, completed)]) as aws:
+            self.assertEqual(cli.resolve_ecr_image_digest(ROOT_DIR, PREVIOUS_IMAGE, self.region, aws_json_fn=aws), PREVIOUS_DIGEST)
             self.assertIn("imageTag=sha-old", aws.call_args.args[1])
             self.assertIn("123456789012", aws.call_args.args[1])
-            with self.assertRaisesRegex(recovery.RecoveryError, "unavailable in ECR"):
-                recovery.ecr_digest(ROOT_DIR, PREVIOUS_DIGEST, self.region)
+            with self.assertRaisesRegex(cli.ConfigValidationError, "unavailable in ECR"):
+                cli.resolve_ecr_image_digest(ROOT_DIR, PREVIOUS_DIGEST, self.region, aws_json_fn=aws)
             self.assertIn("imageDigest=sha256:" + "a" * 64, aws.call_args.args[1])
 
     def test_restore_updates_only_code_and_requires_state_and_health(self) -> None:
@@ -549,7 +599,7 @@ class RecoveryTests(unittest.TestCase):
         completed = subprocess.CompletedProcess([], 0, "", "")
         for recorded, status, error in [(PREVIOUS_DIGEST, 200, None), (PREVIOUS_DIGEST, 302, "/health failed"), (IMAGE, 200, "Terraform state")]:
             with self.subTest(recorded=recorded, status=status), \
-                 patch.object(recovery, "ecr_digest", return_value=PREVIOUS_DIGEST), \
+                 patch.object(recovery, "resolve_ecr_image_digest", return_value=PREVIOUS_DIGEST), \
                  patch.object(recovery, "lambda_image", side_effect=[current, active]), \
                  patch.object(recovery, "_aws_command", return_value=completed) as aws, \
                  patch.object(recovery, "terraform", side_effect=["", recorded]) as tf, \
@@ -588,7 +638,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_manual_rollback_blocks_a_changed_revision_before_aws_write(self) -> None:
         current = recovery.LambdaImage(IMAGE, IMAGE, self.arn, "new-revision", "Active", "Successful")
-        with patch.object(recovery, "ecr_digest", return_value=PREVIOUS_DIGEST), \
+        with patch.object(recovery, "resolve_ecr_image_digest", return_value=PREVIOUS_DIGEST), \
              patch.object(recovery, "lambda_image", return_value=current), patch.object(recovery, "_aws_command") as aws:
             with self.assertRaisesRegex(recovery.RecoveryError, "changed after recovery capture"):
                 recovery.restore(ROOT_DIR, self.function, self.arn, PREVIOUS_DIGEST, self.region, self.health_url,
@@ -598,7 +648,7 @@ class RecoveryTests(unittest.TestCase):
     def test_retry_syncs_state_without_rewriting_already_restored_code(self) -> None:
         active = recovery.LambdaImage(PREVIOUS_DIGEST, PREVIOUS_DIGEST, self.arn, "restored", "Active", "Successful")
         completed = subprocess.CompletedProcess([], 0, "", "")
-        with patch.object(recovery, "ecr_digest", return_value=PREVIOUS_DIGEST), \
+        with patch.object(recovery, "resolve_ecr_image_digest", return_value=PREVIOUS_DIGEST), \
              patch.object(recovery, "lambda_image", return_value=active), \
              patch.object(recovery, "_aws_command", return_value=completed) as aws, \
              patch.object(recovery, "terraform", side_effect=["", PREVIOUS_DIGEST]) as tf, \
@@ -618,10 +668,13 @@ class DeploymentWorkflowContractTests(unittest.TestCase):
         self.assertIn("run-name: DevSecOps", workflow)
         self.assertIn("          - rollback", workflow)
         self.assertIn("      image_uri:", workflow)
-        self.assertIn("github.event.inputs.image_uri || vars.LAMBDA_IMAGE_URI", workflow)
+        self.assertNotIn("github.event.inputs.image_uri || vars.LAMBDA_IMAGE_URI", workflow)
         self.assertIn("github.event.inputs.mode == 'rollback'", workflow)
-        self.assertIn("Rollback requires an explicit immutable image_uri input", workflow)
-        self.assertIn("LAMBDA_IMAGE_URI must be a complete Amazon ECR image URI", workflow)
+        self.assertIn("      commit_sha:", workflow)
+        self.assertIn("      config_sha256:", workflow)
+        self.assertIn("--verify-intent", workflow)
+        self.assertIn("-out=workload.tfplan", workflow)
+        self.assertIn("apply -input=false -no-color workload.tfplan", workflow)
         self.assertIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}", workflow)
         self.assertNotIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}-${{", workflow)
         self.assertLess(workflow.index("recovery capture"), workflow.index("- name: Bootstrap KMS and ECR"))

@@ -12,9 +12,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .config import PIPELINE_CONFIG_VARIABLE, config_shape_errors, production_policy_blockers, validate_config
+from .config import PIPELINE_CONFIG_VARIABLE, config_shape_errors, deployment_config_sha256, production_policy_blockers, validate_config
+from .deploy import DEPLOYMENT_OPERATIONS, DeploymentIntent, is_commit_sha
 from .github import production_environment_check
-from .images import collect_image_preflight_checks
+from .images import collect_image_preflight_checks, parse_ecr_image_uri
 from .models import ConfigValidationError
 from .paths import DIST_DIR, GENERATED_TFVARS
 from .render import backend_hcl, terraform_tfvars
@@ -55,13 +56,18 @@ def decode_pipeline_config(payload: str, *, production: bool = False, image_uri:
 
 
 def write_workflow_inputs(
-    root: Path, payload: str, *, production_repository: str | None = None, image_uri: str = ""
+    root: Path, payload: str, *, intent: DeploymentIntent | None = None, actual_commit: str = "",
+    verify_only: bool = False,
 ) -> dict:
     """Validate the config and any required production protections before writing runner inputs."""
 
-    cfg = decode_pipeline_config(payload, production=production_repository is not None, image_uri=image_uri)
-    if production_repository is not None:
-        approval = production_environment_check(root, production_repository)
+    if intent is None:
+        cfg = decode_pipeline_config(payload)
+    else:
+        cfg = verify_production_intent(payload, intent, actual_commit)
+        if verify_only:
+            return cfg
+        approval = production_environment_check(root, intent.repository)
         if approval.status != "OK":
             raise ConfigValidationError(f"{approval.name}: {approval.detail}")
     outputs = {
@@ -74,15 +80,49 @@ def write_workflow_inputs(
     return cfg
 
 
+def verify_production_intent(payload: str, intent: DeploymentIntent, actual_commit: str) -> dict:
+    image = parse_ecr_image_uri(intent.image_uri)
+    if not image or not image.digest or image.digest != image.digest.lower():
+        raise ConfigValidationError("Production requires an explicit ECR image @sha256 digest from the deployment preview.")
+    if not is_commit_sha(intent.commit_sha) or intent.commit_sha != actual_commit:
+        raise ConfigValidationError("The dispatch commit_sha does not match this workflow commit. Review the deployment again.")
+    cfg = decode_pipeline_config(payload, production=True, image_uri=intent.image_uri)
+    if intent.config_sha256 != deployment_config_sha256(cfg, intent.image_uri):
+        raise ConfigValidationError("The dispatch config_sha256 does not match the effective configuration. Synchronize settings and review the deployment again.")
+    return cfg
+
+
 def main() -> int:
     try:
-        production = os.environ.get("DEPLOY_MODE") in {"deploy", "rollback"}
+        mode = os.environ.get("DEPLOY_MODE", "")
+        production = mode in DEPLOYMENT_OPERATIONS
+        verify_only = "--verify-intent" in sys.argv[1:]
         image_uri = os.environ.get("DISPATCH_IMAGE_URI", "")
+        intent = None
+        if production:
+            intent = DeploymentIntent(
+                os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("DISPATCH_COMMIT_SHA", ""),
+                os.environ.get("DISPATCH_CONFIG_SHA256", ""), image_uri,
+            )
+        if verify_only and intent is None:
+            raise ConfigValidationError("Intent verification requires a production deploy or rollback.")
         cfg = write_workflow_inputs(
             Path.cwd(), os.environ.get(PIPELINE_CONFIG_VARIABLE, ""),
-            production_repository=os.environ.get("GITHUB_REPOSITORY", "") if production else None,
-            image_uri=image_uri,
+            intent=intent, actual_commit=os.environ.get("GITHUB_SHA", ""), verify_only=verify_only,
         )
+        if verify_only and intent is not None:
+            summary = (
+                f"## Reviewed production {mode}\n\n"
+                f"- Commit: `{intent.commit_sha}`\n"
+                f"- Configuration SHA-256: `{intent.config_sha256}`\n"
+                f"- Image: `{intent.image_uri}`\n"
+            )
+            summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+            if summary_path:
+                with open(summary_path, "a", encoding="utf-8") as handle:
+                    handle.write(summary)
+            print(summary)
+            return 0
         # Keep workflow gates and Terraform inputs on the same configuration.
         # All exported values are schema-validated scalars, never shell source.
         values = {

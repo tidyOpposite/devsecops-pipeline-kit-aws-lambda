@@ -1956,7 +1956,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertIn("role-to-assume: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}", deploy_workflow)
         self.assertNotIn("AWS_PLAN_ROLE_TO_ASSUME_ARN || secrets.AWS_ROLE_TO_ASSUME_ARN", deploy_workflow)
         self.assertIn("environment: prod", deploy_workflow)
-        self.assertIn("LAMBDA_IMAGE_URI must use an immutable tag or digest", deploy_workflow)
+        self.assertIn("Verify reviewed production intent before approval", deploy_workflow)
         self.assertIn("Smoke test Lambda health endpoint", deploy_workflow)
         self.assertNotIn("if: env.ENABLE_HTTP_VALIDATION", deploy_workflow)
         self.assertIn("zaproxy/action-baseline", deploy_workflow)

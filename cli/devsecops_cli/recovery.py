@@ -10,8 +10,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from .aws import _aws_command, _aws_json, compact_error, fetch_health_url, resolved_lambda_image_uri
-from .images import is_immutable_image, parse_ecr_image_uri
+from .aws import _aws_command, _aws_json, compact_error, fetch_health_url, resolve_ecr_image_digest, resolved_lambda_image_uri
+from .images import parse_ecr_image_uri
+from .models import ConfigValidationError
 
 LAMBDA_RESOURCE = "module.lambda.aws_lambda_function.workload"
 
@@ -48,26 +49,6 @@ def lambda_image(root: Path, function: str, region: str) -> LambdaImage | None:
                        configuration.get("State", ""), configuration.get("LastUpdateStatus", ""))
 
 
-def ecr_digest(root: Path, image_uri: str, region: str) -> str:
-    ref = parse_ecr_image_uri(image_uri)
-    if not ref or ref.region != region or not is_immutable_image(image_uri):
-        raise RecoveryError("Recovery requires an immutable ECR image in the deployment region.")
-    image_id = f"imageDigest={ref.digest}" if ref.digest else f"imageTag={ref.tag}"
-    payload, result = _aws_json(root, [
-        "ecr", "batch-get-image", "--registry-id", ref.registry.split(".", 1)[0],
-        "--repository-name", ref.repository, "--image-ids", image_id, "--region", region,
-    ])
-    if result.returncode != 0:
-        raise RecoveryError(f"Cannot read recovery image from ECR: {compact_error(result)}")
-    images = payload.get("images") if isinstance(payload, dict) else None
-    if not isinstance(images, list) or len(images) != 1:
-        raise RecoveryError(f"Recovery image is unavailable in ECR: {image_uri}")
-    digest = images[0]["imageId"]["imageDigest"]
-    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", digest) or (ref.digest and ref.digest != digest):
-        raise RecoveryError("ECR did not return the expected recovery image digest.")
-    return f"{ref.registry}/{ref.repository}@{digest}"
-
-
 def terraform(root: Path, *args: str) -> str:
     directory = os.environ.get("TF_WORKING_DIR", "terraform")
     result = subprocess.run(["terraform", f"-chdir={directory}", *args], cwd=root, text=True,
@@ -97,7 +78,7 @@ def recovery_state(root: Path, function: str, function_arn: str) -> dict[str, st
 
 def restore(root: Path, function: str, function_arn: str, image_uri: str, region: str, health_url: str, auth_type: str,
             *, expected_revision: str = "") -> None:
-    target = ecr_digest(root, image_uri, region)
+    target = resolve_ecr_image_digest(root, image_uri, region)
     current = lambda_image(root, function, region)
     if current is None or current.arn != function_arn:
         raise RecoveryError("The original Lambda is unavailable. Image rollback requires the same function ARN.")
@@ -147,15 +128,12 @@ def main() -> int:
         if command == "capture":
             function = f"{env['PROJECT_NAME']}-{env['DEPLOY_ENVIRONMENT']}-lambda"
             current = lambda_image(root, function, env["AWS_REGION"])
-            if env["DEPLOY_MODE"] == "rollback":
-                if current is None:
-                    raise RecoveryError("Lambda is missing. Manual rollback requires an existing function.")
-                target = ecr_digest(root, env["LAMBDA_IMAGE_URI"], env["AWS_REGION"])
-                write_actions_values(env["GITHUB_ENV"], {"LAMBDA_IMAGE_URI": target})
-                print(f"Requested rollback digest: {target}")
+            if env["DEPLOY_MODE"] == "rollback" and current is None:
+                raise RecoveryError("Lambda is missing. Manual rollback requires an existing function.")
+            resolve_ecr_image_digest(root, env["LAMBDA_IMAGE_URI"], env["AWS_REGION"])
             previous = current.digest_uri if current else ""
             if previous and env["DEPLOY_MODE"] == "deploy":
-                ecr_digest(root, previous, env["AWS_REGION"])
+                resolve_ecr_image_digest(root, previous, env["AWS_REGION"])
             write_actions_values(env["GITHUB_OUTPUT"], {
                 "function_name": function, "function_arn": current.arn if current else "",
                 "revision_id": current.revision if current else "", "previous_image_uri": previous,
@@ -170,7 +148,7 @@ def main() -> int:
                     expected_revision=env.get("RECOVERY_REVISION_ID", ""))
         else:
             raise RecoveryError(f"Unknown recovery operation: {command}")
-    except (RecoveryError, OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError, IndexError) as exc:
+    except (RecoveryError, ConfigValidationError, OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError, IndexError) as exc:
         print(f"Lambda recovery: {exc}", file=sys.stderr)
         return 1
     return 0

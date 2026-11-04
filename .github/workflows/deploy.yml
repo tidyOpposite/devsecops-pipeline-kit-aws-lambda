@@ -29,7 +29,15 @@ on:
           - staging
           - prod
       image_uri:
-        description: Exact immutable image for deploy/rollback; CLI supplies this to bind the reviewed target
+        description: Reviewed ECR @sha256 image URI for deploy or rollback
+        required: false
+        type: string
+      commit_sha:
+        description: Reviewed main commit from devsecops deploy --dry-run
+        required: false
+        type: string
+      config_sha256:
+        description: Reviewed configuration SHA-256 from devsecops deploy --dry-run
         required: false
         type: string
 
@@ -51,10 +59,9 @@ env:
   TF_WORKING_DIR: terraform
   DEPLOY_ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
   DEPLOY_MODE: ${{ github.event.inputs.mode || '' }}
-  # An explicit dispatch value takes precedence so the approved run remains
-  # bound to the exact image selected by its caller.
   DISPATCH_IMAGE_URI: ${{ github.event.inputs.image_uri || '' }}
-  LAMBDA_IMAGE_URI: ${{ github.event.inputs.image_uri || vars.LAMBDA_IMAGE_URI || '' }}
+  DISPATCH_COMMIT_SHA: ${{ github.event.inputs.commit_sha || '' }}
+  DISPATCH_CONFIG_SHA256: ${{ github.event.inputs.config_sha256 || '' }}
   API_AUTHORIZATION_TYPE: ${{ vars.API_AUTHORIZATION_TYPE || 'AWS_IAM' }}
   ENABLE_SNYK_SCAN: ${{ vars.ENABLE_SNYK_SCAN || 'false' }}
   ENABLE_HTTP_VALIDATION: ${{ vars.ENABLE_HTTP_VALIDATION || 'false' }}
@@ -71,6 +78,10 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+
+      - name: Verify reviewed production intent before approval
+        if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'deploy' || inputs.mode == 'rollback') && inputs.environment == 'prod' && github.ref == 'refs/heads/main'
+        run: PYTHONPATH=cli python3 -m devsecops_cli.workflow --verify-intent
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
@@ -224,43 +235,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Verify production policy and prepare pipeline configuration
         env:
           GH_TOKEN: ${{ github.token }}
         run: PYTHONPATH=cli python3 -m devsecops_cli.workflow
-
-      # Rollback always requires an explicit target, and mutable bootstrap/latest
-      # tags are rejected before AWS credentials are configured.
-      - name: Require Lambda image URI
-        run: |
-          if [ "${DEPLOY_MODE}" = "rollback" ] && [ -z "${DISPATCH_IMAGE_URI}" ]; then
-            echo "Rollback requires an explicit immutable image_uri input; it never falls back to the current deployment variable." >&2
-            exit 1
-          fi
-          if [ -z "${LAMBDA_IMAGE_URI}" ]; then
-            echo "Set repository variable LAMBDA_IMAGE_URI or dispatch with image_uri set to an immutable Lambda container image URI." >&2
-            exit 1
-          fi
-          if ! printf '%s' "${LAMBDA_IMAGE_URI}" | grep -Eq '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9]([a-z0-9._/-]*[a-z0-9])?(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}|@sha256:[A-Fa-f0-9]{64})$'; then
-            echo "LAMBDA_IMAGE_URI must be a complete Amazon ECR image URI with an immutable tag or sha256 digest." >&2
-            exit 1
-          fi
-          if printf '%s' "${LAMBDA_IMAGE_URI}" | grep -Eiq ':(latest|bootstrap)$'; then
-            echo "LAMBDA_IMAGE_URI must use an immutable tag or digest, not latest/bootstrap." >&2
-            exit 1
-          fi
-
-      - name: Record deployment intent
-        run: |
-          {
-            echo "## Protected production ${DEPLOY_MODE}"
-            echo ""
-            echo "- Ref: \`${GITHUB_REF_NAME}\`"
-            echo "- Environment: \`${DEPLOY_ENVIRONMENT}\`"
-            echo "- Image: \`${LAMBDA_IMAGE_URI}\`"
-          } >> "${GITHUB_STEP_SUMMARY}"
 
       # Exchange GitHub's short-lived OIDC identity for the production role;
       # no long-lived AWS access keys are stored in repository secrets.
@@ -339,19 +320,21 @@ jobs:
             -var="api_authorization_type=${API_AUTHORIZATION_TYPE}" \
             -var="project_name=${PROJECT_NAME}"
 
-      # Pass the exact validated image into Terraform so desired state and the
-      # deployed Lambda revision remain aligned.
-      - name: Terraform apply workload with configured Lambda image
-        id: apply-workload
+      - name: Plan production workload from reviewed inputs
         if: env.DEPLOY_MODE == 'deploy'
         run: |
-          terraform -chdir="${TF_WORKING_DIR}" apply \
-            -auto-approve \
+          terraform -chdir="${TF_WORKING_DIR}" plan \
+            -out=workload.tfplan \
             -input=false \
             -no-color \
             -var="api_authorization_type=${API_AUTHORIZATION_TYPE}" \
             -var="project_name=${PROJECT_NAME}" \
             -var="lambda_image_uri=${LAMBDA_IMAGE_URI}"
+
+      - name: Terraform apply workload with configured Lambda image
+        id: apply-workload
+        if: env.DEPLOY_MODE == 'deploy'
+        run: terraform -chdir="${TF_WORKING_DIR}" apply -input=false -no-color workload.tfplan
 
       - name: Restore requested Lambda image
         if: env.DEPLOY_MODE == 'rollback'

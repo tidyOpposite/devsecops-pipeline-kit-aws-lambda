@@ -141,10 +141,12 @@ download them by the recorded run ID with `gh run download <run-id> -D
 The workflow run must show `status=completed` and `conclusion=success`.
 Review the run log for these production steps:
 
+* `Verify reviewed production intent before approval`, with the reviewed commit,
+  configuration SHA-256, and ECR digest in the run summary
 * `Verify production policy and prepare pipeline configuration`
-* `Require Lambda image URI`
 * `Capture currently deployed Lambda image`
 * `Verify Terraform recovery state`
+* `Plan production workload from reviewed inputs`
 * `Terraform apply workload with configured Lambda image`
 * `Read deployment outputs`
 * `Wait for Lambda update`

@@ -618,7 +618,7 @@ Repository variables:
 | --- | --- | --- |
 | `PIPELINE_CONFIG_JSON` | required | Complete schema-owned, non-secret user configuration. Updated cloud workflows use this as their settings source. |
 | `PROJECT_NAME` | `devsecops-pipeline` | Compatibility mirror of the resource prefix in pipeline configuration. |
-| `LAMBDA_IMAGE_URI` | none | Required for manual production deploy. Immutable image URI deployed to Lambda. |
+| `LAMBDA_IMAGE_URI` | none | Compatibility mirror of the configured image. Production dispatch supplies a reviewed ECR digest. |
 | `API_AUTHORIZATION_TYPE` | `AWS_IAM` | API Gateway route authorization. Use `NONE` only for demo or intentionally public non-sensitive APIs. |
 | `ENABLE_SNYK_SCAN` | `false` | When `true` and `SNYK_TOKEN` is present, CI scans the configured image with Snyk. |
 | `ENABLE_HTTP_VALIDATION` | `false` | Compatibility mirror of `enable_http_validation` in `PIPELINE_CONFIG_JSON`. Production requires `true` and checks `/health` after apply. |
@@ -648,7 +648,7 @@ and [Security controls and policy presets](docs/security-controls.md).
 | Pull request to `main` from fork | n/a | validation only | No AWS credentials. |
 | Push to `main` | n/a | none | No workflow run. Maintainer pushes do not consume Actions minutes. |
 | Manual `workflow_dispatch`, `mode=plan` | selected `dev/staging/prod` | `plan` only | No apply. |
-| Manual `workflow_dispatch`, `mode=deploy`, `environment=prod`, branch `main` | `prod` | `apply` | Scan the image when enabled, deploy Lambda, check `/health`, run DAST when enabled, and roll back on failure when a previous image is available. |
+| Manual `workflow_dispatch`, `mode=deploy`, `environment=prod`, branch `main` | `prod` | Plan and apply the saved plan | Verify the reviewed commit, configuration, and image digest. Deploy Lambda and verify `/health`, with optional scanning and automatic recovery. |
 | Manual `workflow_dispatch`, `mode=rollback`, `environment=prod`, branch `main` | `prod` | Targeted refresh-only | Restore the selected ECR digest on the existing Lambda, record it in Terraform state, and verify `/health`. |
 | Push tag `v*.*.*` | n/a | n/a | Publish GitHub Release from `docs/release-<tag>.md` or `CHANGELOG.md` with installer, wheel, source distribution, and `SHA256SUMS`. |
 
@@ -666,16 +666,16 @@ production-proof release record, use
 4. Validate Terraform formatting and configuration in GitHub Actions on pull
    requests or manual runs.
 5. Run Trivy IaC scanning.
-6. Require an immutable `LAMBDA_IMAGE_URI` on production deploys; Terraform also
-   prevents planning or applying the Lambda workload without an explicit
-   immutable image URI.
-7. Optionally scan the configured Lambda image with Snyk.
+6. Run `devsecops deploy prod --dry-run` to review the ECR digest, configuration
+   SHA-256, and remote `main` commit. A configured tag requires local AWS CLI
+   access to ECR so the CLI can resolve its digest.
+7. Run `devsecops deploy prod` and confirm the pinned inputs. GitHub verifies
+    the inputs before approval and again before requesting AWS credentials.
 8. Capture the previously deployed Lambda digest and verify it remains available in ECR.
-9. Verify the Lambda matches the selected Terraform state, then apply KMS and ECR bootstrap targets.
-10. Run `devsecops deploy prod`; the CLI checks readiness, prevents overlapping
-    production runs, confirms the image, and starts `mode=deploy` with
-    `environment=prod` from `main`.
-11. Apply the full Terraform workload with the configured image URI.
+9. Optionally scan the configured Lambda image with Snyk.
+10. Verify the Lambda matches the selected Terraform state, then apply KMS and ECR bootstrap targets.
+11. Create a Terraform plan with the reviewed digest and apply that saved plan
+    in the same approved run.
 12. Wait for the Lambda update to complete.
 13. Check `/health`. Run OWASP ZAP baseline DAST only when enabled and
     `API_AUTHORIZATION_TYPE=NONE`.

@@ -236,19 +236,31 @@ does not dispatch a workflow:
 devsecops deploy prod --dry-run
 ```
 
-Then let the CLI confirm the target image and dispatch the protected workflow:
+The preview shows the repository, current remote `main` commit, effective
+configuration SHA-256, backend, and exact ECR image digest. To resolve a tag,
+the CLI uses local AWS credentials with `ecr:BatchGetImage`. An image URI
+already pinned to `@sha256` can be reviewed without local AWS credentials.
+The runner checks that the digest is still available before changing AWS.
+
+Then confirm the pinned inputs and dispatch the protected workflow:
 
 ```bash
 devsecops deploy prod
 devsecops deploy status --watch
 ```
 
-`devsecops deploy prod` shows the underlying `gh` command for transparency,
-but users do not need to assemble it. It binds the exact immutable image from
-local config into the dispatch, refuses to overlap an active production run,
-and records only non-secret run metadata in the ignored
-`.devsecops/deployments.json` journal. Use `--yes` only for already reviewed
-non-interactive execution.
+For a direct GitHub UI launch, select `main` and copy the reviewed `image_uri`,
+`commit_sha`, and `config_sha256` from the preview's `gh workflow run` command.
+Review the same values in the run summary before approving `prod`. If GitHub
+reports that the commit or settings changed, run the preview again. The
+approved deploy creates and applies one saved Terraform plan. Standalone plan
+runs remain previews.
+
+The CLI refuses to overlap an active production run and records non-secret
+intent and run metadata in `.devsecops/deployments.json`. Use `--yes` only for
+already reviewed non-interactive execution.
+Use a CLI and a deployed workflow revision that both support these dispatch
+inputs when upgrading an existing deployment repository.
 
 The Deploy menu offers the same preflight and confirmation flow, plus separate
 preview options; you can complete deployment and rollback without exiting it.
@@ -270,7 +282,8 @@ devsecops deploy logs --failed
 
 If a successful deployment must be reversed, preview and dispatch the previous
 image through the same protected GitHub Environment, OIDC role, validation,
-and Terraform state:
+and Terraform state. Rollback previews use the settings currently synchronized
+to the deployment repository:
 
 ```bash
 devsecops deploy rollback --dry-run
