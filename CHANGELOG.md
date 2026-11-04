@@ -5,6 +5,8 @@ semantic versioning.
 
 ## Unreleased
 
+## v0.15.0 - 2026-11-04
+
 ### Fixed
 
 * Transfer each user's complete non-secret config through `PIPELINE_CONFIG_JSON`

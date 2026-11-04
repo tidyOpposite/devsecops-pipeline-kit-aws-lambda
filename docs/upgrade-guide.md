@@ -20,7 +20,7 @@ If the local config has a future `schema_version` greater than this CLI
 supports, the CLI refuses to load it before rendering or changing CLI-owned
 files. Upgrade the CLI first.
 
-## Upcoming Product Audit Fixes
+## Upgrading To v0.15.0
 
 Config schema remains version 1. The deployment workflow now requires the
 complete `PIPELINE_CONFIG_JSON` repository variable instead of falling back to
