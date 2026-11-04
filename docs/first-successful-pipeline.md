@@ -289,8 +289,9 @@ devsecops deploy logs --failed
 
 If a successful deployment must be reversed, preview and dispatch the previous
 image through the same protected GitHub Environment, OIDC role, validation,
-and Terraform state. Rollback previews use the settings currently synchronized
-to the deployment repository:
+and Terraform state. The CLI reads the recovery artifact from the successful
+deployment attempt and verifies the active digest. The runner verifies the
+digest and Lambda ARN again after entering the production queue.
 
 ```bash
 devsecops deploy rollback --dry-run
@@ -298,9 +299,9 @@ devsecops deploy rollback
 devsecops deploy status --watch
 ```
 
-The cloud command above is deliberately separate from `devsecops snapshot
-restore`, which only restores local CLI-owned files. If the local deployment
-journal is unavailable, pass a reviewed immutable target explicitly with
+Use `--run-id` to select a successful deployment when the local journal is
+unavailable. If the run predates recovery artifacts, the artifact expired, or
+the deployment failed, pass a reviewed immutable target explicitly with
 `devsecops deploy rollback --image-uri <immutable-ecr-image-uri>`.
 
 After success, inspect AWS resources:

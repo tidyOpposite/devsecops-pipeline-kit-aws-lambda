@@ -13,7 +13,7 @@ from typing import Any
 
 from . import VERSION
 from .config import config_shape_errors, validate_config
-from .deploy import is_commit_sha
+from .deploy import deployment_title, is_commit_sha
 from .images import parse_ecr_image_uri
 from .render import checklist, github_setup_script, github_variables, terraform_tfvars
 
@@ -94,7 +94,8 @@ def workflow_run_checks(document: dict, proof: dict, requirement: tuple, expecte
     run = document["run"]
     if (run.get("id") != expected_id or run.get("head_branch") != "main" or run.get("head_sha") != proof["commit_sha"]
             or run.get("path", "").split("@", 1)[0] != ".github/workflows/deploy.yml"
-            or run.get("event") != "workflow_dispatch" or run.get("display_title") != title
+            or run.get("event") != "workflow_dispatch"
+            or deployment_title(str(run.get("display_title") or ""))[0] != deployment_title(title)[0]
             or run.get("status") != "completed" or run.get("conclusion") != conclusion
             or run.get("repository", {}).get("full_name", "").lower() != proof["repository"].lower()):
         raise ValueError("Run identity, source commit, event, or conclusion does not match the release proof")

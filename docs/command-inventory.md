@@ -75,9 +75,9 @@ but they are hidden from primary help and shell completion.
 | `devsecops image validate` | Stable | First success | Checks Lambda image URI shape, immutability, and region before production deploy. |
 | `devsecops health` | Stable | Operations | Validates the deployed `/health` endpoint outside GitHub Actions. Uses Terraform output unless `--url` is provided. Signed checks require HTTPS without redirects. Use `--aws-sigv4 --trusted-host HOST` to allow the exact hostname of a custom API Gateway domain. |
 | `devsecops deploy prod` | Stable | Deployment | Runs production preflight, prevents an overlapping manual run, confirms the exact immutable image, and dispatches the protected workflow. Supports `--dry-run`, `--yes`, and `--watch`. |
-| `devsecops deploy status` | Stable | Deployment | Resolves an explicit run, the locally recorded run, or the newest deployment-named run. Shows jobs, requested/previous/active images, URL, and recovery action. Supports human, compact, and JSON output. |
+| `devsecops deploy status` | Stable | Deployment | Resolves an explicit run or reconciles the journaled request ID. Shows an unconfirmed dispatch separately. Supports human, compact, and JSON output. |
 | `devsecops deploy logs` | Stable | Deployment | Reads full or failed-step Actions logs for the same selected deployment run. |
-| `devsecops deploy rollback` | Stable | Deployment recovery | Restores the recorded previous image or an explicit immutable image through the protected workflow. It does not directly mutate Lambda and is distinct from local snapshot restore. |
+| `devsecops deploy rollback` | Stable | Deployment recovery | Restores a verified previous digest from a successful deployment attempt or a reviewed explicit image through the protected workflow. |
 | `devsecops generate` | Stable | Generation | Writes CLI-owned Terraform and GitHub helper artifacts. Use `--dry-run` to preview file changes. |
 | `devsecops report` | Stable | Reporting | Writes a CLI-owned Markdown readiness report or JSON audit evidence with `--format json`. |
 | `devsecops evidence collect` | Stable | Advanced / release | Collects local release-candidate evidence artifacts with `--rc`. |

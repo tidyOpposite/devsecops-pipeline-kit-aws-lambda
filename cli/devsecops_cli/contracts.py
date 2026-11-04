@@ -682,6 +682,8 @@ JSON_OUTPUT_CONTRACTS = [
             "schema_version",
             "environment",
             "operation",
+            "request_id",
+            "run_confirmation",
             "requested_image_uri",
             "previous_image_uri",
             "active_image_uri",
@@ -776,7 +778,7 @@ GENERATED_ARTIFACT_CONTRACTS = [
         "producer": "devsecops deploy prod or devsecops deploy rollback",
         "compatibility": "schema-versioned-local-runtime",
         "rerender_required_when": ["deployment journal schema changes require a documented migration or reset"],
-        "expected_diffs": ["A new non-secret deployment record is prepended after a successful workflow dispatch."],
+        "expected_diffs": ["A dispatch request is recorded and updated when its workflow run is confirmed."],
     },
     {
         "path": str(GENERATED_TFVARS),

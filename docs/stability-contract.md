@@ -52,10 +52,12 @@ only. Repository mutation requires an interactive confirmation or the explicit
 
 `devsecops deploy prod` and `devsecops deploy rollback` store only non-secret
 run metadata in `.devsecops/deployments.json`. Its schema is fail-closed and
-history is bounded. Status and logs are read-only; deploy and cloud rollback
-show the underlying GitHub CLI command, reject concurrent production runs, and
-require confirmation unless `--yes` is explicit. The rollback command always
-uses the protected workflow and never performs a direct local Lambda update.
+history is bounded. Status and logs can reconcile the local journal once
+GitHub confirms the request ID. Deploy and cloud rollback show the underlying
+GitHub CLI command and require confirmation unless `--yes` is explicit.
+The protected workflow serializes production runs. Inferred rollback reads the
+recovery artifact from a completed, successful deployment attempt and verifies
+that its deployed image is still active.
 
 ## JSON Output Contract
 
@@ -68,7 +70,7 @@ without a deprecation window.
 | `config` | `devsecops config validate --format json` | `kind`, `schema_version`, `score`, `overall_breakdown_score`, `breakdown`, `gaps`, `checks` |
 | `status` | `devsecops status --format json` | `kind`, `schema_version`, `score`, `breakdown`, `gaps`, `checks`, `context`, `next_action` |
 | `image-validation` | `devsecops image validate --format json` | `kind`, `schema_version`, `score`, `breakdown`, `gaps`, `checks`, `context` |
-| `deployment-status` | `devsecops deploy status --format json` | `kind`, `schema_version`, `environment`, `operation`, `requested_image_uri`, `previous_image_uri`, `active_image_uri`, `run`, `jobs` |
+| `deployment-status` | `devsecops deploy status --format json` | `kind`, `schema_version`, `environment`, `operation`, `request_id`, `run_confirmation`, `requested_image_uri`, `previous_image_uri`, `active_image_uri`, `run`, `jobs` |
 | `readiness` | `devsecops readiness --format json` (compatibility alias) | Existing legacy keys remain stable. |
 | `preflight` | `devsecops preflight --format json` (compatibility alias) | Existing legacy keys remain stable. |
 | `health` | `devsecops health --format json` | `kind`, `schema_version`, `score`, `overall_breakdown_score`, `breakdown`, `gaps`, `checks`, `context` |

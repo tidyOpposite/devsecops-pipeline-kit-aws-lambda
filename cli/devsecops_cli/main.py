@@ -14,11 +14,15 @@ import datetime as dt
 import getpass
 import json
 import os
+import re
 import shutil
 import subprocess  # nosec B404
 import sys
+import tempfile
 import textwrap
 import time
+import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +63,7 @@ from .deploy import (
     deployment_job_rows,
     deployment_state_path,
     deployment_status_payload,
+    deployment_title,
     display_gh_command,
     empty_deployment_state,
     is_deployment_run,
@@ -68,7 +73,7 @@ from .deploy import (
     newest_deployment_run,
     parse_run_url,
     record_deployment,
-    rollback_target,
+    matches_deployment_request,
     save_deployment_state,
     select_dispatched_run,
     utc_now,
@@ -671,19 +676,19 @@ def collect_github_actions_status(
     )
 
 
-def list_deployment_runs(root: Path, limit: int = 20) -> tuple[list[dict[str, Any]], str | None]:
+def list_deployment_runs(root: Path, limit: int = 20, *, repository: str = "") -> tuple[list[dict[str, Any]], str | None]:
     return _github_adapter.list_workflow_runs(
         root,
-        workflow_run_list_args(limit),
+        workflow_run_list_args(limit, repository),
         command_exists_fn=command_exists,
         gh_command_fn=gh_command,
     )
 
 
-def view_deployment_run(root: Path, run_id: str) -> tuple[dict[str, Any], str | None]:
+def view_deployment_run(root: Path, run_id: str, *, repository: str = "") -> tuple[dict[str, Any], str | None]:
     return _github_adapter.view_workflow_run(
         root,
-        workflow_run_view_args(run_id),
+        workflow_run_view_args(run_id, repository),
         command_exists_fn=command_exists,
         gh_command_fn=gh_command,
     )
@@ -706,10 +711,11 @@ def read_deployment_logs(
     root: Path,
     run_id: str,
     failed_only: bool = False,
+    *, repository: str = "",
 ) -> subprocess.CompletedProcess[str]:
     return _github_adapter.read_workflow_logs(
         root,
-        workflow_run_log_args(run_id, failed_only=failed_only),
+        workflow_run_log_args(run_id, failed_only=failed_only, repository=repository),
         command_exists_fn=command_exists,
         gh_stream_command_fn=gh_stream_command,
     )
@@ -720,10 +726,11 @@ def watch_deployment_run(
     run_id: str,
     interval: int = 5,
     stream: bool = True,
+    *, repository: str = "",
 ) -> subprocess.CompletedProcess[str]:
     return _github_adapter.watch_workflow_run(
         root,
-        workflow_run_watch_args(run_id, interval),
+        workflow_run_watch_args(run_id, interval, repository),
         stream=stream,
         command_exists_fn=command_exists,
         gh_command_fn=gh_command,
@@ -3017,61 +3024,66 @@ def rollback_deployment_preflight_checks(
     return checks
 
 
-def resolve_deployment_run(
-    root: Path,
-    run_id: str | None = None,
-) -> tuple[dict[str, Any], dict[str, str] | None, str | None]:
-    """Resolve and verify a deployment run from an id, journal, or discovery."""
+def save_dispatched_run(root: Path, record: dict[str, str]) -> None:
+    try:
+        record_deployment(root, record)
+    except (DeploymentStateError, OSError) as exc:
+        print(warn(f"Could not save the deployment request locally: {exc}"), file=sys.stderr)
 
-    record = latest_deployment(root, run_id) if run_id else latest_deployment(root)
+
+def find_deployment_request(root: Path, record: dict[str, str], attempts: int) -> dict[str, Any]:
+    if not record["request_id"]:
+        return {}
+    for attempt in range(attempts):
+        try:
+            runs, error = list_deployment_runs(root, limit=100, repository=record["repository"])
+        except subprocess.TimeoutExpired:
+            return {}
+        if error:
+            return {}
+        run = select_dispatched_run(runs, record)
+        if run:
+            record.update(run_id=str(run["databaseId"]), run_url=run["url"])
+            save_dispatched_run(root, record)
+            return run
+        if attempt + 1 < attempts:
+            time.sleep(1)
+    return {}
+
+
+def resolve_deployment_run(
+    root: Path, run_id: str | None = None, *, attempts: int = 1,
+) -> tuple[dict[str, Any], dict[str, str] | None, str | None]:
+    """Resolve a journaled request without falling back to another run."""
+
+    record = latest_deployment(root, run_id)
     selected_run_id = str(run_id or (record or {}).get("run_id") or "")
     if selected_run_id:
-        run, error = view_deployment_run(root, selected_run_id)
+        if not re.fullmatch(r"[1-9][0-9]*", selected_run_id):
+            return {}, record, "A GitHub Actions run ID must be a positive integer."
+        repo = (record or {}).get("repository", "")
+        run, error = view_deployment_run(root, selected_run_id, **({"repository": repo} if repo else {}))
         if error:
             return {}, record, error
-        workflow_name = str(run.get("workflowName") or "")
-        event = str(run.get("event") or "")
-        branch = str(run.get("headBranch") or "")
-        if workflow_name and workflow_name != DEPLOYMENT_WORKFLOW_NAME:
-            return {}, record, f"Run {selected_run_id} belongs to `{workflow_name}`, not the deployment workflow."
-        if event and event != "workflow_dispatch":
-            return {}, record, f"Run {selected_run_id} was triggered by `{event}`, not a manual deployment."
-        if branch and branch != DEPLOYMENT_REF:
-            return {}, record, f"Run {selected_run_id} uses `{branch}`, not protected ref `{DEPLOYMENT_REF}`."
-        return run, record, None
+        if str(run.get("databaseId") or "") != selected_run_id or not is_deployment_run(run):
+            return {}, record, f"Run {selected_run_id} does not belong to the protected deployment workflow."
+        if record and record["request_id"]:
+            if not matches_deployment_request(run, record):
+                return {}, record, f"Run {selected_run_id} does not match the saved deployment request."
+            return run, record, None
+        # Old journals could correlate to a different run. The GitHub result
+        # is still useful on its own, without the unverified journal fields.
+        return run, None, None
+    if record:
+        return find_deployment_request(root, record, attempts), record, None
 
     runs, error = list_deployment_runs(root)
     if error:
-        return {}, record, error
+        return {}, None, error
     run = newest_deployment_run(runs)
     if run is None:
-        return {}, record, "No CLI deployment run was found. Start one with `devsecops deploy prod`."
-    discovered_id = str(run.get("databaseId") or "")
-    matched_record = latest_deployment(root, discovered_id) if discovered_id else None
-    return run, matched_record or record, None
-
-
-def resolve_dispatched_run(
-    root: Path,
-    before_run_ids: set[str],
-    output: str,
-    operation: str,
-    attempts: int = 8,
-) -> tuple[str, str]:
-    """Correlate a dispatch with its new Actions run, retrying delayed listings."""
-
-    run_id, run_url = parse_run_url(output)
-    if run_id:
-        return run_id, run_url
-    for attempt in range(max(1, attempts)):
-        runs, error = list_deployment_runs(root)
-        if not error:
-            run = select_dispatched_run(before_run_ids, runs, operation)
-            if run is not None:
-                return str(run.get("databaseId") or ""), str(run.get("url") or "")
-        if attempt + 1 < attempts:
-            time.sleep(1)
-    return "", ""
+        return {}, None, "No production deployment run was found. Start one with `devsecops deploy prod`."
+    return run, None, None
 
 
 def confirm_cloud_deployment(operation: str) -> bool:
@@ -3108,7 +3120,7 @@ def review_deployment_intent(
     if not command_exists("aws"):
         raise ConfigValidationError("Install and authenticate AWS CLI to verify the selected ECR image.")
     digest_uri = verify_ecr_lambda_image(root, image_uri, cfg["aws_region"], aws_json_fn=aws_json)
-    intent = DeploymentIntent(name, commit_sha, deployment_config_sha256(cfg, digest_uri), digest_uri)
+    intent = DeploymentIntent(name, commit_sha, deployment_config_sha256(cfg, digest_uri), digest_uri, uuid.uuid4().hex)
     return intent, cfg
 
 
@@ -3147,7 +3159,6 @@ def dispatch_cloud_deployment(
     root: Path,
     operation: str,
     intent: DeploymentIntent,
-    previous_image_uri: str,
     source_run_id: str,
     *,
     watch: bool,
@@ -3159,7 +3170,7 @@ def dispatch_cloud_deployment(
     between initial preflight and workflow dispatch.
     """
 
-    current_runs, current_runs_error = list_deployment_runs(root)
+    current_runs, current_runs_error = list_deployment_runs(root, repository=intent.repository)
     if current_runs_error:
         print(fail("Could not recheck the production deployment lane: ") + current_runs_error)
         return deployment_error_exit_code(current_runs_error)
@@ -3170,19 +3181,19 @@ def dispatch_cloud_deployment(
             + f"run {active[0].get('databaseId')} became {active[0].get('status')} during confirmation."
         )
         return EXIT_VALIDATION_FAILED
-    before_runs = current_runs
-    result = dispatch_deployment_workflow(root, operation, intent)
-    if result.returncode != 0:
-        print(fail("GitHub workflow dispatch failed: ") + compact_error(result))
-        return deployment_error_exit_code(compact_error(result))
+    print(f"Request: {intent.request_id}", flush=True)
+    dispatch_timed_out = False
+    try:
+        result = dispatch_deployment_workflow(root, operation, intent)
+    except subprocess.TimeoutExpired:
+        dispatch_timed_out = True
+        run_id, run_url = "", ""
+    else:
+        if result.returncode != 0:
+            print(fail("GitHub workflow dispatch failed: ") + compact_error(result))
+            return deployment_error_exit_code(compact_error(result))
+        run_id, run_url = parse_run_url(result.stdout or "", intent.repository)
 
-    before_ids = {str(run.get("databaseId") or "") for run in before_runs if run.get("databaseId")}
-    run_id, run_url = resolve_dispatched_run(
-        root,
-        before_ids,
-        (result.stdout or "") + "\n" + (result.stderr or ""),
-        operation,
-    )
     record = {
         "operation": operation,
         "environment": DEPLOYMENT_ENVIRONMENT,
@@ -3190,42 +3201,50 @@ def dispatch_cloud_deployment(
         "repository": intent.repository,
         "commit_sha": intent.commit_sha,
         "config_sha256": intent.config_sha256,
+        "request_id": intent.request_id,
+        "dispatch_acknowledged": "false" if dispatch_timed_out else "true",
         "requested_image_uri": intent.image_uri,
-        "previous_image_uri": previous_image_uri,
         "source_run_id": source_run_id,
         "run_id": run_id,
         "run_url": run_url,
         "dispatched_at": utc_now(),
     }
-    try:
-        record_deployment(root, record)
-    except (DeploymentStateError, OSError) as exc:
-        print(warn(f"Workflow started, but local deployment metadata could not be saved: {exc}"))
-
-    print(ok("Protected production workflow dispatched."))
-    if run_id:
-        print(f"Run: {run_id}")
-    if run_url:
-        print(f"URL: {run_url}")
+    save_dispatched_run(root, record)
     if not run_id:
-        print(warn("GitHub did not return the run ID yet; `devsecops deploy status` will discover it by run name."))
-    print("Next command: devsecops deploy status --watch")
+        find_deployment_request(root, record, attempts=8)
+        run_id, run_url = record["run_id"], record["run_url"]
 
-    if watch and run_id:
-        print()
-        print(info("Watching deployment run through GitHub CLI..."))
-        watch_result = watch_deployment_run(root, run_id, interval, stream=True)
+    if not run_id:
+        message = "Dispatch response timed out; run unconfirmed." if dispatch_timed_out else "Dispatched, run unconfirmed."
+        print(warn(message + " Check status before dispatching again."))
+        print("Next command: devsecops deploy status --watch")
+        return EXIT_VALIDATION_FAILED if watch or dispatch_timed_out else EXIT_OK
+    print(ok("Protected production workflow dispatched."))
+    print(f"Run: {run_id}")
+    print(f"URL: {run_url}")
+    print(f"Next command: devsecops deploy status --run-id {run_id} --watch")
+
+    if not watch:
+        return EXIT_OK
+    print(info("Watching deployment run through GitHub CLI..."))
+    try:
+        watch_result = watch_deployment_run(root, run_id, interval, stream=True, repository=intent.repository)
+    except subprocess.TimeoutExpired:
+        print(warn("Watch timed out. Checking the exact run for a conclusion."))
+    else:
         if (watch_result.stdout or "").strip():
             print((watch_result.stdout or "").rstrip())
         if watch_result.returncode != 0 and (watch_result.stderr or "").strip():
             print(warn(compact_error(watch_result)))
-        refreshed, error = view_deployment_run(root, run_id)
-        if error:
-            return deployment_error_exit_code(error)
-        if watch_result.returncode != 0 and str(refreshed.get("status") or "") != "completed":
-            return EXIT_VALIDATION_FAILED
-        return deployment_exit_code(refreshed)
-    return EXIT_OK
+    refreshed, error = view_deployment_run(root, run_id, repository=intent.repository)
+    if error:
+        print(fail(error))
+        return deployment_error_exit_code(error)
+    if (str(refreshed.get("databaseId")) != run_id or not matches_deployment_request(refreshed, record)
+            or refreshed.get("status") != "completed"):
+        print(warn("The requested run has no verified conclusion."))
+        return EXIT_VALIDATION_FAILED
+    return deployment_exit_code(refreshed)
 
 
 def cmd_deploy_prod(args: argparse.Namespace) -> int:
@@ -3266,11 +3285,64 @@ def cmd_deploy_prod(args: argparse.Namespace) -> int:
         root,
         "deploy",
         intent,
-        active_image_uri,
         "",
         watch=getattr(args, "watch", False),
         interval=getattr(args, "interval", 5),
     )
+
+
+def read_deployment_recovery_point(root: Path, run: dict[str, Any]) -> dict[str, str]:
+    """Read the runner's recovery point for a completed production deployment."""
+
+    run_id = str(run.get("databaseId") or "")
+    attempt = str(run.get("attempt") or "")
+    operation, _ = deployment_title(str(run.get("displayTitle") or ""))
+    run_url = str(run.get("url") or "")
+    identity = re.fullmatch(r"https://github\.com/([\w.-]+/[\w.-]+)/actions/runs/([1-9][0-9]*)", run_url)
+    jobs = run.get("jobs") or []
+    production = next((job for job in jobs if job.get("name") == "Manual Apply, Deploy, or Roll Back Production"), {})
+    steps = {step.get("name"): step.get("conclusion") for step in production.get("steps", [])}
+    if (not is_deployment_run(run) or operation != "deploy" or run.get("status") != "completed"
+            or run.get("conclusion") != "success" or production.get("conclusion") != "success"
+            or steps.get("Terraform apply workload with configured Lambda image") != "success"
+            or steps.get("Smoke test Lambda health endpoint") != "success"
+            or not identity or identity[2] != run_id or not re.fullmatch(r"[1-9][0-9]*", attempt)
+            or not is_commit_sha(str(run.get("headSha") or ""))):
+        raise ConfigValidationError(
+            "Rollback inference requires a completed, successful production deployment that applied and passed health validation. "
+            "For incident recovery, pass a reviewed --image-uri."
+        )
+    repository = identity[1]
+    metadata = gh_command(root, ["api", f"repos/{repository}/actions/runs/{run_id}"])
+    source = _github_adapter.parse_json_object(metadata.stdout)
+    if (metadata.returncode != 0 or str(source.get("path") or "").split("@", 1)[0] != DEPLOYMENT_WORKFLOW_PATH
+            or str(source.get("id")) != run_id or str(source.get("run_attempt")) != attempt
+            or source.get("head_sha") != run["headSha"] or source.get("head_branch") != DEPLOYMENT_REF
+            or source.get("event") != "workflow_dispatch"
+            or source.get("status") != "completed" or source.get("conclusion") != "success"):
+        raise ConfigValidationError("Could not verify the successful source run and attempt.")
+    with tempfile.TemporaryDirectory(prefix="devsecops-recovery-") as directory:
+        result = gh_command(root, [
+            "run", "download", run_id, "--repo", repository, "--name", f"deployment-recovery-{attempt}", "--dir", directory,
+        ])
+        if result.returncode != 0:
+            raise ConfigValidationError("The source run has no downloadable recovery point. Pass a reviewed --image-uri.")
+        path = Path(directory) / "deployment-recovery.json"
+        try:
+            if path.is_symlink() or path.stat().st_size > 8192:
+                raise ValueError("Invalid recovery point file")
+            point = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ConfigValidationError("Could not read the source run's recovery point.") from exc
+    expected = {"run_id": run_id, "attempt": attempt, "commit_sha": run["headSha"]}
+    if (not isinstance(point, dict) or str(point.get("repository") or "").lower() != repository.lower()
+            or any(point.get(key) != value for key, value in expected.items())):
+        raise ConfigValidationError("The recovery point does not belong to the selected run and attempt.")
+    previous = parse_ecr_image_uri(point.get("previous_image_uri"))
+    deployed = parse_ecr_image_uri(point.get("deployed_image_uri"))
+    if not deployed or not deployed.digest or (point.get("previous_image_uri") != "" and (not previous or not previous.digest)):
+        raise ConfigValidationError("The source run's recovery point does not contain exact image digests.")
+    return point
 
 
 def cmd_deploy_rollback(args: argparse.Namespace) -> int:
@@ -3281,24 +3353,41 @@ def cmd_deploy_rollback(args: argparse.Namespace) -> int:
         print(fail("--interval must be at least 3 seconds."))
         return EXIT_VALIDATION_FAILED
     source_run_id = str(getattr(args, "run_id", None) or "")
-    explicit_image = str(getattr(args, "image_uri", None) or "").strip()
-    inferred_image, source_record = rollback_target(root, source_run_id or None)
-    target_image_uri = explicit_image or inferred_image
+    target_image_uri = str(getattr(args, "image_uri", None) or "").strip()
+    point = None
     if not target_image_uri:
-        print(fail("No rollback target is available."))
-        print("Pass `--image-uri <immutable-ecr-image-uri>` or run a deployment from this CLI first.")
-        return EXIT_VALIDATION_FAILED
-    recorded_image = parse_ecr_image_uri(inferred_image)
-    if not explicit_image and (recorded_image is None or not recorded_image.digest):
-        print(fail("The saved rollback target does not identify an exact digest."))
-        print("Pass a reviewed `--image-uri <repository>@sha256:<digest>`.")
-        return EXIT_VALIDATION_FAILED
-    if not source_run_id and source_record:
-        source_run_id = source_record.get("run_id", "")
+        if not source_run_id and not latest_deployment(root):
+            print(fail("No rollback target is available."))
+            print("Pass `--run-id` for a successful deployment or a reviewed `--image-uri`.")
+            return EXIT_VALIDATION_FAILED
+        run, record, error = resolve_deployment_run(root, source_run_id or None)
+        if not run or error:
+            print(fail(error or "The deployment request has no confirmed run."))
+            print("Pass `--run-id` for a successful deployment or a reviewed `--image-uri`.")
+            return deployment_error_exit_code(error or "")
+        if "jobs" not in run:
+            run, record, error = resolve_deployment_run(root, str(run["databaseId"]))
+            if error:
+                raise ConfigValidationError(error)
+        point = read_deployment_recovery_point(root, run)
+        if record and record["requested_image_uri"] != point["deployed_image_uri"]:
+            raise ConfigValidationError("The recovery point's deployed image does not match the recorded request.")
+        source_run_id = point["run_id"]
+        target_image_uri = point["previous_image_uri"]
+        if not target_image_uri:
+            raise ConfigValidationError("The source run has no previous image. Pass a reviewed --image-uri.")
 
     intent, cfg = review_deployment_intent(root, target_image_uri)
+    if point:
+        expected_arn = rf"arn:aws:lambda:{re.escape(cfg['aws_region'])}:[0-9]{{12}}:function:{re.escape(expected_lambda_function_name(cfg, 'prod'))}"
+        if (point["repository"].lower() != intent.repository.lower()
+                or not re.fullmatch(expected_arn, str(point.get("function_arn") or ""))):
+            raise ConfigValidationError("The recovery point is for a different repository or Lambda function.")
+        intent = replace(intent, rollback_from_image_uri=point["deployed_image_uri"], rollback_function_arn=point["function_arn"])
     runs, runs_error = list_deployment_runs(root)
     active_image_uri, active_image_error = inspect_active_lambda_image(root, cfg)
+    if point and active_image_uri != point["deployed_image_uri"]:
+        raise ConfigValidationError("The active image could not be verified against the source deployment. Review an explicit --image-uri.")
     checks = rollback_deployment_preflight_checks(
         root,
         cfg,
@@ -3326,24 +3415,10 @@ def cmd_deploy_rollback(args: argparse.Namespace) -> int:
         root,
         "rollback",
         intent,
-        active_image_uri,
         source_run_id,
         watch=getattr(args, "watch", False),
         interval=getattr(args, "interval", 5),
     )
-
-
-def deployment_operation_from_run(run: dict[str, Any], record: dict[str, str] | None) -> str:
-    """Infer deployment intent from trusted local metadata or workflow title."""
-
-    if record and record.get("operation"):
-        return record["operation"]
-    title = str(run.get("displayTitle") or "").lower()
-    if title == "devsecops rollback prod":
-        return "rollback"
-    if title == "devsecops deploy prod":
-        return "deploy"
-    return "unknown"
 
 
 def emit_deployment_status(
@@ -3362,7 +3437,7 @@ def emit_deployment_status(
         emit_json(payload)
         return
 
-    operation = deployment_operation_from_run(run, record)
+    operation = payload["operation"] or "unknown"
     run_id = str(run.get("databaseId") or "")
     status = str(run.get("status") or "unknown")
     conclusion = str(run.get("conclusion") or "")
@@ -3382,13 +3457,13 @@ def emit_deployment_status(
             f"Conclusion: {conclusion or '(pending)'}",
             f"Ref: {run.get('headBranch') or DEPLOYMENT_REF} ({str(run.get('headSha') or '')[:12] or 'unknown SHA'})",
             f"Requested image: {(record or {}).get('requested_image_uri') or '(not recorded locally)'}",
-            f"Previous image: {(record or {}).get('previous_image_uri') or '(not recorded locally)'}",
+            f"Previous image: {payload['previous_image_uri'] or '(no verified recovery digest)'}",
             f"Active AWS image: {active_image_uri or '(not observed locally)'}",
             f"URL: {run.get('url') or '(not available)'}",
         ],
     )
     print("Underlying GitHub command:")
-    print("  " + display_gh_command(workflow_run_view_args(run_id or "<run-id>")))
+    print("  " + display_gh_command(workflow_run_view_args(run_id, (record or {}).get("repository", ""))))
     rows = deployment_job_rows(run)
     if rows:
         print()
@@ -3398,13 +3473,11 @@ def emit_deployment_status(
         print(warn("AWS image inspection: ") + active_image_error)
     print()
     if status != "completed":
-        print("Next command: devsecops deploy status --watch")
+        print(f"Next command: devsecops deploy status --run-id {run_id} --watch")
     elif conclusion == "success":
         print("Next command: devsecops health --aws-sigv4")
     else:
-        print("Next command: devsecops deploy logs --failed")
-        if record and record.get("previous_image_uri"):
-            print("Recovery command: devsecops deploy rollback")
+        print(f"Next command: devsecops deploy logs --run-id {run_id} --failed")
 
 
 def cmd_deploy_status(args: argparse.Namespace) -> int:
@@ -3426,7 +3499,8 @@ def cmd_deploy_status(args: argparse.Namespace) -> int:
             print(fail("--interval must be at least 3 seconds."))
         return EXIT_VALIDATION_FAILED
     watch_incomplete = False
-    run, record, error = resolve_deployment_run(root, getattr(args, "run_id", None))
+    watch = bool(getattr(args, "watch", False))
+    run, record, error = resolve_deployment_run(root, getattr(args, "run_id", None), **({"attempts": 8} if watch else {}))
     if error:
         if output_format == "json":
             emit_json(
@@ -3442,14 +3516,33 @@ def cmd_deploy_status(args: argparse.Namespace) -> int:
             print(fail(error))
         return deployment_error_exit_code(error)
 
+    if not run:
+        payload = deployment_status_payload(run, record)
+        if output_format == "json":
+            emit_json(payload)
+        else:
+            print(warn(f"{payload['run_confirmation'].capitalize()}. Request: {payload['request_id'] or '(legacy request)'}"))
+            print("Next command: devsecops deploy status --watch")
+        return EXIT_VALIDATION_FAILED if watch else EXIT_OK
+
     run_id = str(run.get("databaseId") or "")
-    if getattr(args, "watch", False) and str(run.get("status") or "") != "completed":
+    repository = (record or {}).get("repository", "")
+    scope = {"repository": repository} if repository else {}
+    if watch and run.get("status") != "completed":
         if output_format != "json":
-            print(info("Underlying GitHub command: ") + display_gh_command(workflow_run_watch_args(run_id, interval)))
-        watched = watch_deployment_run(root, run_id, interval, stream=output_format != "json")
-        if output_format != "json" and (watched.stdout or "").strip():
-            print((watched.stdout or "").rstrip())
-        refreshed, refresh_error = view_deployment_run(root, run_id)
+            print(info("Underlying GitHub command: ") + display_gh_command(workflow_run_watch_args(run_id, interval, repository)))
+        try:
+            watched = watch_deployment_run(root, run_id, interval, stream=output_format != "json", **scope)
+        except subprocess.TimeoutExpired:
+            if output_format != "json":
+                print(warn("Watch timed out. Checking the exact run for a conclusion."))
+        else:
+            if output_format != "json" and (watched.stdout or "").strip():
+                print((watched.stdout or "").rstrip())
+        refreshed, refresh_error = view_deployment_run(root, run_id, **scope)
+        if not refresh_error and (str(refreshed.get("databaseId")) != run_id or not is_deployment_run(refreshed)
+                                  or (record and not matches_deployment_request(refreshed, record))):
+            refresh_error = "The refreshed run does not match the selected deployment."
         if refresh_error:
             if output_format == "json":
                 emit_json(
@@ -3465,13 +3558,27 @@ def cmd_deploy_status(args: argparse.Namespace) -> int:
                 print(fail(refresh_error))
             return deployment_error_exit_code(refresh_error)
         run = refreshed
-        if watched.returncode != 0 and str(run.get("status") or "") != "completed":
+        if run.get("status") != "completed":
             watch_incomplete = True
             if output_format != "json":
                 print(warn("GitHub stopped watching before the deployment reached a conclusion."))
 
     cfg = load_config(root)
     active_image_uri, active_image_error = inspect_active_lambda_image(root, cfg)
+    if run.get("conclusion") == "success" and any(
+        step.get("name") == "Upload deployment recovery point" and step.get("conclusion") == "success"
+        for job in run.get("jobs") or [] for step in job.get("steps") or []
+    ):
+        try:
+            point = read_deployment_recovery_point(root, run)
+        except (ConfigValidationError, subprocess.TimeoutExpired):
+            pass
+        else:
+            if record and record["requested_image_uri"] != point["deployed_image_uri"]:
+                print(warn("The recovery point's deployed image does not match the recorded request."), file=sys.stderr)
+            else:
+                record = {**(record or {}), "requested_image_uri": point["deployed_image_uri"],
+                          "previous_image_uri": point["previous_image_uri"]}
     emit_deployment_status(run, record, active_image_uri, active_image_error, output_format)
     return EXIT_VALIDATION_FAILED if watch_incomplete else deployment_exit_code(run)
 
@@ -3484,9 +3591,13 @@ def cmd_deploy_logs(args: argparse.Namespace) -> int:
     if error:
         print(fail(error))
         return deployment_error_exit_code(error)
+    if not run:
+        print(fail("Dispatched, run unconfirmed. Run `devsecops deploy status --watch` to locate this request."))
+        return EXIT_VALIDATION_FAILED
     run_id = str(run.get("databaseId") or "")
     failed_only = bool(getattr(args, "failed", False))
-    command = workflow_run_log_args(run_id, failed_only=failed_only)
+    repository = (record or {}).get("repository", "")
+    command = workflow_run_log_args(run_id, failed_only=failed_only, repository=repository)
     draw_box(
         "Production Deployment Logs",
         [
@@ -3498,7 +3609,7 @@ def cmd_deploy_logs(args: argparse.Namespace) -> int:
     print("Underlying GitHub command:")
     print("  " + display_gh_command(command))
     print()
-    result = read_deployment_logs(root, run_id, failed_only=failed_only)
+    result = read_deployment_logs(root, run_id, failed_only=failed_only, **({"repository": repository} if repository else {}))
     if result.returncode != 0:
         print(fail(compact_error(result)))
         return deployment_error_exit_code(compact_error(result))
@@ -3511,11 +3622,9 @@ def cmd_deploy_logs(args: argparse.Namespace) -> int:
     status = str(run.get("status") or "")
     conclusion = str(run.get("conclusion") or "")
     if status != "completed":
-        next_command = "devsecops deploy status --watch"
+        next_command = f"devsecops deploy status --run-id {run_id} --watch"
     elif conclusion == "success":
         next_command = "devsecops health --aws-sigv4"
-    elif record and record.get("previous_image_uri"):
-        next_command = "devsecops deploy rollback --dry-run"
     else:
         next_command = "devsecops deploy rollback --image-uri <known-good-immutable-ecr-image-uri> --dry-run"
     print(f"Next command: {next_command}")
@@ -4290,7 +4399,7 @@ def show_production_rollback_command() -> None:
     draw_box(
         "Roll Back Production Deployment",
         [
-            "Cloud rollback restores the previous image recorded when the CLI dispatched a deployment.",
+            "Cloud rollback can use the previous digest captured by a successful deployment.",
             "It uses the same protected GitHub environment, OIDC role, Terraform state, and validation steps.",
             "This is separate from `devsecops snapshot restore`, which changes local CLI-owned files only.",
         ],

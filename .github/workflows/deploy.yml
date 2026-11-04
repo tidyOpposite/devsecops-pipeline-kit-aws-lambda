@@ -1,5 +1,5 @@
 name: Secure Serverless DevSecOps Pipeline
-run-name: DevSecOps ${{ github.event_name == 'workflow_dispatch' && format('{0} {1}', inputs.mode, inputs.environment) || github.event_name }}
+run-name: DevSecOps ${{ github.event_name == 'workflow_dispatch' && format('{0} {1}{2}', inputs.mode, inputs.environment, inputs.request_id && format(' [{0}]', inputs.request_id) || '') || github.event_name }}
 
 # Pull requests receive validation and a plan; state-changing deploy and rollback
 # modes are available only through the explicitly parameterized manual trigger.
@@ -40,6 +40,18 @@ on:
         description: Reviewed configuration SHA-256 from devsecops deploy --dry-run
         required: false
         type: string
+      request_id:
+        description: Unique CLI request identifier
+        required: false
+        type: string
+      rollback_from_image_uri:
+        description: Expected active image for a rollback inferred from a deployment
+        required: false
+        type: string
+      rollback_function_arn:
+        description: Expected Lambda ARN for a rollback inferred from a deployment
+        required: false
+        type: string
 
 permissions:
   # Individual jobs opt into OIDC or pull-request writes only when required.
@@ -50,6 +62,7 @@ permissions:
 concurrency:
   group: terraform-${{ github.event.inputs.environment || 'dev' }}
   cancel-in-progress: false
+  queue: max
 
 env:
   PIPELINE_CONFIG_JSON: ${{ vars.PIPELINE_CONFIG_JSON }}
@@ -62,6 +75,7 @@ env:
   DISPATCH_IMAGE_URI: ${{ github.event.inputs.image_uri || '' }}
   DISPATCH_COMMIT_SHA: ${{ github.event.inputs.commit_sha || '' }}
   DISPATCH_CONFIG_SHA256: ${{ github.event.inputs.config_sha256 || '' }}
+  DISPATCH_REQUEST_ID: ${{ github.event.inputs.request_id || '' }}
   API_AUTHORIZATION_TYPE: ${{ vars.API_AUTHORIZATION_TYPE || 'AWS_IAM' }}
   ENABLE_SNYK_SCAN: ${{ vars.ENABLE_SNYK_SCAN || 'false' }}
   ENABLE_HTTP_VALIDATION: ${{ vars.ENABLE_HTTP_VALIDATION || 'false' }}
@@ -257,6 +271,10 @@ jobs:
 
       - name: Capture currently deployed Lambda image
         id: capture-current-image
+        env:
+          RECOVERY_POINT_FILE: ${{ runner.temp }}/deployment-recovery.json
+          ROLLBACK_FROM_IMAGE_URI: ${{ inputs.rollback_from_image_uri }}
+          ROLLBACK_FUNCTION_ARN: ${{ inputs.rollback_function_arn }}
         run: PYTHONPATH=cli python3 -m devsecops_cli.recovery capture
 
       # Enabling the optional image scan makes its credentials and result blocking.
@@ -311,6 +329,14 @@ jobs:
           RECOVERY_FUNCTION_NAME: ${{ steps.capture-current-image.outputs.function_name }}
           RECOVERY_FUNCTION_ARN: ${{ steps.capture-current-image.outputs.function_arn }}
         run: PYTHONPATH=cli python3 -m devsecops_cli.recovery state
+
+      - name: Upload deployment recovery point
+        if: env.DEPLOY_MODE == 'deploy'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deployment-recovery-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/deployment-recovery.json
+          if-no-files-found: error
 
       - name: Plan production workload from reviewed inputs
         if: env.DEPLOY_MODE == 'deploy'

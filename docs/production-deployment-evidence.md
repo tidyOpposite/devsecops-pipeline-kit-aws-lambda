@@ -144,10 +144,11 @@ workload logs can be absent at this stage. Initialize both Terraform modules
 for validation in a fresh checkout. Review the exact inputs and workflow
 availability in the dry run before dispatch.
 
-The human dispatch output and JSON status include the GitHub run ID and URL.
-The CLI also saves the run ID, requested image, and previously active image in
-the ignored `.devsecops/deployments.json` journal; it never stores tokens or
-credentials there. If workflow artifacts are part of the evidence policy,
+The human dispatch output and JSON status include the GitHub run ID and URL
+once confirmed. Until then the local journal tracks the dispatch request ID.
+Use `devsecops deploy status --watch` if the run is unconfirmed. The runner
+uploads the previous digest in `deployment-recovery-<attempt>` for the exact
+deployment run. If workflow artifacts are part of the evidence policy,
 download them by the recorded run ID with `gh run download <run-id> -D
 "${EVIDENCE_DIR}/workflow-artifacts"`.
 
@@ -160,6 +161,7 @@ Review the run log for these production steps:
 * `Verify reviewed Lambda image in ECR` before Terraform initialization
 * `Capture currently deployed Lambda image`
 * `Verify Terraform recovery state`
+* `Upload deployment recovery point`
 * `Plan production workload from reviewed inputs`
 * `Terraform apply workload with configured Lambda image`
 * `Read deployment outputs`

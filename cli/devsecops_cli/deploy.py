@@ -9,6 +9,7 @@ local journal that lets ``deploy status``, ``deploy logs``, and
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import json
 import os
 import re
@@ -29,7 +30,7 @@ DEPLOYMENT_REF = "main"
 DEPLOYMENT_ENVIRONMENT = "prod"
 DEPLOYMENT_RUN_JSON_FIELDS = (
     "databaseId,workflowName,displayTitle,event,headBranch,headSha,status,"
-    "conclusion,createdAt,updatedAt,url,jobs"
+    "conclusion,createdAt,updatedAt,url,attempt,jobs"
 )
 DEPLOYMENT_LIST_JSON_FIELDS = (
     "databaseId,workflowName,displayTitle,event,headBranch,headSha,status,"
@@ -37,7 +38,8 @@ DEPLOYMENT_LIST_JSON_FIELDS = (
 )
 ACTIVE_RUN_STATUSES = frozenset({"queued", "in_progress", "requested", "waiting", "pending"})
 DEPLOYMENT_OPERATIONS = frozenset({"deploy", "rollback"})
-_RUN_URL_RE = re.compile(r"https://github\.com/[^\s/]+/[^\s/]+/actions/runs/(?P<run_id>\d+)")
+_RUN_URL_RE = re.compile(r"https://github\.com/(?P<repo>[\w.-]+/[\w.-]+)/actions/runs/(?P<run_id>[1-9][0-9]*)(?=\s|$)")
+_DEPLOYMENT_TITLE_RE = re.compile(r"devsecops (deploy|rollback) prod(?: \[([a-f0-9]{32})\])?")
 
 
 class DeploymentStateError(ValueError):
@@ -50,6 +52,9 @@ class DeploymentIntent:
     commit_sha: str
     config_sha256: str
     image_uri: str
+    request_id: str = ""
+    rollback_from_image_uri: str = ""
+    rollback_function_arn: str = ""
 
 
 def is_commit_sha(value: str) -> bool:
@@ -87,6 +92,8 @@ def _clean_record(record: dict[str, Any]) -> dict[str, str]:
         "repository": str(record.get("repository") or ""),
         "commit_sha": str(record.get("commit_sha") or ""),
         "config_sha256": str(record.get("config_sha256") or ""),
+        "request_id": str(record.get("request_id") or ""),
+        "dispatch_acknowledged": str(record.get("dispatch_acknowledged") or ""),
         "requested_image_uri": str(record.get("requested_image_uri") or ""),
         "previous_image_uri": str(record.get("previous_image_uri") or ""),
         "source_run_id": str(record.get("source_run_id") or ""),
@@ -155,12 +162,23 @@ def save_deployment_state(root: Path, state: dict[str, Any]) -> Path:
 
 
 def record_deployment(root: Path, record: dict[str, Any]) -> dict[str, str]:
-    """Prepend one sanitized deployment record and persist the journal."""
+    """Serialize journal updates and merge a confirmed run into its request."""
 
-    state = load_deployment_state(root)
     cleaned = _clean_record(record)
-    records = [cleaned, *state["deployments"]]
-    save_deployment_state(root, {"deployments": records})
+    path = deployment_state_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        records = load_deployment_state(root)["deployments"]
+        for index, existing in enumerate(records):
+            if cleaned["request_id"] and existing["request_id"] == cleaned["request_id"]:
+                if existing["run_id"] and existing["run_id"] != cleaned["run_id"]:
+                    raise DeploymentStateError("A deployment request already has a different confirmed run.")
+                records[index] = cleaned
+                break
+        else:
+            records.insert(0, cleaned)
+        save_deployment_state(root, {"deployments": records})
     return cleaned
 
 
@@ -172,15 +190,6 @@ def latest_deployment(root: Path, run_id: str | None = None) -> dict[str, str] |
         return records[0] if records else None
     wanted = str(run_id)
     return next((record for record in records if record["run_id"] == wanted), None)
-
-
-def rollback_target(root: Path, source_run_id: str | None = None) -> tuple[str, dict[str, str] | None]:
-    """Resolve the previous image recorded for a deployment workflow run."""
-
-    record = latest_deployment(root, source_run_id)
-    if record is None:
-        return "", None
-    return record["previous_image_uri"], record
 
 
 def workflow_dispatch_args(operation: str, intent: DeploymentIntent) -> list[str]:
@@ -206,10 +215,15 @@ def workflow_dispatch_args(operation: str, intent: DeploymentIntent) -> list[str
         f"commit_sha={intent.commit_sha}",
         "--raw-field",
         f"config_sha256={intent.config_sha256}",
+        "--raw-field",
+        f"request_id={intent.request_id}",
+        *(["--raw-field", f"rollback_from_image_uri={intent.rollback_from_image_uri}",
+           "--raw-field", f"rollback_function_arn={intent.rollback_function_arn}"]
+          if intent.rollback_from_image_uri else []),
     ]
 
 
-def workflow_run_list_args(limit: int = 20) -> list[str]:
+def workflow_run_list_args(limit: int = 20, repository: str = "") -> list[str]:
     """Build ``gh`` arguments for candidate deployment-run discovery."""
 
     return [
@@ -225,25 +239,29 @@ def workflow_run_list_args(limit: int = 20) -> list[str]:
         str(limit),
         "--json",
         DEPLOYMENT_LIST_JSON_FIELDS,
+        *(["--repo", repository] if repository else []),
     ]
 
 
-def workflow_run_view_args(run_id: str) -> list[str]:
+def workflow_run_view_args(run_id: str, repository: str = "") -> list[str]:
     """Build ``gh`` arguments for structured details of one run."""
 
-    return ["run", "view", str(run_id), "--json", DEPLOYMENT_RUN_JSON_FIELDS]
+    return ["run", "view", str(run_id), "--json", DEPLOYMENT_RUN_JSON_FIELDS,
+            *(["--repo", repository] if repository else [])]
 
 
-def workflow_run_log_args(run_id: str, failed_only: bool = False) -> list[str]:
+def workflow_run_log_args(run_id: str, failed_only: bool = False, repository: str = "") -> list[str]:
     """Build ``gh`` arguments for all logs or only failed-step logs."""
 
-    return ["run", "view", str(run_id), "--log-failed" if failed_only else "--log"]
+    return ["run", "view", str(run_id), "--log-failed" if failed_only else "--log",
+            *(["--repo", repository] if repository else [])]
 
 
-def workflow_run_watch_args(run_id: str, interval: int = 5) -> list[str]:
+def workflow_run_watch_args(run_id: str, interval: int = 5, repository: str = "") -> list[str]:
     """Build ``gh`` arguments that propagate the watched run's exit status."""
 
-    return ["run", "watch", str(run_id), "--exit-status", "--interval", str(interval)]
+    return ["run", "watch", str(run_id), "--exit-status", "--interval", str(interval),
+            *(["--repo", repository] if repository else [])]
 
 
 def display_gh_command(args: list[str]) -> str:
@@ -252,13 +270,20 @@ def display_gh_command(args: list[str]) -> str:
     return shlex.join(["gh", *args])
 
 
-def parse_run_url(output: str) -> tuple[str, str]:
+def parse_run_url(output: str, repository: str = "") -> tuple[str, str]:
     """Extract a GitHub Actions run identifier and URL from dispatch output."""
 
-    match = _RUN_URL_RE.search(output or "")
-    if not match:
-        return "", ""
-    return match.group("run_id"), match.group(0)
+    matches = {match.group(0): match.group("run_id") for match in _RUN_URL_RE.finditer(output or "")
+               if not repository or match.group("repo").lower() == repository.lower()}
+    if len(matches) == 1:
+        url, identifier = matches.popitem()
+        return identifier, url
+    return "", ""
+
+
+def deployment_title(title: str) -> tuple[str, str]:
+    match = _DEPLOYMENT_TITLE_RE.fullmatch(title.lower())
+    return (match[1], match[2] or "") if match else ("", "")
 
 
 def is_deployment_run(run: dict[str, Any]) -> bool:
@@ -275,8 +300,7 @@ def is_deployment_run(run: dict[str, Any]) -> bool:
     workflow_name = str(run.get("workflowName") or "")
     if workflow_name and workflow_name != DEPLOYMENT_WORKFLOW_NAME:
         return False
-    title = str(run.get("displayTitle") or "").lower()
-    return title in {"devsecops deploy prod", "devsecops rollback prod"}
+    return bool(deployment_title(str(run.get("displayTitle") or ""))[0])
 
 
 def active_deployment_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -303,29 +327,21 @@ def newest_deployment_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     return next((run for run in runs if is_deployment_run(run)), None)
 
 
-def select_dispatched_run(
-    before_run_ids: set[str],
-    runs: list[dict[str, Any]],
-    operation: str | None = None,
-) -> dict[str, Any] | None:
-    """Find the newly created run by excluding the pre-dispatch snapshot.
+def matches_deployment_request(run: dict[str, Any], record: dict[str, str]) -> bool:
+    identifier, _ = parse_run_url(str(run.get("url") or ""), record["repository"])
+    return (
+        bool(identifier and record["request_id"] and record["repository"])
+        and identifier == str(run.get("databaseId") or "")
+        and is_deployment_run(run)
+        and run.get("workflowName") == DEPLOYMENT_WORKFLOW_NAME
+        and run.get("headSha") == record["commit_sha"]
+        and deployment_title(str(run.get("displayTitle") or "")) == (record["operation"], record["request_id"])
+    )
 
-    Comparing identifiers is more reliable than timestamps when GitHub API
-    results arrive with coarse or delayed time metadata.
-    """
 
-    expected_title = f"devsecops {operation} {DEPLOYMENT_ENVIRONMENT}" if operation else ""
-    for run in runs:
-        run_id = str(run.get("databaseId") or "")
-        title = str(run.get("displayTitle") or "").lower()
-        if (
-            run_id
-            and run_id not in before_run_ids
-            and is_deployment_run(run)
-            and (not expected_title or title == expected_title)
-        ):
-            return run
-    return None
+def select_dispatched_run(runs: list[dict[str, Any]], record: dict[str, str]) -> dict[str, Any] | None:
+    matches = [run for run in runs if matches_deployment_request(run, record)]
+    return matches[0] if len(matches) == 1 else None
 
 
 def deployment_job_rows(run: dict[str, Any]) -> list[list[str]]:
@@ -362,18 +378,18 @@ def deployment_status_payload(
     """
 
     record = record or {}
-    operation = record.get("operation") or ""
-    if not operation:
-        title = str(run.get("displayTitle") or "").lower()
-        if title == f"devsecops rollback {DEPLOYMENT_ENVIRONMENT}":
-            operation = "rollback"
-        elif title == f"devsecops deploy {DEPLOYMENT_ENVIRONMENT}":
-            operation = "deploy"
+    title_operation, request_id = deployment_title(str(run.get("displayTitle") or ""))
+    operation = record.get("operation") or title_operation
     return {
         "kind": "deployment-status",
         "schema_version": 1,
         "environment": record.get("environment") or DEPLOYMENT_ENVIRONMENT,
         "operation": operation,
+        "request_id": record.get("request_id") or request_id,
+        "run_confirmation": (
+            "confirmed" if run else "dispatch response unconfirmed" if record.get("dispatch_acknowledged") == "false"
+            else "dispatched, run unconfirmed"
+        ),
         "requested_image_uri": record.get("requested_image_uri") or "",
         "previous_image_uri": record.get("previous_image_uri") or "",
         "active_image_uri": active_image_uri,
@@ -392,7 +408,7 @@ def deployment_status_payload(
                 "updatedAt",
                 "url",
             )
-        },
+        } if run else None,
         "jobs": [
             {
                 "name": row[0],
@@ -448,7 +464,8 @@ __all__ = [
     "newest_deployment_run",
     "parse_run_url",
     "record_deployment",
-    "rollback_target",
+    "deployment_title",
+    "matches_deployment_request",
     "save_deployment_state",
     "select_dispatched_run",
     "utc_now",

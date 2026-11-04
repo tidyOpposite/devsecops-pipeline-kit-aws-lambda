@@ -141,9 +141,21 @@ def main() -> int:
             current = lambda_image(root, function, env["AWS_REGION"])
             if env["DEPLOY_MODE"] == "rollback" and current is None:
                 raise RecoveryError("Lambda is missing. Manual rollback requires an existing function.")
+            expected_image = env.get("ROLLBACK_FROM_IMAGE_URI", "")
+            expected_arn = env.get("ROLLBACK_FUNCTION_ARN", "")
+            if expected_image or expected_arn:
+                if env["DEPLOY_MODE"] != "rollback" or not current or current.digest_uri != expected_image or current.arn != expected_arn:
+                    raise RecoveryError("The active Lambda or image no longer matches the selected deployment. Review rollback again.")
             previous = current.digest_uri if current else ""
-            if previous and env["DEPLOY_MODE"] == "deploy":
-                resolve_ecr_image_digest(root, previous, env["AWS_REGION"])
+            if env["DEPLOY_MODE"] == "deploy":
+                if previous:
+                    resolve_ecr_image_digest(root, previous, env["AWS_REGION"])
+                Path(env["RECOVERY_POINT_FILE"]).write_text(json.dumps({
+                    "repository": env["GITHUB_REPOSITORY"], "run_id": env["GITHUB_RUN_ID"],
+                    "attempt": env["GITHUB_RUN_ATTEMPT"], "commit_sha": env["GITHUB_SHA"],
+                    "function_arn": current.arn if current else "",
+                    "previous_image_uri": previous, "deployed_image_uri": env["LAMBDA_IMAGE_URI"],
+                }), encoding="utf-8")
             write_actions_values(env["GITHUB_OUTPUT"], {
                 "function_name": function, "function_arn": current.arn if current else "",
                 "revision_id": current.revision if current else "", "previous_image_uri": previous,

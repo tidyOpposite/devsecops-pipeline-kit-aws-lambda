@@ -336,8 +336,11 @@ def list_workflow_runs(
     result = gh_command_fn(root, args)
     if result.returncode != 0:
         return [], compact_error(result)
-    runs = parse_gh_runs(result.stdout)
-    if not runs and result.stdout.strip():
+    try:
+        runs = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError:
+        runs = None
+    if not isinstance(runs, list) or any(not isinstance(run, dict) for run in runs):
         return [], "Could not parse `gh run list` output."
     return runs, None
 

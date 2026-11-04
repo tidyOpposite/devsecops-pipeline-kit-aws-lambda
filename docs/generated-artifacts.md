@@ -18,7 +18,7 @@ devsecops inventory --format json
 | --- | --- | --- | --- |
 | `.devsecops-pipeline.toml` | CLI-managed local source config | No | Use `devsecops setup` initially; use Configuration commands or the Advanced control editor for later changes, then run `devsecops config validate`. |
 | `.devsecops/setup-state.json` | CLI-owned local workflow state | No | Rerun `devsecops setup`; the CLI atomically reconciles saved progress with config, tools, AWS identity, and GitHub. Move the file aside only when intentionally discarding setup history. |
-| `.devsecops/deployments.json` | CLI-owned local deployment journal | No | Created after successful `devsecops deploy prod` or `devsecops deploy rollback` dispatches. Keep it to let status, logs, and rollback select the same run; it contains no credentials or tokens. |
+| `.devsecops/deployments.json` | CLI-owned local deployment journal | No | Records the unique request and reconciles its GitHub run ID. The protected deployment run supplies the separate recovery artifact. |
 | `terraform/generated.auto.tfvars` | CLI-owned generated artifact | No | Update `.devsecops-pipeline.toml`, then run `devsecops generate`. |
 | `dist/devsecops/backend.tf` | CLI-owned compatibility template | No | Optional reference for manual Terraform use; normal CLI and workflow paths use `backend.hcl`. |
 | `dist/devsecops/backend.hcl` | CLI-owned backend inputs | No | Update backend settings and run `devsecops generate`; CLI plan passes this explicitly to Terraform init. |

@@ -16,7 +16,9 @@ import tempfile
 import unittest
 import urllib.request
 import urllib.response
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
+from dataclasses import replace
 from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
@@ -31,6 +33,8 @@ IMAGE_DIGEST = IMAGE.rsplit(":", 1)[0] + "@sha256:" + "b" * 64
 PREVIOUS_IMAGE = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-old"
 PREVIOUS_DIGEST = PREVIOUS_IMAGE.rsplit(":", 1)[0] + "@sha256:" + "a" * 64
 COMMIT_SHA = "a" * 40
+REQUEST_ID = "a" * 32
+FUNCTION_ARN = "arn:aws:lambda:us-east-1:123456789012:function:devsecops-pipeline-prod-lambda"
 
 
 def deployment_config() -> dict[str, object]:
@@ -46,7 +50,7 @@ def deployment_config() -> dict[str, object]:
 def fixture_intent(image_uri, cfg=None):
     cfg = cfg if cfg is not None else deployment_config()
     digest_uri = IMAGE_DIGEST if image_uri == IMAGE else image_uri
-    return deploy.DeploymentIntent("acme/pipeline", COMMIT_SHA, config.deployment_config_sha256(cfg, digest_uri), digest_uri), cfg
+    return deploy.DeploymentIntent("acme/pipeline", COMMIT_SHA, config.deployment_config_sha256(cfg, digest_uri), digest_uri, REQUEST_ID), cfg
 
 
 def create_deployment_project(root: Path) -> dict[str, object]:
@@ -68,6 +72,7 @@ def workflow_run(
     run_id: int = 42,
     *,
     operation: str = "deploy",
+    request_id: str = "",
     status: str = "completed",
     conclusion: str = "success",
 ) -> dict[str, object]:
@@ -76,10 +81,11 @@ def workflow_run(
     return {
         "databaseId": run_id,
         "workflowName": deploy.DEPLOYMENT_WORKFLOW_NAME,
-        "displayTitle": f"DevSecOps {operation} prod",
+        "displayTitle": f"DevSecOps {operation} prod" + (f" [{request_id}]" if request_id else ""),
         "event": "workflow_dispatch",
         "headBranch": "main",
-        "headSha": "abcdef1234567890",
+        "headSha": COMMIT_SHA,
+        "attempt": 1,
         "status": status,
         "conclusion": conclusion,
         "createdAt": "2026-08-29T10:00:00Z",
@@ -92,6 +98,9 @@ def workflow_run(
                 "conclusion": conclusion,
                 "startedAt": "2026-08-29T10:00:00Z",
                 "completedAt": "2026-08-29T10:05:00Z",
+                "steps": [{"name": step, "conclusion": conclusion} for step in (
+                    "Terraform apply workload with configured Lambda image", "Smoke test Lambda health endpoint",
+                )],
             }
         ],
     }
@@ -162,14 +171,16 @@ class DeploymentDomainTests(unittest.TestCase):
 
         self.assertEqual(deploy.parse_run_url(output), ("987", output.strip().split()[-1]))
         self.assertEqual(deploy.newest_deployment_run([unrelated, matching]), matching)
-        self.assertEqual(deploy.select_dispatched_run({"11"}, [unrelated, matching]), matching)
+        self.assertEqual(deploy.parse_run_url(output, "another/repository"), ("", ""))
 
-    def test_dispatched_run_fallback_matches_the_requested_operation(self) -> None:
-        rollback = workflow_run(13, operation="rollback", status="queued", conclusion="")
-        deployment = workflow_run(12, operation="deploy", status="queued", conclusion="")
-
-        self.assertEqual(deploy.select_dispatched_run(set(), [rollback, deployment], "deploy"), deployment)
-        self.assertEqual(deploy.select_dispatched_run(set(), [deployment, rollback], "rollback"), rollback)
+    def test_dispatched_run_fallback_matches_only_one_exact_request(self) -> None:
+        record = {"operation": "deploy", "request_id": REQUEST_ID, "repository": "acme/pipeline", "commit_sha": COMMIT_SHA}
+        matching = workflow_run(12, request_id=REQUEST_ID)
+        other_request = workflow_run(13, request_id="b" * 32)
+        wrong_commit = dict(workflow_run(14, request_id=REQUEST_ID), headSha="b" * 40)
+        self.assertEqual(deploy.select_dispatched_run([other_request, wrong_commit, matching], record), matching)
+        self.assertIsNone(deploy.select_dispatched_run([other_request, wrong_commit], record))
+        self.assertIsNone(deploy.select_dispatched_run([matching, workflow_run(15, request_id=REQUEST_ID)], record))
 
     def test_json_status_infers_operation_without_local_journal(self) -> None:
         payload = deploy.deployment_status_payload(workflow_run(operation="rollback"))
@@ -182,23 +193,15 @@ class DeploymentDomainTests(unittest.TestCase):
 
         self.assertEqual(deploy.active_deployment_runs([old_run]), [old_run])
 
-    def test_rollback_target_can_be_selected_by_run(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
+    def test_parallel_journal_updates_preserve_all_requests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, ThreadPoolExecutor(max_workers=8) as pool:
             root = Path(tmpdir)
-            deploy.record_deployment(
-                root,
-                {
-                    "operation": "deploy",
-                    "requested_image_uri": IMAGE,
-                    "previous_image_uri": PREVIOUS_IMAGE,
-                    "run_id": "42",
-                },
-            )
-
-            target, record = deploy.rollback_target(root, "42")
-
-        self.assertEqual(target, PREVIOUS_IMAGE)
-        self.assertEqual(record["requested_image_uri"], IMAGE)
+            records = [{"operation": "deploy", "request_id": f"{index:032x}"} for index in range(12)]
+            list(pool.map(lambda record: deploy.record_deployment(root, record), records))
+            deploy.record_deployment(root, dict(records[0], run_id="42"))
+            saved = deploy.load_deployment_state(root)["deployments"]
+            self.assertEqual(len(saved), len(records))
+            self.assertEqual(deploy.latest_deployment(root, "42")["request_id"], records[0]["request_id"])
 
 
 class DeploymentCommandTests(unittest.TestCase):
@@ -312,7 +315,8 @@ class DeploymentCommandTests(unittest.TestCase):
         self.assertEqual(state["deployments"][0]["requested_image_uri"], IMAGE_DIGEST)
         self.assertEqual(state["deployments"][0]["commit_sha"], intent.commit_sha)
         self.assertEqual(state["deployments"][0]["config_sha256"], intent.config_sha256)
-        self.assertEqual(state["deployments"][0]["previous_image_uri"], PREVIOUS_IMAGE)
+        self.assertEqual(state["deployments"][0]["previous_image_uri"], "")
+        self.assertEqual(state["deployments"][0]["request_id"], REQUEST_ID)
         self.assertEqual(state["deployments"][0]["run_id"], "42")
         self.assertIn("Underlying GitHub command", buffer.getvalue())
         self.assertIn("image_uri=", buffer.getvalue())
@@ -332,13 +336,13 @@ class DeploymentCommandTests(unittest.TestCase):
                 return_value=[cli.Check("Ready", "OK", "Ready.")],
             ), patch.object(cli, "dispatch_deployment_workflow", return_value=dispatch_result), patch.object(
                 cli, "watch_deployment_run", return_value=streamed_watch
-            ) as watch, patch.object(cli, "view_deployment_run", return_value=(workflow_run(), None)), redirect_stdout(
+            ) as watch, patch.object(cli, "view_deployment_run", return_value=(workflow_run(request_id=REQUEST_ID), None)), redirect_stdout(
                 io.StringIO()
             ):
                 result = cli.main(["deploy", "prod", "--yes", "--watch"])
 
         self.assertEqual(result, cli.EXIT_OK)
-        watch.assert_called_once_with(root, "42", 5, stream=True)
+        watch.assert_called_once_with(root, "42", 5, stream=True, repository="acme/pipeline")
 
     def test_deploy_prod_requires_confirmation_without_yes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -413,7 +417,7 @@ class DeploymentCommandTests(unittest.TestCase):
         self.assertEqual(payload["run"]["status"], "completed")
         self.assertNotIn("interactive progress", buffer.getvalue())
 
-    def test_failed_status_returns_validation_failure_and_recovery_command(self) -> None:
+    def test_failed_status_points_to_logs_for_the_exact_run(self) -> None:
         failed = workflow_run(status="completed", conclusion="failure")
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -435,8 +439,7 @@ class DeploymentCommandTests(unittest.TestCase):
                 result = cli.main(["deploy", "status"])
 
         self.assertEqual(result, cli.EXIT_VALIDATION_FAILED)
-        self.assertIn("devsecops deploy logs --failed", buffer.getvalue())
-        self.assertIn("devsecops deploy rollback", buffer.getvalue())
+        self.assertIn("devsecops deploy logs --run-id 42 --failed", buffer.getvalue())
 
     def test_deploy_logs_selects_same_run_and_failed_log_scope(self) -> None:
         logs = subprocess.CompletedProcess(["gh"], 0, "failed log\n", "")
@@ -455,7 +458,7 @@ class DeploymentCommandTests(unittest.TestCase):
         self.assertIn("failed log", buffer.getvalue())
         self.assertIn("Next command: devsecops health --aws-sigv4", buffer.getvalue())
 
-    def test_failed_deploy_logs_recommend_a_rollback_preview(self) -> None:
+    def test_failed_deploy_logs_require_a_reviewed_rollback_image(self) -> None:
         logs = subprocess.CompletedProcess(["gh"], 0, "failed log\n", "")
         record = {"previous_image_uri": PREVIOUS_IMAGE}
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -468,7 +471,7 @@ class DeploymentCommandTests(unittest.TestCase):
                 result = cli.main(["deploy", "logs", "--failed"])
 
         self.assertEqual(result, cli.EXIT_OK)
-        self.assertIn("Next command: devsecops deploy rollback --dry-run", buffer.getvalue())
+        self.assertIn("Next command: devsecops deploy rollback --image-uri", buffer.getvalue())
 
     # Rollback reuses the protected workflow and requires either journaled or
     # explicit immutable target evidence before any provider call.
@@ -482,14 +485,18 @@ class DeploymentCommandTests(unittest.TestCase):
                 {
                     "operation": "deploy",
                     "requested_image_uri": IMAGE,
-                    "previous_image_uri": PREVIOUS_DIGEST,
+                    "previous_image_uri": "wrong-local-observation",
                     "run_id": "42",
                 },
             )
+            point = {"repository": "acme/pipeline", "run_id": "42", "deployed_image_uri": IMAGE_DIGEST,
+                     "previous_image_uri": PREVIOUS_DIGEST, "function_arn": FUNCTION_ARN}
             completed = subprocess.CompletedProcess(["gh"], 0, url + "\n", "")
             with patch.object(cli, "repo_root", return_value=root), patch.object(
                 cli, "list_deployment_runs", return_value=([], None)
-            ), patch.object(cli, "inspect_active_lambda_image", return_value=(IMAGE, None)), patch.object(
+            ), patch.object(cli, "inspect_active_lambda_image", return_value=(IMAGE_DIGEST, None)), patch.object(
+                cli, "view_deployment_run", return_value=(workflow_run(), None)
+            ), patch.object(cli, "read_deployment_recovery_point", return_value=point), patch.object(
                 cli,
                 "rollback_deployment_preflight_checks",
                 return_value=[cli.Check("Ready", "OK", "Ready.")],
@@ -500,9 +507,11 @@ class DeploymentCommandTests(unittest.TestCase):
             state = deploy.load_deployment_state(root)
 
         self.assertEqual(result, cli.EXIT_OK)
-        dispatch.assert_called_once_with(root, "rollback", fixture_intent(PREVIOUS_DIGEST)[0])
+        dispatch.assert_called_once_with(root, "rollback", replace(
+            fixture_intent(PREVIOUS_DIGEST)[0], rollback_from_image_uri=IMAGE_DIGEST, rollback_function_arn=FUNCTION_ARN,
+        ))
         self.assertEqual(state["deployments"][0]["source_run_id"], "42")
-        self.assertEqual(state["deployments"][0]["previous_image_uri"], IMAGE)
+        self.assertEqual(state["deployments"][0]["requested_image_uri"], PREVIOUS_DIGEST)
 
     def test_implicit_rollback_rejects_legacy_tag_before_provider_calls(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -513,7 +522,7 @@ class DeploymentCommandTests(unittest.TestCase):
                  redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(cli.main(["deploy", "rollback", "--yes"]), cli.EXIT_VALIDATION_FAILED)
             runs.assert_not_called()
-            self.assertIn("exact digest", output.getvalue())
+            self.assertIn("no confirmed run", output.getvalue())
 
     def test_deploy_rollback_without_record_or_explicit_image_fails_before_provider_calls(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -538,7 +547,7 @@ class DeploymentCommandTests(unittest.TestCase):
                 result = cli.main(["deploy", "status", "--run-id", "42"])
 
         self.assertEqual(result, cli.EXIT_VALIDATION_FAILED)
-        self.assertIn("not the deployment workflow", buffer.getvalue())
+        self.assertIn("does not belong to the protected deployment workflow", buffer.getvalue())
 
 
 class DeploymentIntentTests(unittest.TestCase):
@@ -549,7 +558,8 @@ class DeploymentIntentTests(unittest.TestCase):
              patch.object(cli, "command_exists", return_value=True), \
              patch.object(cli, "verify_ecr_lambda_image", return_value=IMAGE_DIGEST) as verify:
             intent, reviewed = cli.review_deployment_intent(ROOT_DIR, IMAGE, cfg)
-        self.assertEqual(intent, fixture_intent(IMAGE, cfg)[0])
+        self.assertRegex(intent.request_id, r"^[a-f0-9]{32}$")
+        self.assertEqual(replace(intent, request_id=REQUEST_ID), fixture_intent(IMAGE, cfg)[0])
         self.assertIs(reviewed, cfg)
         self.assertIn("repos/acme/pipeline/git/ref/heads/main", gh.call_args.args[1])
         verify.assert_called_once_with(ROOT_DIR, IMAGE, cfg["aws_region"], aws_json_fn=cli.aws_json)
@@ -565,7 +575,7 @@ class DeploymentIntentTests(unittest.TestCase):
              patch.object(cli, "verify_ecr_lambda_image", return_value=PREVIOUS_DIGEST) as verify:
             intent, reviewed = cli.review_deployment_intent(ROOT_DIR, PREVIOUS_DIGEST)
         verify.assert_called_once_with(ROOT_DIR, PREVIOUS_DIGEST, remote["aws_region"], aws_json_fn=cli.aws_json)
-        self.assertEqual(intent, fixture_intent(PREVIOUS_DIGEST, remote)[0])
+        self.assertEqual(replace(intent, request_id=REQUEST_ID), fixture_intent(PREVIOUS_DIGEST, remote)[0])
         self.assertEqual(reviewed["backend"]["key"], "state-from-github.tfstate")
         self.assertIn("repos/acme/pipeline/actions/variables/PIPELINE_CONFIG_JSON", gh.call_args.args[1])
 
@@ -589,6 +599,74 @@ class DeploymentIntentTests(unittest.TestCase):
             self.assertIn("unavailable in ECR", output.getvalue())
             confirm.assert_not_called()
             dispatch.assert_not_called()
+
+
+class DeploymentCorrelationTests(unittest.TestCase):
+    def test_empty_gitHub_listing_is_valid_during_dispatch_propagation(self) -> None:
+        with patch.object(cli, "command_exists", return_value=True), patch.object(
+            cli, "gh_command", return_value=subprocess.CompletedProcess(["gh"], 0, "[]", ""),
+        ):
+            self.assertEqual(cli.list_deployment_runs(ROOT_DIR, repository="acme/pipeline"), ([], None))
+
+    def test_unconfirmed_watch_fails_and_later_status_reconciles_only_its_request(self) -> None:
+        intent, _ = fixture_intent(IMAGE)
+        unrelated = workflow_run(55, request_id="b" * 32)
+        matched = workflow_run(56, request_id=REQUEST_ID)
+        accepted = subprocess.CompletedProcess(["gh"], 0, "", "")
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()) as output:
+            root = Path(directory)
+            with patch.object(cli, "repo_root", return_value=root), patch.object(
+                cli, "dispatch_deployment_workflow", return_value=accepted,
+            ) as dispatch, patch.object(cli, "list_deployment_runs", return_value=([unrelated], None)) as runs, patch.object(
+                cli.time, "sleep",
+            ), patch.object(cli, "watch_deployment_run") as watch:
+                code = cli.dispatch_cloud_deployment(root, "deploy", intent, "", watch=True, interval=3)
+                self.assertEqual(code, 1)
+                self.assertIn("Dispatched, run unconfirmed", output.getvalue())
+                watch.assert_not_called()
+                dispatch.assert_called_once()
+                self.assertEqual(deploy.latest_deployment(root)["run_id"], "")
+
+                output.seek(0)
+                output.truncate()
+                self.assertEqual(cli.main(["deploy", "status", "--format", "json"]), 0)
+                payload = json.loads(output.getvalue())
+                self.assertEqual(payload["run_confirmation"], "dispatched, run unconfirmed")
+                self.assertIsNone(payload["run"])
+                self.assertEqual(payload["request_id"], REQUEST_ID)
+
+                runs.return_value = ([unrelated, matched], None)
+                run, _, error = cli.resolve_deployment_run(root)
+                self.assertIsNone(error)
+                self.assertEqual(run["databaseId"], 56)
+                self.assertEqual(deploy.latest_deployment(root)["run_id"], "56")
+                self.assertEqual(len(deploy.load_deployment_state(root)["deployments"]), 1)
+
+    def test_recovery_point_is_bound_to_a_successful_run_and_attempt(self) -> None:
+        point = {"repository": "acme/pipeline", "run_id": "42", "attempt": "1", "commit_sha": COMMIT_SHA,
+                 "previous_image_uri": PREVIOUS_DIGEST, "deployed_image_uri": IMAGE_DIGEST, "function_arn": FUNCTION_ARN}
+        source = {"id": 42, "path": deploy.DEPLOYMENT_WORKFLOW_PATH, "run_attempt": 1, "head_sha": COMMIT_SHA,
+                  "head_branch": "main", "event": "workflow_dispatch", "status": "completed", "conclusion": "success"}
+
+        def gh(root, args):
+            if args[0] == "api":
+                self.assertIn("repos/acme/pipeline/actions/runs/42", args)
+                return subprocess.CompletedProcess(args, 0, json.dumps(source), "")
+            self.assertEqual(args[:7], ["run", "download", "42", "--repo", "acme/pipeline", "--name", "deployment-recovery-1"])
+            (Path(args[-1]) / "deployment-recovery.json").write_text(json.dumps(point))
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        with patch.object(cli, "gh_command", side_effect=gh) as provider:
+            with self.assertRaisesRegex(cli.ConfigValidationError, "successful production deployment"):
+                cli.read_deployment_recovery_point(ROOT_DIR, workflow_run(conclusion="cancelled"))
+            provider.assert_not_called()
+            self.assertEqual(cli.read_deployment_recovery_point(ROOT_DIR, workflow_run()), point)
+            point["attempt"] = "2"
+            with self.assertRaisesRegex(cli.ConfigValidationError, "selected run and attempt"):
+                cli.read_deployment_recovery_point(ROOT_DIR, workflow_run())
+            source["run_attempt"] = 2
+            with self.assertRaisesRegex(cli.ConfigValidationError, "successful source run and attempt"):
+                cli.read_deployment_recovery_point(ROOT_DIR, workflow_run())
 
 
 class EcrImageVerificationTests(unittest.TestCase):
@@ -675,6 +753,28 @@ class RecoveryTests(unittest.TestCase):
     region = "us-east-1"
     arn = f"arn:aws:lambda:{region}:123456789012:function:{function}"
     health_url = "https://abc123.execute-api.us-east-1.amazonaws.com/health"
+
+    def test_capture_records_actual_previous_digest_and_blocks_stale_rollback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            artifact = Path(directory) / "deployment-recovery.json"
+            environment = {"PROJECT_NAME": "devsecops-pipeline", "DEPLOY_ENVIRONMENT": "prod", "DEPLOY_MODE": "deploy",
+                           "AWS_REGION": self.region, "GITHUB_REPOSITORY": "acme/pipeline", "GITHUB_RUN_ID": "42",
+                           "GITHUB_RUN_ATTEMPT": "2", "GITHUB_SHA": COMMIT_SHA, "LAMBDA_IMAGE_URI": IMAGE_DIGEST,
+                           "RECOVERY_POINT_FILE": str(artifact), "GITHUB_OUTPUT": str(output)}
+            current = recovery.LambdaImage(PREVIOUS_DIGEST, PREVIOUS_IMAGE, self.arn, "rev", "Active", "Successful")
+            with patch.dict(os.environ, environment, clear=True), patch.object(recovery.sys, "argv", ["recovery", "capture"]), \
+                 patch.object(recovery, "lambda_image", return_value=current), \
+                 patch.object(recovery, "resolve_ecr_image_digest", return_value=PREVIOUS_DIGEST), redirect_stdout(io.StringIO()):
+                self.assertEqual(recovery.main(), 0)
+                point = json.loads(artifact.read_text())
+                self.assertEqual(point["previous_image_uri"], PREVIOUS_DIGEST)
+                self.assertEqual(point["attempt"], "2")
+                self.assertEqual(point["deployed_image_uri"], IMAGE_DIGEST)
+                os.environ.update(DEPLOY_MODE="rollback", ROLLBACK_FROM_IMAGE_URI=IMAGE_DIGEST, ROLLBACK_FUNCTION_ARN=self.arn)
+                with patch.object(recovery.sys, "stderr", new=io.StringIO()) as stderr:
+                    self.assertEqual(recovery.main(), 1)
+                    self.assertIn("no longer matches", stderr.getvalue())
 
     def test_only_lambda_resource_not_found_is_first_deployment(self) -> None:
         missing = subprocess.CompletedProcess([], 254, "", "An error occurred (ResourceNotFoundException) when calling the GetFunction operation: missing")
@@ -780,6 +880,8 @@ class DeploymentWorkflowContractTests(unittest.TestCase):
         self.assertIn("-out=workload.tfplan", workflow)
         self.assertIn("apply -input=false -no-color workload.tfplan", workflow)
         self.assertIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}", workflow)
+        self.assertIn("queue: max", workflow)
+        self.assertIn("name: deployment-recovery-${{ github.run_attempt }}", workflow)
         self.assertNotIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}-${{", workflow)
         image_gate = workflow.index("recovery verify-image")
         self.assertLess(workflow.index("role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}"), image_gate)

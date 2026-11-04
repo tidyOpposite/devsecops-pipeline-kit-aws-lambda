@@ -347,15 +347,17 @@ Common runbooks:
 ### Deployment command cannot find a run or rollback target
 
 `devsecops deploy status`, `logs`, and `rollback` first use an explicit
-`--run-id`, then the ignored `.devsecops/deployments.json` journal. Status can
-also discover a newer workflow run whose title is `DevSecOps deploy prod` or
-`DevSecOps rollback prod`.
+`--run-id`, then the ignored `.devsecops/deployments.json` journal. If a
+dispatch has no confirmed run, the CLI searches for the unique request ID in
+the workflow title. Retry `devsecops deploy status --watch` to follow that
+request before dispatching again.
 
 If the journal came from another workstation or was intentionally removed:
 
 ```bash
 devsecops deploy status --run-id <github-actions-run-id>
 devsecops deploy logs --run-id <github-actions-run-id> --failed
+devsecops deploy rollback --run-id <successful-deployment-run-id> --dry-run
 devsecops deploy rollback --image-uri <known-good-immutable-ecr-image-uri> --dry-run
 ```
 

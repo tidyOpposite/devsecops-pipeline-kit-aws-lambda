@@ -99,6 +99,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
         (self.directory / name).write_text(json.dumps(content) if isinstance(content, dict) else content, encoding="utf-8")
 
     def test_validated_evidence_and_reviewed_wheel_pass(self):
+        document = self.documents["workflow-run.json"]
+        document["run"]["display_title"] += " [" + "a" * 32 + "]"
+        self.write("workflow-run.json", document)
         payload = v1_criteria_payload(ROOT, self.directory, artifacts_dir=self.directory)
         self.assertTrue(payload["stable_ready"], payload["stable_release_gates"])
 

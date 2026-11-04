@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -81,6 +82,8 @@ def write_workflow_inputs(
 
 
 def verify_production_intent(payload: str, intent: DeploymentIntent, actual_commit: str) -> dict:
+    if intent.request_id and not re.fullmatch(r"[a-f0-9]{32}", intent.request_id):
+        raise ConfigValidationError("The deployment request ID must be 32 lowercase hexadecimal characters.")
     image = parse_ecr_image_uri(intent.image_uri)
     if not image or not image.digest or image.digest != image.digest.lower():
         raise ConfigValidationError("Production requires an explicit ECR image @sha256 digest from the deployment preview.")
@@ -102,7 +105,7 @@ def main() -> int:
         if production:
             intent = DeploymentIntent(
                 os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("DISPATCH_COMMIT_SHA", ""),
-                os.environ.get("DISPATCH_CONFIG_SHA256", ""), image_uri,
+                os.environ.get("DISPATCH_CONFIG_SHA256", ""), image_uri, os.environ.get("DISPATCH_REQUEST_ID", ""),
             )
         if verify_only and intent is None:
             raise ConfigValidationError("Intent verification requires a production deploy or rollback.")

@@ -444,11 +444,12 @@ dist/devsecops/setup-checklist.md
 `devsecops report --format json` writes `dist/devsecops/audit-report.json`
 for pull request, workflow artifact, or release evidence.
 
-Successful deployment and rollback dispatches prepend non-secret metadata to
-`.devsecops/deployments.json`: operation, environment, ref, requested and
-previous image URIs, run ID/URL, and timestamp. The ignored file is written
-with a schema version and private permissions; credentials and tokens are not
-stored. It lets status, logs, and rollback resolve the same run by default.
+The local `.devsecops/deployments.json` journal records each dispatch request
+and its run ID when GitHub confirms it. If GitHub has accepted the dispatch
+but the run is still unconfirmed, use `devsecops deploy status --watch` to
+follow that request before retrying. The journal contains non-secret metadata.
+Inferred rollback uses the previous digest captured by a successful deployment
+attempt and checks that the same Lambda and deployed image are still active.
 
 Generated artifacts include CLI-owned headers and are ignored by Git. See
 [Generated artifacts](docs/generated-artifacts.md) for the source-versus-output
