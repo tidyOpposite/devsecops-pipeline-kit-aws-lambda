@@ -49,7 +49,7 @@ flowchart LR
 | Misconfigured pipeline hidden from operator | `devsecops status`, `[i] details`, `doctor`, and reports show scored readiness gaps and concrete fix actions. |
 | Security controls hidden in Terraform or workflows | `devsecops controls`, `devsecops explain <control>`, and `docs/security-controls.md` map CLI options to generated Terraform, GitHub, AWS, and scanner behavior. |
 | Static cloud credentials leaked from CI | GitHub Actions uses OIDC and short-lived STS credentials; no AWS access keys are stored in the repo. |
-| Overprivileged PR planning | Terraform plan workflows require `AWS_PLAN_ROLE_TO_ASSUME_ARN`, skip forked PRs, and do not fall back to the deploy role. |
+| Overprivileged PR planning | All PRs run without AWS credentials. Manual sandbox planning accepts only reviewed `main` code, explicit opt-in, a separate backend and the least-privilege plan role. |
 | Unauthorized Terraform apply | Workflow applies only on manual `workflow_dispatch` deploy/rollback runs from `main`, inside the protected production environment; PRs and direct pushes do not apply. The CLI confirms the exact immutable image and serializes the production lane. Protect `main` with required checks. |
 | Concurrent Terraform state writes | S3 backend uses DynamoDB state locking. Bootstrap stack creates the lock table. |
 | Insecure Terraform configuration | Trivy scans Terraform modules for high and critical IaC findings. |
@@ -84,5 +84,6 @@ flowchart LR
   Terraform state backups, or cloud rollback strategy.
 * Lambda DLQ only captures asynchronous invocation failures. API Gateway
   synchronous errors are returned to the client and logged in CloudWatch.
-* PR Terraform plan requires a lower-privilege `AWS_PLAN_ROLE_TO_ASSUME_ARN`.
-  Forked PRs intentionally do not receive AWS-backed plans.
+* A malicious change merged to `main` can execute in a manually dispatched AWS
+  job. Protect `main`, review Terraform/provider/Python changes, and scope the
+  plan role to sandbox state/resources. No PR receives AWS-backed planning.

@@ -1,8 +1,8 @@
 name: Secure Serverless DevSecOps Pipeline
 run-name: DevSecOps ${{ github.event_name == 'workflow_dispatch' && format('{0} {1}{2}', inputs.mode, inputs.environment, inputs.request_id && format(' [{0}]', inputs.request_id) || '') || github.event_name }}
 
-# Pull requests receive validation and a plan; state-changing deploy and rollback
-# modes are available only through the explicitly parameterized manual trigger.
+# All pull requests receive credential-free validation. AWS-backed operations
+# require an explicitly configured manual trigger from reviewed main code.
 on:
   pull_request:
     branches:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Plan any environment, or deploy/rollback prod from main
+        description: Sandbox plan for dev, or deploy/rollback prod; main only
         required: true
         default: plan
         type: choice
@@ -20,13 +20,12 @@ on:
           - deploy
           - rollback
       environment:
-        description: Terraform workspace (deploy and rollback require prod)
+        description: Sandbox plan requires dev; deploy and rollback require prod
         required: true
         default: dev
         type: choice
         options:
           - dev
-          - staging
           - prod
       image_uri:
         description: Reviewed ECR @sha256 image URI for deploy or rollback
@@ -54,18 +53,20 @@ on:
         type: string
 
 permissions:
-  # Individual jobs opt into OIDC or pull-request writes only when required.
+  # Individual jobs opt into AWS OIDC only when required.
   contents: read
 
-# Serialize operations per Terraform workspace and never cancel an apply or
-# rollback that may already be changing remote infrastructure.
+# Serialize manual operations per workspace; keep PR validation queues separate.
+# Never cancel an apply or rollback that may be changing remote infrastructure.
 concurrency:
-  group: terraform-${{ github.event.inputs.environment || 'dev' }}
+  group: ${{ github.event_name == 'pull_request' && format('pr-validation-{0}', github.event.pull_request.number) || format('terraform-{0}', inputs.environment) }}
   cancel-in-progress: false
   queue: max
 
 env:
   PIPELINE_CONFIG_JSON: ${{ vars.PIPELINE_CONFIG_JSON }}
+  ENABLE_AWS_PLAN: ${{ vars.ENABLE_AWS_PLAN || 'false' }}
+  PLAN_BACKEND_JSON: ${{ vars.PLAN_BACKEND_JSON }}
   PROJECT_NAME: ${{ vars.PROJECT_NAME || 'devsecops-pipeline' }}
   TF_VERSION: "1.10.5"
   TF_IN_AUTOMATION: "true"
@@ -136,21 +137,20 @@ jobs:
           severity: HIGH,CRITICAL
 
   terraform-plan:
-    name: Terraform Plan
+    name: Sandbox Terraform Plan
     runs-on: ubuntu-latest
     needs: security-and-validate
-    # Forked pull requests cannot enter an OIDC-enabled job; maintainers can run
-    # their plans separately after reviewing untrusted changes.
-    if: (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'plan')
+    # Sandbox planning executes reviewed main code only, with explicit opt-in.
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'plan' && inputs.environment == 'dev' && github.ref == 'refs/heads/main' && vars.ENABLE_AWS_PLAN == 'true'
     permissions:
       contents: read
       id-token: write
-      pull-requests: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Prepare user pipeline configuration
@@ -159,12 +159,8 @@ jobs:
       # Fail closed instead of silently granting a plan the more powerful deploy role.
       - name: Require separate AWS plan role
         env:
-          PLAN_ROLE_ARN: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}
-        run: |
-          if [ -z "${PLAN_ROLE_ARN}" ]; then
-            echo "Set AWS_PLAN_ROLE_TO_ASSUME_ARN to a least-privilege plan role. Terraform plan does not fall back to the deploy role." >&2
-            exit 1
-          fi
+          EXPECTED_ROLE_ARN: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}
+        run: PYTHONPATH=cli python3 -m devsecops_cli.oidc settings plan
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
@@ -199,47 +195,9 @@ jobs:
       - name: Upload Terraform plan artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: terraform-plan-${{ env.DEPLOY_ENVIRONMENT }}
+          name: sandbox-terraform-plan-${{ env.DEPLOY_ENVIRONMENT }}
           path: ${{ env.TF_WORKING_DIR }}/tfplan.txt
           retention-days: 14
-
-      # The stable marker lets repeated runs update one bot comment instead of
-      # filling the pull request with obsolete plans.
-      - name: Comment Terraform plan on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        env:
-          PLAN_PATH: ${{ env.TF_WORKING_DIR }}/tfplan.txt
-          PLAN_ENVIRONMENT: ${{ env.DEPLOY_ENVIRONMENT }}
-        with:
-          script: |
-            const fs = require('fs');
-            const marker = `<!-- terraform-plan-${process.env.PLAN_ENVIRONMENT} -->`;
-            const rawPlan = fs.readFileSync(process.env.PLAN_PATH, 'utf8');
-            const plan = rawPlan.length > 60000 ? `${rawPlan.slice(0, 60000)}\n\n[plan truncated]` : rawPlan;
-            const body = [
-              marker,
-              `### Terraform plan: \`${process.env.PLAN_ENVIRONMENT}\``,
-              '',
-              '<details><summary>Show plan</summary>',
-              '',
-              '```terraform',
-              plan,
-              '```',
-              '',
-              '</details>',
-            ].join('\n');
-
-            const { owner, repo } = context.repo;
-            const issue_number = context.issue.number;
-            const comments = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
-            const existing = comments.data.find(comment => comment.user.type === 'Bot' && comment.body.includes(marker));
-
-            if (existing) {
-              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body });
-            }
 
   deploy-main:
     name: Manual Apply, Deploy, or Roll Back Production

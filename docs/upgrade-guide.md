@@ -75,6 +75,23 @@ Generated output drift now requires regeneration. Informational checks no longer
 reduce category scores. The menu resumes saved setup and supports confirmed
 production deployment and rollback directly.
 
+## Pull Requests And Sandbox Planning
+
+All PRs now run without AWS credentials. Remove `:pull_request` and branch
+wildcards from the plan role's IAM trust policy; only the exact main-branch
+subject is supported. Updating workflow files alone does not update IAM.
+Replace the `Terraform Plan` required branch check with `Terraform Format and
+Validate`, retaining `Security and Terraform Validate`.
+
+The template repository requires no AWS settings for PR checks. Optional
+AWS-backed sandbox plans in deployment repositories require
+`ENABLE_AWS_PLAN=true`, a separate state bucket/lock table in `PLAN_BACKEND_JSON`,
+and manual dispatch from `main` with `mode=plan`, `environment=dev`.
+Other plan environments and refs are rejected before AWS access. The protected
+production job still plans against the deployment backend before applying.
+Follow [Manual sandbox plans](sandbox-plans.md) to configure the independent
+backend. Existing `github setup` commands retain these optional variables.
+
 ## Health And Production Evidence
 
 Public and IAM-protected `health` checks now require HTTP 2xx and reject

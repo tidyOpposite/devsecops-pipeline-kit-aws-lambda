@@ -953,7 +953,11 @@ class DeploymentWorkflowContractTests(unittest.TestCase):
         self.assertIn("--verify-intent", workflow)
         self.assertIn("-out=workload.tfplan", workflow)
         self.assertIn("apply -input=false -no-color workload.tfplan", workflow)
-        self.assertIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}", workflow)
+        concurrency = workflow.split("concurrency:\n", 1)[1].split("\nenv:\n", 1)[0]
+        self.assertIn("format('terraform-{0}', inputs.environment)", concurrency)
+        self.assertIn("format('pr-validation-{0}', github.event.pull_request.number)", concurrency)
+        self.assertNotIn("inputs.mode", concurrency)
+        self.assertNotIn("request_id", concurrency)
         self.assertIn("queue: max", workflow)
         self.assertIn("name: deployment-recovery-${{ github.run_attempt }}", workflow)
         self.assertNotIn("group: terraform-${{ github.event.inputs.environment || 'dev' }}-${{", workflow)

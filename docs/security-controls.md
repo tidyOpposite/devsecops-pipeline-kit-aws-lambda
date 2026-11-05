@@ -20,7 +20,7 @@ devsecops explain cors
 | --- | --- | --- | --- | --- | --- |
 | GitHub OIDC | `devsecops github setup --deploy-role-arn`, `--plan-role-arn` | AWS provider receives short-lived role credentials from GitHub Actions. | AWS jobs use `id-token: write` and `aws-actions/configure-aws-credentials`. | IAM OIDC provider and scoped plan/deploy role trust policies. | None. |
 | Production approval gate | `use_prod_approval_environment`, `devsecops compose`, presets | Enforced before Terraform apply starts. | Deploy and rollback verify required reviewers, prevention of self-review, disabled administrator bypass, and an exact `main` branch rule for `prod`. | The deploy role trusts the `prod` environment subject. | None. |
-| Separate AWS plan role | `use_separate_aws_plan_role`, `devsecops github setup --plan-role-arn` | Terraform plan uses backend access and refresh permissions. | Plan job fails if `AWS_PLAN_ROLE_TO_ASSUME_ARN` is missing; no deploy-role fallback. | Plan role should read state and describe resources without mutating workloads. | Trivy runs before AWS-backed planning. |
+| Separate AWS plan role | `use_separate_aws_plan_role`, `devsecops github setup --plan-role-arn` | Manual sandbox plans use an independent backend. | All PRs are credential-free; main-only sandbox plans require explicit opt-in and the plan role, with no deploy-role fallback. | Plan role reads sandbox state/resources without mutating workloads or accessing deployment state. | Trivy runs before AWS-backed planning. |
 | Terraform state lock | `backend.*`, `devsecops terraform bootstrap` | Rendered backend uses encrypted S3 state and DynamoDB locking. | Plan/deploy jobs run `terraform init` against the backend. | S3 stores state; DynamoDB serializes state writes. | Trivy scans Terraform configuration. |
 | Immutable Lambda image | `lambda_image_uri`, `devsecops image validate` | Root and Lambda module validation reject mutable `latest`/`bootstrap`; Lambda module precondition blocks apply without an image. | Deploy job requires `LAMBDA_IMAGE_URI` and rejects mutable tags. | Lambda is updated to the configured immutable image; rollback restores previous image. | Snyk scans the configured image when enabled. |
 | API authorization | `api_authorization_type`, `API_AUTHORIZATION_TYPE` | API Gateway routes default to `AWS_IAM`; `NONE` is accepted only when explicitly configured. | Health validation signs IAM-protected requests with SigV4; ZAP is skipped unless the API is public. | API Gateway requires IAM-signed requests by default. | Trivy scans API Gateway IaC. |
@@ -113,7 +113,7 @@ Use two AWS roles with GitHub OIDC:
 
 | Role secret | Used by | Guidance |
 | --- | --- | --- |
-| `AWS_PLAN_ROLE_TO_ASSUME_ARN` | Pull request and manual plan workflows | Read Terraform state, lock DynamoDB state, and describe resources for refresh. Avoid create/update/delete workload permissions. |
+| `AWS_PLAN_ROLE_TO_ASSUME_ARN` | Opt-in manual sandbox plans from `main` | Read isolated sandbox state, lock it, and describe sandbox resources. No PR access, deployment-state access or workload mutation. |
 | `AWS_ROLE_TO_ASSUME_ARN` | Manual production deploy workflow from `main` | Apply Terraform-managed resources, pass only the Lambda execution role, read configured images, and restore the previous Lambda image on rollback. |
 
 The plan role must not fall back to the deploy role. The tracked workflow

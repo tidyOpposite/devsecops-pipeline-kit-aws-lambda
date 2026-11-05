@@ -1950,7 +1950,15 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         ci_workflow = (ROOT_DIR / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         release_workflow = (ROOT_DIR / ".github/workflows/release.yml").read_text(encoding="utf-8")
 
-        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", deploy_workflow)
+        self.assertNotIn("github.event.pull_request.head.repo.full_name == github.repository", deploy_workflow)
+        plan = deploy_workflow.split("  terraform-plan:\n", 1)[1].split("  deploy-main:\n", 1)[0]
+        self.assertIn("github.event_name == 'workflow_dispatch'", plan)
+        self.assertIn("github.ref == 'refs/heads/main'", plan)
+        self.assertIn("vars.ENABLE_AWS_PLAN == 'true'", plan)
+        self.assertNotIn("pull_request", plan)
+        validation = deploy_workflow.split("  security-and-validate:\n", 1)[1].split("  terraform-plan:\n", 1)[0]
+        self.assertNotIn("id-token: write", validation)
+        self.assertNotIn("aws-actions/configure-aws-credentials", validation)
         self.assertIn("Require separate AWS plan role", deploy_workflow)
         self.assertIn("role-to-assume: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}", deploy_workflow)
         self.assertNotIn("AWS_PLAN_ROLE_TO_ASSUME_ARN || secrets.AWS_ROLE_TO_ASSUME_ARN", deploy_workflow)
@@ -1960,7 +1968,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertNotIn("if: env.ENABLE_HTTP_VALIDATION", deploy_workflow)
         self.assertIn("zaproxy/action-baseline", deploy_workflow)
         self.assertIn("id-token: write", deploy_workflow)
-        self.assertIn("pull-requests: write", deploy_workflow)
+        self.assertNotIn("pull-requests: write", deploy_workflow)
         self.assertIn("API_AUTHORIZATION_TYPE: ${{ vars.API_AUTHORIZATION_TYPE || 'AWS_IAM' }}", deploy_workflow)
         self.assertIn("--aws-sigv4", deploy_workflow)
         self.assertIn("env.API_AUTHORIZATION_TYPE == 'NONE'", deploy_workflow)
@@ -2013,12 +2021,12 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
             "required_pull_request_reviews": {"required_approving_review_count": 1},
             "required_status_checks": {
                 "contexts": ["Security and Terraform Validate"],
-                "checks": [{"context": "Terraform Plan"}],
+                "checks": [{"context": "Terraform Format and Validate"}],
             },
         }
         checks = cli.branch_protection_checks("main", True, protection)
         self.assertTrue(any(check.name == "Branch `main` protection" and check.status == "OK" for check in checks))
-        self.assertTrue(any(check.name == "Required check `Terraform Plan`" and check.status == "OK" for check in checks))
+        self.assertTrue(any(check.name == "Required check `Terraform Format and Validate`" and check.status == "OK" for check in checks))
 
     def test_branch_protection_checks_missing_required_status(self) -> None:
         protection = {
@@ -2027,7 +2035,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         }
         checks = cli.branch_protection_checks("main", True, protection)
         self.assertTrue(any(check.name == "Pull request requirement" and check.status == "WARN" for check in checks))
-        self.assertTrue(any(check.name == "Required check `Terraform Plan`" and check.status == "WARN" for check in checks))
+        self.assertTrue(any(check.name == "Required check `Terraform Format and Validate`" and check.status == "WARN" for check in checks))
 
     def test_actions_run_rows_and_failed_jobs(self) -> None:
         runs = cli.parse_gh_runs(

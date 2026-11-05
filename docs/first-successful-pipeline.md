@@ -154,9 +154,9 @@ before running the production preflight.
 
 Create separate AWS IAM roles using the [deploy and plan trust policies](../AWS_policy.md#deploy-trust-policy-example)
 for your deployment repository. The deploy role trusts the `prod` environment
-subject. The plan role trusts the PR subject and the exact branches you allow
-for manual plans. The workflow limits AWS-backed PR plans to branches within
-the same repository.
+subject. The plan role trusts only the exact `main` branch subject. All PRs
+run without AWS credentials. Optional manual sandbox plans require an isolated
+backend and explicit opt-in; see [Manual sandbox plans](sandbox-plans.md).
 
 In repository Settings > Environments > `prod`, configure at least one
 required reviewer, enable **Prevent self-review**, disable administrator

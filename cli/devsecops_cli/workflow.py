@@ -13,13 +13,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .config import PIPELINE_CONFIG_VARIABLE, config_shape_errors, deployment_config_sha256, production_policy_blockers, validate_config
+from .config import AWS_REGION_RE, PIPELINE_CONFIG_VARIABLE, config_shape_errors, deployment_config_sha256, production_policy_blockers, validate_config
 from .deploy import DEPLOYMENT_OPERATIONS, DeploymentIntent, is_commit_sha
 from .github import production_environment_check
 from .images import collect_image_preflight_checks, parse_ecr_image_uri
 from .models import ConfigValidationError
 from .paths import DIST_DIR, GENERATED_TFVARS
 from .render import backend_hcl, terraform_tfvars
+from .setup import is_backend_bucket_configured
 
 
 def decode_pipeline_config(payload: str, *, production: bool = False, image_uri: str = "") -> dict:
@@ -58,12 +59,13 @@ def decode_pipeline_config(payload: str, *, production: bool = False, image_uri:
 
 def write_workflow_inputs(
     root: Path, payload: str, *, intent: DeploymentIntent | None = None, actual_commit: str = "",
-    verify_only: bool = False,
+    verify_only: bool = False, plan_backend_payload: str | None = None,
 ) -> dict:
     """Validate the config and any required production protections before writing runner inputs."""
 
     if intent is None:
-        cfg = decode_pipeline_config(payload)
+        cfg = (decode_sandbox_plan_config(payload, plan_backend_payload)
+               if plan_backend_payload is not None else decode_pipeline_config(payload))
     else:
         cfg = verify_production_intent(payload, intent, actual_commit)
         if verify_only:
@@ -79,6 +81,27 @@ def write_workflow_inputs(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
     return cfg
+
+
+def decode_sandbox_plan_config(payload: str, backend_payload: str) -> dict:
+    """Use a separate backend for manually requested sandbox plans."""
+
+    cfg = decode_pipeline_config(payload)
+    try:
+        backend = json.loads(backend_payload)
+    except json.JSONDecodeError as exc:
+        raise ConfigValidationError("Configure PLAN_BACKEND_JSON before enabling sandbox plans.") from exc
+    if config_shape_errors(backend, cfg["backend"], "plan_backend."):
+        raise ConfigValidationError("PLAN_BACKEND_JSON must contain only bucket, key, region, lock_table and workspace_key_prefix strings.")
+    if (not is_backend_bucket_configured(backend["bucket"]) or not AWS_REGION_RE.fullmatch(backend["region"])
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{3,255}", backend["lock_table"])
+            or any(not value.strip() or value != value.strip()
+                   or any(ord(char) < 32 or ord(char) == 127 for char in value) for value in backend.values())):
+        raise ConfigValidationError("PLAN_BACKEND_JSON contains an invalid backend identifier or region.")
+    if backend["bucket"] == cfg["backend"]["bucket"].strip() or backend["lock_table"] == cfg["backend"]["lock_table"].strip():
+        raise ConfigValidationError("Sandbox plans require a separate state bucket and lock table from deployment.")
+    cfg["backend"] = backend
+    return decode_pipeline_config(json.dumps(cfg))
 
 
 def verify_production_intent(payload: str, intent: DeploymentIntent, actual_commit: str) -> dict:
@@ -107,12 +130,18 @@ def validate_workflow_request(environment: dict[str, str]) -> None:
     if mode not in DEPLOYMENT_OPERATIONS | {"plan"}:
         raise ConfigValidationError("Choose workflow mode plan, deploy, or rollback.")
     if target not in {"dev", "staging", "prod"}:
-        raise ConfigValidationError("Choose workflow environment dev, staging, or prod.")
+        raise ConfigValidationError("Choose dev for a sandbox plan or prod for deploy/rollback.")
+    if environment.get("GITHUB_REF") != "refs/heads/main":
+        raise ConfigValidationError(f"Mode {mode} requires branch main. Select main in the workflow form.")
+    if mode == "plan":
+        if target != "dev":
+            raise ConfigValidationError("Sandbox plan supports only environment dev. Production plans run inside the protected deploy job.")
+        if environment.get("ENABLE_AWS_PLAN") != "true":
+            raise ConfigValidationError("AWS plans are disabled. Configure the sandbox backend and explicitly set ENABLE_AWS_PLAN=true in the deployment repository.")
+        decode_sandbox_plan_config(environment.get(PIPELINE_CONFIG_VARIABLE, ""), environment.get("PLAN_BACKEND_JSON", ""))
     if mode in DEPLOYMENT_OPERATIONS:
         if target != "prod":
-            raise ConfigValidationError(f"Mode {mode} supports only environment prod. Choose mode plan for {target}.")
-        if environment.get("GITHUB_REF") != "refs/heads/main":
-            raise ConfigValidationError(f"Mode {mode} requires branch main. Select main in the workflow form.")
+            raise ConfigValidationError(f"Mode {mode} supports only environment prod. Use mode plan with dev for a sandbox preview.")
 
 
 def main() -> int:
@@ -121,6 +150,8 @@ def main() -> int:
         if "--validate-request" in sys.argv[1:]:
             print("Workflow operation, environment, and branch are supported.")
             return 0
+        if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
+            raise ConfigValidationError("Pull requests run credential-free validation only; AWS plans require a manual run from main.")
         mode = os.environ.get("DEPLOY_MODE", "")
         production = mode in DEPLOYMENT_OPERATIONS
         verify_only = "--verify-intent" in sys.argv[1:]
@@ -136,6 +167,7 @@ def main() -> int:
         cfg = write_workflow_inputs(
             Path.cwd(), os.environ.get(PIPELINE_CONFIG_VARIABLE, ""),
             intent=intent, actual_commit=os.environ.get("GITHUB_SHA", ""), verify_only=verify_only,
+            plan_backend_payload=os.environ.get("PLAN_BACKEND_JSON", "") if mode == "plan" else None,
         )
         if verify_only and intent is not None:
             summary = (

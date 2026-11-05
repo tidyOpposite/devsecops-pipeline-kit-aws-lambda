@@ -250,7 +250,7 @@ flowchart LR
 | Environments | `dev`, `staging`, and `prod` are mapped to Terraform workspaces. Resource names include the environment, for example `devsecops-pipeline-prod-lambda`. |
 | Terraform state | Remote S3 backend with DynamoDB locking. `terraform/bootstrap` creates KMS-encrypted state, encrypted locks, access logging, lifecycle retention, and public access blocks. |
 | IaC structure | Root Terraform composes modules in `terraform/modules`: `kms`, `storage`, `ecr`, `lambda`, and `api-gateway`. |
-| PR workflow | Pull requests run Terraform formatting, validation, and Trivy IaC scanning. Same-repository PRs also run an AWS-backed Terraform plan with the plan role and publish a PR comment plus artifact. |
+| PR workflow | All pull requests run Terraform formatting, backend-free validation, and Trivy IaC scanning without AWS credentials. AWS-backed sandbox plans require explicit opt-in and manual dispatch from reviewed `main`. |
 | Production deploy | `devsecops deploy prod` performs readiness and overlap checks, confirms the exact immutable image, and delegates `terraform apply` to a manual protected workflow run from `main`. Direct pushes do not deploy. |
 | Image deployment | The deploy workflow and Terraform require an explicit immutable `LAMBDA_IMAGE_URI` and reject mutable `latest` or `bootstrap` tags. |
 | API authorization | API Gateway routes default to `AWS_IAM`; health checks use SigV4 signing for protected production endpoints. |
@@ -265,7 +265,7 @@ pyproject.toml                      Root Python package metadata for `pipx insta
 cli/devsecops_cli/                  Modular CLI application, domains, and provider adapters
 cli/tests/                          Focused CLI unit tests
 dist/devsecops/                     Ignored CLI-generated helper artifacts
-.github/workflows/deploy.yml        CI, PR plan, production deploy, rollback, optional DAST
+.github/workflows/deploy.yml        PR validation, manual sandbox plan, production deploy, rollback, optional DAST
 .github/workflows/release.yml       Tag release workflow with wheel/sdist artifacts
 terraform/bootstrap/                One-time S3 backend and DynamoDB lock table
 terraform/modules/kms/              Customer-managed KMS key and alias
@@ -654,18 +654,20 @@ Repository variables:
 | `ENABLE_HTTP_VALIDATION` | `false` | Compatibility mirror of `enable_http_validation` in `PIPELINE_CONFIG_JSON`. Production requires `true` and checks `/health` after apply. |
 | `ENABLE_DAST` | `false` | When `true`, CI runs OWASP ZAP baseline scan only when `API_AUTHORIZATION_TYPE=NONE`. |
 | `PROD_APPROVAL_ENVIRONMENT` | `prod` | Compatibility posture value. Production jobs and CLI preflight verify `prod` reviewer and branch protections. |
+| `ENABLE_AWS_PLAN` | `false` | Explicit deployment-repository opt-in for manual sandbox plans from `main`. Preserved by `github setup`. |
+| `PLAN_BACKEND_JSON` | none | Independent sandbox backend: bucket, key, region, lock_table, workspace_key_prefix. Must use a different bucket and lock table from deployment. |
 
 Recommended branch protection for `main`:
 
 * Require pull requests before merging.
-* Require `Security and Terraform Validate` and `Terraform Plan` to pass.
-* Use pull requests from branches in this repository for automatic AWS-backed
-  Terraform plans. Pull requests from forks still run validation, but the
-  AWS-backed plan job is skipped.
+* Require `Security and Terraform Validate` and `Terraform Format and Validate`
+  to pass. Remove the former `Terraform Plan` requirement when upgrading.
+* All PRs use credential-free validation. Enable sandbox planning only in a
+  configured deployment repository; see [Manual sandbox plans](docs/sandbox-plans.md).
 * Direct pushes to `main` do not run this workflow.
 
-Use separate AWS roles for plan and deploy. The plan role should read backend
-state, acquire locks, and describe resources for Terraform refresh; it should
+Use separate AWS roles for plan and deploy. The plan role should read isolated
+sandbox state, acquire its locks, and describe sandbox resources; it should
 not mutate workload resources. The deploy role is reserved for approved manual
 production deploys from `main`. See [AWS IAM policy guidance](AWS_policy.md)
 and [Security controls and policy presets](docs/security-controls.md).
@@ -674,15 +676,16 @@ and [Security controls and policy presets](docs/security-controls.md).
 
 | Event | Environment | Terraform action | Deployment |
 | --- | --- | --- | --- |
-| Pull request to `main` from same repository | `dev` | `plan` only with `AWS_PLAN_ROLE_TO_ASSUME_ARN` | No apply. |
-| Pull request to `main` from fork | n/a | validation only | No AWS credentials. |
+| Pull request to `main`, internal branch or fork | n/a | backend-free validation and IaC scan | No AWS credentials or state access. |
 | Push to `main` | n/a | none | No workflow run. Maintainer pushes do not consume Actions minutes. |
-| Manual `workflow_dispatch`, `mode=plan` | selected `dev/staging/prod` | `plan` only | No apply. |
+| Manual `workflow_dispatch`, `mode=plan`, branch `main`, explicit opt-in | `dev` in independent sandbox backend | sandbox `plan` only | No apply or production state access. |
 | Manual `workflow_dispatch`, `mode=deploy`, `environment=prod`, branch `main` | `prod` | Plan and apply the saved plan | Verify the reviewed commit, configuration, and image digest. Deploy Lambda and verify `/health`, with optional scanning and automatic recovery. |
 | Manual `workflow_dispatch`, `mode=rollback`, `environment=prod`, branch `main` | `prod` | Targeted refresh-only | Restore the selected ECR digest on the existing Lambda, record it in Terraform state, and verify `/health`. |
 | Push tag `v*.*.*` | n/a | n/a | Publish GitHub Release from `docs/release-<tag>.md` or `CHANGELOG.md` with installer, wheel, source distribution, and `SHA256SUMS`. |
 
 Manual `deploy` and `rollback` require `environment=prod` and branch `main`.
+Manual sandbox `plan` requires `environment=dev`, branch `main`,
+`ENABLE_AWS_PLAN=true`, and valid `PLAN_BACKEND_JSON`.
 Unsupported combinations fail in the credential-free validation job with a
 message explaining the supported selection.
 

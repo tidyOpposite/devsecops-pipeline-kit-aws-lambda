@@ -107,7 +107,7 @@ def least_privilege_guidance() -> dict[str, Any]:
     return {
         "plan_role": {
             SENSITIVITY_LABEL: PLAN_ROLE_ENV_NAME,
-            "purpose": "Pull request and manual Terraform plans.",
+            "purpose": "Opt-in manual sandbox Terraform plans from main.",
             "allow": [
                 "Read Terraform state from the dedicated S3 backend bucket.",
                 "Acquire and release DynamoDB state locks.",
@@ -116,8 +116,8 @@ def least_privilege_guidance() -> dict[str, Any]:
             ],
             "avoid": [
                 "Do not grant broad create/update/delete permissions for workload resources.",
-                "Do not reuse AWS_ROLE_TO_ASSUME_ARN for pull request planning.",
-                "Do not allow forked pull requests to assume AWS roles.",
+                "Do not reuse AWS_ROLE_TO_ASSUME_ARN for sandbox planning.",
+                "Do not allow any pull request to assume AWS roles or access deployment state.",
             ],
         },
         "deploy_role": {

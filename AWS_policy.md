@@ -24,11 +24,11 @@ not create AWS IAM roles for you.
 
 | Role | Used by | Purpose |
 | --- | --- | --- |
-| `AWS_PLAN_ROLE_TO_ASSUME_ARN` | Pull request and manual plan workflows | Read Terraform state, acquire state lock, refresh resources, and produce plans. |
+| `AWS_PLAN_ROLE_TO_ASSUME_ARN` | Opt-in manual sandbox plans and OIDC verification from `main` | Read isolated sandbox state, acquire its lock, refresh sandbox resources, and produce a plan. |
 | `AWS_ROLE_TO_ASSUME_ARN` | Manual production deploy workflow from `main` | Apply Terraform, read configured images for optional scanning, and perform rollback. |
 
 Use separate roles. The workflow requires `AWS_PLAN_ROLE_TO_ASSUME_ARN` for
-Terraform plans and does not fall back to the deploy role. The plan role should
+sandbox plans and does not fall back to the deploy role. The plan role should
 not be able to mutate workload resources beyond Terraform backend locking.
 
 ## Least-Privilege Boundaries
@@ -37,7 +37,7 @@ Treat the two roles as different blast-radius controls:
 
 | Role | Allow | Avoid |
 | --- | --- | --- |
-| Plan role | Read Terraform state, acquire/release the DynamoDB lock, list/read backend objects, and describe existing resources for Terraform refresh. | Do not grant broad create, update, delete, `iam:PassRole`, Lambda update, or KMS administration permissions. Do not reuse the deploy role for pull request planning. |
+| Plan role | Read isolated sandbox state, acquire/release its DynamoDB lock, list/read its backend objects, and describe sandbox resources for Terraform refresh. | Deny access to deployment state. Do not grant broad create, update, delete, `iam:PassRole`, Lambda update, or KMS administration permissions. Do not grant AWS access to PR code. |
 | Deploy role | Apply Terraform-managed resources after the protected production environment gate, pass only the Terraform-managed Lambda execution role, read the configured ECR image, invoke the IAM-protected health route, and update Lambda image code for deploy/rollback. | Do not use for PR plans. Do not use unscoped account-wide permissions after project, environment, and resource names are stable. Do not store long-lived AWS keys in GitHub. |
 
 Generate `dist/devsecops/audit-report.json` with
@@ -102,12 +102,12 @@ See the [GitHub environment protection settings](https://docs.github.com/en/acti
 
 ## Plan Trust Policy Example
 
-The Terraform Plan job runs without a GitHub Environment. Same-repository
-pull requests use the `:pull_request` subject. For manual plans, dispatch
-`deploy.yml` from `main` with `mode=plan` to match the branch subject below.
-Add an exact branch subject to this list for each additional ref that you
-intend to allow for manual plans. The workflow skips AWS-backed plans for fork
-pull requests. The PR subject itself does not distinguish fork authors.
+The sandbox plan and plan-role verification jobs run without a GitHub
+Environment and accept only a manual dispatch from `main`. Trust only the
+exact main branch subject below. Remove any existing `:pull_request` subject,
+branch wildcard, or additional branch subjects from this role's trust policy.
+All PRs, including branches within the same repository, run without AWS
+credentials. Repository membership does not make PR code trusted.
 
 ```json
 {
@@ -122,10 +122,7 @@ pull requests. The PR subject itself does not distinguish fork authors.
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": [
-            "repo:<GITHUB_REPOSITORY_SUBJECT>:pull_request",
-            "repo:<GITHUB_REPOSITORY_SUBJECT>:ref:refs/heads/main"
-          ]
+          "token.actions.githubusercontent.com:sub": "repo:<GITHUB_REPOSITORY_SUBJECT>:ref:refs/heads/main"
         }
       }
     }
@@ -173,7 +170,11 @@ readiness posture display, but deploy-role fallback is disabled.
 
 ## Backend Access
 
-Both plan and deploy roles need access to the Terraform backend:
+Plan and deploy roles use different backends. Apply the following example
+separately with each role's own bucket, lock table and KMS key. The plan role
+must have no access to the deployment backend, including through inherited
+policies. Scope it to the sandbox account/resources where possible. Configure
+the sandbox backend using [Manual sandbox plans](docs/sandbox-plans.md).
 
 ```json
 {
@@ -332,15 +333,18 @@ The local deployment reviewer also needs these two ECR read actions and
 
 ## Plan Role Guidance
 
-The plan role needs backend access and enough read permissions for Terraform
-refresh. Start with read-only permissions for the services above, then add
+The plan role needs access to its isolated backend and enough read permissions
+for sandbox Terraform refresh. Start with read-only permissions scoped to
+sandbox resources, then add
 specific `kms:DescribeKey`, `iam:GetRole`, `iam:GetRolePolicy`,
 `lambda:GetFunctionConfiguration`, `ecr:DescribeRepositories`, and S3 listing
 permissions as Terraform reports missing access.
 
-Keep the role scoped to the [plan subjects](#plan-trust-policy-example) you
-intend to allow. Use a separate sandbox account and review process if you need
-AWS-backed plans for untrusted code.
+Keep the role scoped to the exact [main subject](#plan-trust-policy-example).
+The supplied workflow never executes unmerged PR code with AWS credentials.
+To evaluate a proposed change, review and merge it first, then explicitly
+dispatch the sandbox plan from `main`. Its separate state is a sandbox preview;
+the protected production job creates the actual production plan before apply.
 
 ## KMS Admin Role Name
 

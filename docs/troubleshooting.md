@@ -312,10 +312,12 @@ devsecops branch-doctor
 The expected required checks are:
 
 * `Security and Terraform Validate`
-* `Terraform Plan`
+* `Terraform Format and Validate`
 
 Configure them in the GitHub branch protection settings for `main` after the
 checks have run at least once.
+Remove the previous `Terraform Plan` requirement; AWS-backed sandbox plans are
+manual and cannot satisfy a PR merge requirement.
 
 ### Actions status cannot show workflow runs
 
@@ -509,10 +511,12 @@ devsecops status
 Check the IAM role trust policy:
 
 * `token.actions.githubusercontent.com:aud` must equal `sts.amazonaws.com`.
-* For deploys, `sub` should include `repo:<owner>/<repo>:ref:refs/heads/main`.
-* For PR plans, use `AWS_PLAN_ROLE_TO_ASSUME_ARN`; plan workflows do not fall
-  back to the deploy role.
-* Pull requests from forks intentionally do not run AWS-backed plans.
+* Deploy/rollback uses the protected `prod` environment subject:
+  `repo:<owner>/<repo>:environment:prod`.
+* The sandbox plan role trusts only `repo:<owner>/<repo>:ref:refs/heads/main`
+  (or the repository's corresponding immutable subject), without PR subjects
+  or branch wildcards. It never falls back to the deploy role.
+* All PRs intentionally run without AWS credentials, including internal branches.
 * Confirm the workflow has `permissions: id-token: write`.
 
 Then re-run:
@@ -522,15 +526,14 @@ devsecops gh-doctor
 devsecops branch-doctor
 ```
 
-### PR plan cannot access Terraform backend
+### Manual sandbox plan cannot access Terraform backend
 
-The plan role needs S3 access to the state bucket and DynamoDB access to the
-lock table. It also needs read permissions for resources Terraform refreshes.
-Use `AWS_policy.md` as the IAM review guide, then re-run the failing workflow.
-
-If the pull request comes from a fork, the AWS-backed Terraform plan job is
-skipped by design. Run the plan from a trusted branch or use a reviewed manual
-`workflow_dispatch` plan.
+Set `ENABLE_AWS_PLAN=true` and a valid `PLAN_BACKEND_JSON` in the deployment
+repository, with a bucket and lock table different from the deployment backend.
+The plan role needs access to those sandbox resources and their KMS key, not
+production state. Dispatch `mode=plan`, `environment=dev` from `main` only.
+See [Manual sandbox plans](sandbox-plans.md) and [IAM guidance](../AWS_policy.md).
+PRs require neither AWS secrets nor a configured backend.
 
 ## Terraform Backend
 

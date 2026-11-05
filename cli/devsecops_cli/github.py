@@ -41,7 +41,7 @@ SNYK_ENV_NAME = "SNYK_TOKEN"
 DEFAULT_BRANCH = "main"
 OIDC_WORKFLOW = "verify-oidc.yml"
 SETUP_IN_PROGRESS_CONFIG = '{"setup_in_progress":true}'
-REQUIRED_BRANCH_CHECKS = ["Security and Terraform Validate", "Terraform Plan"]
+REQUIRED_BRANCH_CHECKS = ["Security and Terraform Validate", "Terraform Format and Validate"]
 
 RUNBOOKS_DIR = "docs/runbooks"
 RUNBOOK_FAILED_PLAN = f"{RUNBOOKS_DIR}/failed-terraform-plan.md"

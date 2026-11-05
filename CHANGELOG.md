@@ -7,6 +7,11 @@ semantic versioning.
 
 ### Fixed
 
+* Keep all PR validation free of AWS credentials. Restrict optional AWS-backed
+  sandbox plans to explicit manual runs from `main`, `dev`, and a separate
+  backend; remove PR comments/write permission and PR subjects from IAM guidance.
+* Require credential-free `Terraform Format and Validate` for PR merges in
+  place of the former AWS-backed plan check.
 * Require HTTP 2xx without redirects in public and signed health checks, reuse
   that check in the deployment smoke step, and bound the step execution time.
 * Capture and validate the configured Terraform backend, `prod` workspace,

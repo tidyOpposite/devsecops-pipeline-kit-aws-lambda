@@ -49,7 +49,7 @@ Complete these before dispatching production:
 * Select the successful `CLI and Terraform CI` run for the candidate commit on
   `main`. Copy its run ID into `CI_RUN_ID` for the next section.
 * Use a real GitHub repository with `main` protected by pull requests and the
-  required `Security and Terraform Validate` and `Terraform Plan` checks.
+  required `Security and Terraform Validate` and `Terraform Format and Validate` checks.
 * Configure the GitHub Environment `prod` with required reviewers, self-review
   and administrator bypass disabled, and an exact `main` branch allowlist.
 * Configure [separate GitHub OIDC roles](../AWS_policy.md#deploy-trust-policy-example)

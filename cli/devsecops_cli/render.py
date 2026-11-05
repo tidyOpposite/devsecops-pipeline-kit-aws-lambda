@@ -180,7 +180,7 @@ def checklist(cfg: dict[str, Any]) -> str:
 
         - [ ] Require pull requests before merging to `main`
         - [ ] Require `Security and Terraform Validate`
-        - [ ] Require `Terraform Plan`
+        - [ ] Require `Terraform Format and Validate`
         """
     )
 

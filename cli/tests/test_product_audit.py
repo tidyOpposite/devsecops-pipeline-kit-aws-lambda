@@ -39,6 +39,11 @@ def customer_config():
     return cfg
 
 
+def sandbox_backend():
+    return {"bucket": "customer-sandbox-state", "region": "eu-central-1", "key": "sandbox.tfstate",
+            "lock_table": "customer-sandbox-locks", "workspace_key_prefix": "sandbox-environments"}
+
+
 def reviewed_environment(cfg, image=IMAGE_DIGEST):
     return {config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(cfg), "DEPLOY_MODE": "deploy",
             "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main", "DEPLOY_ENVIRONMENT": "prod",
@@ -148,7 +153,8 @@ class PipelineTransportTests(unittest.TestCase):
                 approval.assert_called_once_with(root, "owner/deployment")
                 approval.reset_mock()
                 cfg["enable_http_validation"] = False
-                os.environ.update(DEPLOY_MODE="plan", PIPELINE_CONFIG_JSON=config.pipeline_config_json(cfg))
+                os.environ.update(DEPLOY_MODE="plan", DEPLOY_ENVIRONMENT="dev", ENABLE_AWS_PLAN="true",
+                                  PLAN_BACKEND_JSON=json.dumps(sandbox_backend()), PIPELINE_CONFIG_JSON=config.pipeline_config_json(cfg))
                 self.assertEqual(workflow.main(), 0)
                 approval.assert_not_called()
                 self.assertTrue((root / cli.GENERATED_TFVARS).exists())
@@ -452,6 +458,16 @@ class AwsConstraintTests(unittest.TestCase):
 
 
 class WorkflowRequestTests(unittest.TestCase):
+    def test_documented_plan_trust_accepts_main_and_rejects_pr_and_other_refs(self):
+        policy = (ROOT / "AWS_policy.md").read_text().split("## Plan Trust Policy Example", 1)[1].split("```json\n", 1)[1].split("```", 1)[0]
+        condition = json.loads(policy)["Statement"][0]["Condition"]["StringEquals"]
+        self.assertEqual(condition["token.actions.githubusercontent.com:aud"], "sts.amazonaws.com")
+        subject = condition["token.actions.githubusercontent.com:sub"].replace("<GITHUB_REPOSITORY_SUBJECT>", "owner/repository")
+        self.assertEqual(subject, "repo:owner/repository:ref:refs/heads/main")
+        for denied in ("repo:owner/repository:pull_request", "repo:owner/repository:ref:refs/heads/feature",
+                       "repo:owner/repository:environment:prod", "repo:other/fork:ref:refs/heads/main"):
+            self.assertNotEqual(subject, denied)
+
     def test_runner_rejects_unsupported_manual_requests_before_configuration(self):
         cases = [
             ("deploy", "dev", "refs/heads/main", 1, "only environment prod"),
@@ -459,17 +475,20 @@ class WorkflowRequestTests(unittest.TestCase):
             ("deploy", "prod", "refs/heads/feature", 1, "requires branch main"),
             ("rollback", "prod", "refs/tags/v0.15.0", 1, "requires branch main"),
             ("destroy", "prod", "refs/heads/main", 1, "mode plan, deploy, or rollback"),
-            ("plan", "test", "refs/heads/main", 1, "environment dev, staging, or prod"),
+            ("plan", "test", "refs/heads/main", 1, "Choose dev for a sandbox"),
             ("plan", "dev", "refs/heads/main", 0, ""),
-            ("plan", "staging", "refs/heads/main", 0, ""),
-            ("plan", "prod", "refs/heads/main", 0, ""),
+            ("plan", "staging", "refs/heads/main", 1, "only environment dev"),
+            ("plan", "prod", "refs/heads/main", 1, "only environment dev"),
+            ("plan", "dev", "refs/heads/feature", 1, "requires branch main"),
             ("deploy", "prod", "refs/heads/main", 0, ""),
             ("rollback", "prod", "refs/heads/main", 0, ""),
         ]
         for mode, target, ref, code, error in cases:
             with self.subTest(mode=mode, target=target, ref=ref), tempfile.TemporaryDirectory() as directory:
                 environment = {"PYTHONPATH": str(ROOT / "cli"), "GITHUB_EVENT_NAME": "workflow_dispatch",
-                               "GITHUB_REF": ref, "DEPLOY_MODE": mode, "DEPLOY_ENVIRONMENT": target}
+                               "GITHUB_REF": ref, "DEPLOY_MODE": mode, "DEPLOY_ENVIRONMENT": target,
+                               "ENABLE_AWS_PLAN": "true", "PLAN_BACKEND_JSON": json.dumps(sandbox_backend()),
+                               "PIPELINE_CONFIG_JSON": config.pipeline_config_json(customer_config())}
                 result = subprocess.run(
                     [sys.executable, "-m", "devsecops_cli.workflow", "--validate-request"],
                     cwd=directory, env=environment, text=True, capture_output=True, check=False,
@@ -478,6 +497,49 @@ class WorkflowRequestTests(unittest.TestCase):
                 if error:
                     self.assertIn(error, result.stderr)
                 self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_sandbox_plan_requires_opt_in_and_isolated_valid_backend_before_writes(self):
+        cfg = customer_config()
+        environment = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main",
+                       "DEPLOY_MODE": "plan", "DEPLOY_ENVIRONMENT": "dev", "ENABLE_AWS_PLAN": "true",
+                       "PLAN_BACKEND_JSON": json.dumps(sandbox_backend()), "PIPELINE_CONFIG_JSON": config.pipeline_config_json(cfg)}
+        for overrides in (
+            {"ENABLE_AWS_PLAN": "false"}, {"PLAN_BACKEND_JSON": ""},
+            {"PLAN_BACKEND_JSON": json.dumps(cfg["backend"])},
+            *({"PLAN_BACKEND_JSON": json.dumps(sandbox_backend() | change)} for change in (
+                {"lock_table": cfg["backend"]["lock_table"]}, {"bucket": "invalid bucket"}, {"bucket": " " + cfg["backend"]["bucket"]},
+                {"region": "bad-region"}, {"lock_table": ""}, {"key": ""}, {"workspace_key_prefix": "bad\nvalue"},
+                {"access_key": "must-not-be-accepted"},
+            )),
+        ):
+            with self.subTest(overrides=overrides), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with patch.dict(os.environ, environment | overrides, clear=True), patch.object(workflow.Path, "cwd", return_value=root), \
+                     redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), patch.object(workflow, "production_environment_check") as provider:
+                    self.assertEqual(workflow.main(), 1)
+                self.assertEqual(list(root.iterdir()), [])
+                provider.assert_not_called()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.dict(os.environ, environment, clear=True), patch.object(workflow.Path, "cwd", return_value=root), redirect_stdout(io.StringIO()):
+                self.assertEqual(workflow.main(), 0)
+            backend = (root / "dist/devsecops/backend.hcl").read_text()
+            self.assertIn(sandbox_backend()["bucket"], backend)
+            self.assertIn(sandbox_backend()["lock_table"], backend)
+            self.assertNotIn(cfg["backend"]["bucket"], backend)
+            self.assertNotIn(cfg["backend"]["lock_table"], backend)
+
+    def test_pull_requests_need_no_deployment_settings_and_cannot_materialize_aws_inputs(self):
+        for fork in (False, True):
+            with self.subTest(fork=fork), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                environment = {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/1/merge",
+                               "GITHUB_HEAD_REF": "external" if fork else "internal"}
+                workflow.validate_workflow_request(environment)
+                with patch.dict(os.environ, environment, clear=True), patch.object(workflow.Path, "cwd", return_value=root), \
+                     redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                    self.assertEqual(workflow.main(), 1)
+                self.assertEqual(list(root.iterdir()), [])
 
 
 class ReadinessRegressionTests(unittest.TestCase):
