@@ -658,6 +658,15 @@ and [Security controls and policy presets](docs/security-controls.md).
 | Manual `workflow_dispatch`, `mode=rollback`, `environment=prod`, branch `main` | `prod` | Targeted refresh-only | Restore the selected ECR digest on the existing Lambda, record it in Terraform state, and verify `/health`. |
 | Push tag `v*.*.*` | n/a | n/a | Publish GitHub Release from `docs/release-<tag>.md` or `CHANGELOG.md` with installer, wheel, source distribution, and `SHA256SUMS`. |
 
+Manual `deploy` and `rollback` require `environment=prod` and branch `main`.
+Unsupported combinations fail in the credential-free validation job with a
+message explaining the supported selection.
+
+`devsecops deploy status` reports success after checking the production job
+and its apply/health or restore steps. Skipped and neutral runs return an
+error. JSON output includes `deployment_result` and `deployment_detail`
+alongside the raw workflow conclusion.
+
 ## Deployment Flow
 
 For a command-by-command walkthrough with expected output, see

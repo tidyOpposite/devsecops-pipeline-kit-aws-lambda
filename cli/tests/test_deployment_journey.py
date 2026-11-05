@@ -6,6 +6,7 @@ workflow contract without dispatching a workflow or contacting cloud services.
 """
 
 import argparse
+import copy
 import hashlib
 import io
 import json
@@ -99,7 +100,8 @@ def workflow_run(
                 "startedAt": "2026-08-29T10:00:00Z",
                 "completedAt": "2026-08-29T10:05:00Z",
                 "steps": [{"name": step, "conclusion": conclusion} for step in (
-                    "Terraform apply workload with configured Lambda image", "Smoke test Lambda health endpoint",
+                    ("Terraform apply workload with configured Lambda image", "Smoke test Lambda health endpoint")
+                    if operation == "deploy" else ("Restore requested Lambda image",)
                 )],
             }
         ],
@@ -636,7 +638,9 @@ class DeploymentCorrelationTests(unittest.TestCase):
                 self.assertEqual(payload["request_id"], REQUEST_ID)
 
                 runs.return_value = ([unrelated, matched], None)
-                run, _, error = cli.resolve_deployment_run(root)
+                with patch.object(cli, "view_deployment_run", return_value=(matched, None)) as view:
+                    run, _, error = cli.resolve_deployment_run(root)
+                view.assert_called_once_with(root, "56", repository="acme/pipeline")
                 self.assertIsNone(error)
                 self.assertEqual(run["databaseId"], 56)
                 self.assertEqual(deploy.latest_deployment(root)["run_id"], "56")
@@ -667,6 +671,76 @@ class DeploymentCorrelationTests(unittest.TestCase):
             source["run_attempt"] = 2
             with self.assertRaisesRegex(cli.ConfigValidationError, "successful source run and attempt"):
                 cli.read_deployment_recovery_point(ROOT_DIR, workflow_run())
+
+
+class DeploymentResultTests(unittest.TestCase):
+    def test_status_requires_the_production_job_and_the_selected_operation(self) -> None:
+        valid = workflow_run()
+        rollback = workflow_run(operation="rollback")
+        skipped_job = copy.deepcopy(valid)
+        skipped_job["jobs"][0]["conclusion"] = "skipped"
+        skipped_apply = copy.deepcopy(valid)
+        skipped_apply["jobs"][0]["steps"][0]["conclusion"] = "skipped"
+        skipped_health = copy.deepcopy(valid)
+        skipped_health["jobs"][0]["steps"][1]["conclusion"] = "skipped"
+        skipped_restore = copy.deepcopy(rollback)
+        skipped_restore["jobs"][0]["steps"][0]["conclusion"] = "skipped"
+        cases = [
+            ("deploy", valid, 0, "success"),
+            ("rollback", rollback, 0, "success"),
+            ("queued", workflow_run(status="queued", conclusion=""), 0, "pending"),
+            ("skipped workflow", workflow_run(conclusion="skipped"), 1, "failed"),
+            ("neutral workflow", workflow_run(conclusion="neutral"), 1, "failed"),
+            ("missing job", dict(valid, jobs=[]), 1, "failed"),
+            ("missing job details", {key: value for key, value in valid.items() if key != "jobs"}, 1, "failed"),
+            ("skipped job", skipped_job, 1, "failed"),
+            ("skipped apply", skipped_apply, 1, "failed"),
+            ("skipped health", skipped_health, 1, "failed"),
+            ("skipped restore", skipped_restore, 1, "failed"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, run, code, result in cases:
+                with self.subTest(name=name), patch.object(cli, "repo_root", return_value=root), patch.object(
+                    cli, "view_deployment_run", return_value=(run, None),
+                ), patch.object(cli, "inspect_active_lambda_image", return_value=("", None)), redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(cli.main(["deploy", "status", "--run-id", "42", "--format", "json"]), code)
+                payload = json.loads(output.getvalue())
+                self.assertEqual(payload["deployment_result"], result)
+                self.assertTrue(payload["deployment_detail"])
+                self.assertEqual(payload["run"]["conclusion"], run["conclusion"])
+
+    def test_explicit_plan_is_rejected_and_discovery_fetches_job_details(self) -> None:
+        plan = workflow_run(operation="plan")
+        invalid = workflow_run()
+        invalid["jobs"][0]["conclusion"] = "skipped"
+        with tempfile.TemporaryDirectory() as directory, patch.object(cli, "repo_root", return_value=Path(directory)), patch.object(
+            cli, "inspect_active_lambda_image", return_value=("", None),
+        ) as inspect:
+            with patch.object(cli, "view_deployment_run", return_value=(plan, None)), redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(cli.main(["deploy", "status", "--run-id", "42"]), 1)
+                self.assertIn("does not belong", output.getvalue())
+            inspect.assert_not_called()
+            candidate = {key: value for key, value in invalid.items() if key != "jobs"}
+            with patch.object(cli, "list_deployment_runs", return_value=([plan, candidate], None)), patch.object(
+                cli, "view_deployment_run", return_value=(invalid, None),
+            ) as view, redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(cli.main(["deploy", "status", "--format", "json"]), 1)
+            view.assert_called_once_with(Path(directory), "42")
+            self.assertEqual(json.loads(output.getvalue())["deployment_result"], "failed")
+
+    def test_dispatch_watch_fails_when_github_reports_success_with_a_skipped_job(self) -> None:
+        intent, _ = fixture_intent(IMAGE)
+        skipped = workflow_run(request_id=REQUEST_ID)
+        skipped["jobs"][0]["conclusion"] = "skipped"
+        response = subprocess.CompletedProcess(["gh"], 0, skipped["url"], "")
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            cli, "list_deployment_runs", return_value=([], None),
+        ), patch.object(cli, "dispatch_deployment_workflow", return_value=response), patch.object(
+            cli, "watch_deployment_run", return_value=subprocess.CompletedProcess(["gh"], 0, "", ""),
+        ), patch.object(cli, "view_deployment_run", return_value=(skipped, None)), redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(cli.dispatch_cloud_deployment(Path(directory), "deploy", intent, "", watch=True, interval=3), 1)
+        self.assertIn("production job did not complete successfully", output.getvalue())
 
 
 class EcrImageVerificationTests(unittest.TestCase):

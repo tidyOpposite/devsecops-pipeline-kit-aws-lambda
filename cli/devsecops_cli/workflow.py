@@ -95,8 +95,32 @@ def verify_production_intent(payload: str, intent: DeploymentIntent, actual_comm
     return cfg
 
 
+def validate_workflow_request(environment: dict[str, str]) -> None:
+    """Reject unsupported manual operations before configuration or provider access."""
+
+    if environment.get("GITHUB_EVENT_NAME") == "pull_request":
+        return
+    if environment.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
+        raise ConfigValidationError("Use a pull request or a manual workflow_dispatch to run this workflow.")
+    mode = environment.get("DEPLOY_MODE", "")
+    target = environment.get("DEPLOY_ENVIRONMENT", "")
+    if mode not in DEPLOYMENT_OPERATIONS | {"plan"}:
+        raise ConfigValidationError("Choose workflow mode plan, deploy, or rollback.")
+    if target not in {"dev", "staging", "prod"}:
+        raise ConfigValidationError("Choose workflow environment dev, staging, or prod.")
+    if mode in DEPLOYMENT_OPERATIONS:
+        if target != "prod":
+            raise ConfigValidationError(f"Mode {mode} supports only environment prod. Choose mode plan for {target}.")
+        if environment.get("GITHUB_REF") != "refs/heads/main":
+            raise ConfigValidationError(f"Mode {mode} requires branch main. Select main in the workflow form.")
+
+
 def main() -> int:
     try:
+        validate_workflow_request(os.environ)
+        if "--validate-request" in sys.argv[1:]:
+            print("Workflow operation, environment, and branch are supported.")
+            return 0
         mode = os.environ.get("DEPLOY_MODE", "")
         production = mode in DEPLOYMENT_OPERATIONS
         verify_only = "--verify-intent" in sys.argv[1:]

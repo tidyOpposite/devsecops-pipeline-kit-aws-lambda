@@ -56,10 +56,12 @@ from .deploy import (
     DEPLOYMENT_WORKFLOW,
     DEPLOYMENT_WORKFLOW_NAME,
     DEPLOYMENT_WORKFLOW_PATH,
+    PRODUCTION_JOB,
     DeploymentIntent,
     DeploymentStateError,
     active_deployment_runs,
     deployment_exit_code,
+    deployment_result,
     deployment_job_rows,
     deployment_state_path,
     deployment_status_payload,
@@ -3058,6 +3060,19 @@ def resolve_deployment_run(
 
     record = latest_deployment(root, run_id)
     selected_run_id = str(run_id or (record or {}).get("run_id") or "")
+    if not selected_run_id:
+        if record:
+            candidate = find_deployment_request(root, record, attempts)
+            if not candidate:
+                return {}, record, None
+        else:
+            runs, error = list_deployment_runs(root)
+            if error:
+                return {}, None, error
+            candidate = newest_deployment_run(runs)
+            if candidate is None:
+                return {}, None, "No production deployment run was found. Start one with `devsecops deploy prod`."
+        selected_run_id = str(candidate.get("databaseId") or "")
     if selected_run_id:
         if not re.fullmatch(r"[1-9][0-9]*", selected_run_id):
             return {}, record, "A GitHub Actions run ID must be a positive integer."
@@ -3074,16 +3089,7 @@ def resolve_deployment_run(
         # Old journals could correlate to a different run. The GitHub result
         # is still useful on its own, without the unverified journal fields.
         return run, None, None
-    if record:
-        return find_deployment_request(root, record, attempts), record, None
-
-    runs, error = list_deployment_runs(root)
-    if error:
-        return {}, None, error
-    run = newest_deployment_run(runs)
-    if run is None:
-        return {}, None, "No production deployment run was found. Start one with `devsecops deploy prod`."
-    return run, None, None
+    return {}, record, "The deployment run has no GitHub Actions run ID."
 
 
 def confirm_cloud_deployment(operation: str) -> bool:
@@ -3244,6 +3250,8 @@ def dispatch_cloud_deployment(
             or refreshed.get("status") != "completed"):
         print(warn("The requested run has no verified conclusion."))
         return EXIT_VALIDATION_FAILED
+    result, detail = deployment_result(refreshed)
+    print(ok(detail) if result == "success" else fail(detail))
     return deployment_exit_code(refreshed)
 
 
@@ -3299,13 +3307,7 @@ def read_deployment_recovery_point(root: Path, run: dict[str, Any]) -> dict[str,
     operation, _ = deployment_title(str(run.get("displayTitle") or ""))
     run_url = str(run.get("url") or "")
     identity = re.fullmatch(r"https://github\.com/([\w.-]+/[\w.-]+)/actions/runs/([1-9][0-9]*)", run_url)
-    jobs = run.get("jobs") or []
-    production = next((job for job in jobs if job.get("name") == "Manual Apply, Deploy, or Roll Back Production"), {})
-    steps = {step.get("name"): step.get("conclusion") for step in production.get("steps", [])}
-    if (not is_deployment_run(run) or operation != "deploy" or run.get("status") != "completed"
-            or run.get("conclusion") != "success" or production.get("conclusion") != "success"
-            or steps.get("Terraform apply workload with configured Lambda image") != "success"
-            or steps.get("Smoke test Lambda health endpoint") != "success"
+    if (deployment_result(run)[0] != "success" or operation != "deploy"
             or not identity or identity[2] != run_id or not re.fullmatch(r"[1-9][0-9]*", attempt)
             or not is_commit_sha(str(run.get("headSha") or ""))):
         raise ConfigValidationError(
@@ -3442,8 +3444,8 @@ def emit_deployment_status(
     status = str(run.get("status") or "unknown")
     conclusion = str(run.get("conclusion") or "")
     if output_format == "compact":
-        result = conclusion or status
-        print(f"prod {operation} | run {run_id or '?'} | {status} | {result}")
+        print(f"prod {operation} | run {run_id or '?'} | {status} | {payload['deployment_result']}")
+        print(payload["deployment_detail"])
         if run.get("url"):
             print(str(run["url"]))
         return
@@ -3455,6 +3457,8 @@ def emit_deployment_status(
             f"Operation: {operation}",
             f"Status: {status}",
             f"Conclusion: {conclusion or '(pending)'}",
+            f"Deployment result: {payload['deployment_result']}",
+            payload["deployment_detail"],
             f"Ref: {run.get('headBranch') or DEPLOYMENT_REF} ({str(run.get('headSha') or '')[:12] or 'unknown SHA'})",
             f"Requested image: {(record or {}).get('requested_image_uri') or '(not recorded locally)'}",
             f"Previous image: {payload['previous_image_uri'] or '(no verified recovery digest)'}",
@@ -3474,7 +3478,7 @@ def emit_deployment_status(
     print()
     if status != "completed":
         print(f"Next command: devsecops deploy status --run-id {run_id} --watch")
-    elif conclusion == "success":
+    elif payload["deployment_result"] == "success":
         print("Next command: devsecops health --aws-sigv4")
     else:
         print(f"Next command: devsecops deploy logs --run-id {run_id} --failed")
@@ -3565,9 +3569,10 @@ def cmd_deploy_status(args: argparse.Namespace) -> int:
 
     cfg = load_config(root)
     active_image_uri, active_image_error = inspect_active_lambda_image(root, cfg)
-    if run.get("conclusion") == "success" and any(
+    if deployment_result(run)[0] == "success" and any(
         step.get("name") == "Upload deployment recovery point" and step.get("conclusion") == "success"
-        for job in run.get("jobs") or [] for step in job.get("steps") or []
+        for job in run.get("jobs") or [] if job.get("name") == PRODUCTION_JOB
+        for step in job.get("steps") or []
     ):
         try:
             point = read_deployment_recovery_point(root, run)
@@ -3620,10 +3625,9 @@ def cmd_deploy_logs(args: argparse.Namespace) -> int:
             print(warn("GitHub returned no log lines for this scope."))
     print()
     status = str(run.get("status") or "")
-    conclusion = str(run.get("conclusion") or "")
     if status != "completed":
         next_command = f"devsecops deploy status --run-id {run_id} --watch"
-    elif conclusion == "success":
+    elif deployment_result(run)[0] == "success":
         next_command = "devsecops health --aws-sigv4"
     else:
         next_command = "devsecops deploy rollback --image-uri <known-good-immutable-ecr-image-uri> --dry-run"

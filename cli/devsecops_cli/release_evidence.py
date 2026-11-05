@@ -13,7 +13,7 @@ from typing import Any
 
 from . import VERSION
 from .config import config_shape_errors, validate_config
-from .deploy import deployment_title, is_commit_sha
+from .deploy import PRODUCTION_JOB, deployment_title, is_commit_sha
 from .images import parse_ecr_image_uri
 from .render import checklist, github_setup_script, github_variables, terraform_tfvars
 
@@ -28,7 +28,6 @@ PRODUCTION_EVIDENCE_REQUIRED_FILES = [
 ]
 WSL2_EVIDENCE_REQUIRED_FILES = ["wsl2-transcript.txt"]
 MAX_EVIDENCE_FILE_BYTES = 8 * 1024 * 1024
-PRODUCTION_JOB = "Manual Apply, Deploy, or Roll Back Production"
 RECOVERY_STEP = "Roll back Lambda image on failed deployment validation"
 HEALTH_STEP = "Smoke test Lambda health endpoint"
 MANUAL_RECOVERY_STEP = "Restore requested Lambda image"

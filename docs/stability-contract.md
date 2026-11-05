@@ -70,7 +70,7 @@ without a deprecation window.
 | `config` | `devsecops config validate --format json` | `kind`, `schema_version`, `score`, `overall_breakdown_score`, `breakdown`, `gaps`, `checks` |
 | `status` | `devsecops status --format json` | `kind`, `schema_version`, `score`, `breakdown`, `gaps`, `checks`, `context`, `next_action` |
 | `image-validation` | `devsecops image validate --format json` | `kind`, `schema_version`, `score`, `breakdown`, `gaps`, `checks`, `context` |
-| `deployment-status` | `devsecops deploy status --format json` | `kind`, `schema_version`, `environment`, `operation`, `request_id`, `run_confirmation`, `requested_image_uri`, `previous_image_uri`, `active_image_uri`, `run`, `jobs` |
+| `deployment-status` | `devsecops deploy status --format json` | `kind`, `schema_version`, `environment`, `operation`, `deployment_result`, `deployment_detail`, `request_id`, `run_confirmation`, `requested_image_uri`, `previous_image_uri`, `active_image_uri`, `run`, `jobs` |
 | `readiness` | `devsecops readiness --format json` (compatibility alias) | Existing legacy keys remain stable. |
 | `preflight` | `devsecops preflight --format json` (compatibility alias) | Existing legacy keys remain stable. |
 | `health` | `devsecops health --format json` | `kind`, `schema_version`, `score`, `overall_breakdown_score`, `breakdown`, `gaps`, `checks`, `context` |
@@ -93,6 +93,14 @@ They use exit code 1 rather than an unexpected-runtime code.
 `--pre-deploy` and `--deep` are mutually exclusive. Compact status leaves
 provider checks unverified. Informational checks are excluded from both scores
 and gaps. Use `criteria --strict` to verify release evidence.
+
+`deploy status` reports `deployment_result` as `unconfirmed`, `pending`,
+`success`, or `failed`. A completed operation succeeds only when the
+workflow, production job, and required apply/health or restore steps succeeded.
+`skipped`, `neutral`, and missing production results return exit code 1.
+An observation of a pending run returns 0. With `--watch`, an unconfirmed or
+incomplete run returns a non-zero code. The raw GitHub conclusion remains in
+`run.conclusion`.
 
 ## Deprecation Policy
 

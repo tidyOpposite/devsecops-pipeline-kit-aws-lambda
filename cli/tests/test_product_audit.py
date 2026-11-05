@@ -38,6 +38,7 @@ def customer_config():
 
 def reviewed_environment(cfg, image=IMAGE_DIGEST):
     return {config.PIPELINE_CONFIG_VARIABLE: config.pipeline_config_json(cfg), "DEPLOY_MODE": "deploy",
+            "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main", "DEPLOY_ENVIRONMENT": "prod",
             "GITHUB_REPOSITORY": "owner/deployment", "DISPATCH_IMAGE_URI": image, "GITHUB_SHA": COMMIT_SHA,
             "DISPATCH_COMMIT_SHA": COMMIT_SHA, "DISPATCH_CONFIG_SHA256": config.deployment_config_sha256(cfg, image)}
 
@@ -219,6 +220,35 @@ class PipelineTransportTests(unittest.TestCase):
         payload = next(c for c in checks if c.name.endswith(config.PIPELINE_CONFIG_VARIABLE))
         self.assertTrue(payload.scored)
         self.assertEqual(payload.status, "WARN")
+
+
+class WorkflowRequestTests(unittest.TestCase):
+    def test_runner_rejects_unsupported_manual_requests_before_configuration(self):
+        cases = [
+            ("deploy", "dev", "refs/heads/main", 1, "only environment prod"),
+            ("rollback", "staging", "refs/heads/main", 1, "only environment prod"),
+            ("deploy", "prod", "refs/heads/feature", 1, "requires branch main"),
+            ("rollback", "prod", "refs/tags/v0.15.0", 1, "requires branch main"),
+            ("destroy", "prod", "refs/heads/main", 1, "mode plan, deploy, or rollback"),
+            ("plan", "test", "refs/heads/main", 1, "environment dev, staging, or prod"),
+            ("plan", "dev", "refs/heads/main", 0, ""),
+            ("plan", "staging", "refs/heads/main", 0, ""),
+            ("plan", "prod", "refs/heads/main", 0, ""),
+            ("deploy", "prod", "refs/heads/main", 0, ""),
+            ("rollback", "prod", "refs/heads/main", 0, ""),
+        ]
+        for mode, target, ref, code, error in cases:
+            with self.subTest(mode=mode, target=target, ref=ref), tempfile.TemporaryDirectory() as directory:
+                environment = {"PYTHONPATH": str(ROOT / "cli"), "GITHUB_EVENT_NAME": "workflow_dispatch",
+                               "GITHUB_REF": ref, "DEPLOY_MODE": mode, "DEPLOY_ENVIRONMENT": target}
+                result = subprocess.run(
+                    [sys.executable, "-m", "devsecops_cli.workflow", "--validate-request"],
+                    cwd=directory, env=environment, text=True, capture_output=True, check=False,
+                )
+                self.assertEqual(result.returncode, code, result.stderr)
+                if error:
+                    self.assertIn(error, result.stderr)
+                self.assertEqual(list(Path(directory).iterdir()), [])
 
 
 class ReadinessRegressionTests(unittest.TestCase):

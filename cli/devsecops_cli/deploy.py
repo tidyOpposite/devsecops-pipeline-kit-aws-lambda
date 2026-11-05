@@ -26,6 +26,7 @@ DEPLOYMENT_STATE_HISTORY_LIMIT = 50
 DEPLOYMENT_WORKFLOW = "deploy.yml"
 DEPLOYMENT_WORKFLOW_PATH = ".github/workflows/deploy.yml"
 DEPLOYMENT_WORKFLOW_NAME = "Secure Serverless DevSecOps Pipeline"
+PRODUCTION_JOB = "Manual Apply, Deploy, or Roll Back Production"
 DEPLOYMENT_REF = "main"
 DEPLOYMENT_ENVIRONMENT = "prod"
 DEPLOYMENT_RUN_JSON_FIELDS = (
@@ -297,8 +298,7 @@ def is_deployment_run(run: dict[str, Any]) -> bool:
         return False
     if str(run.get("headBranch") or "") != DEPLOYMENT_REF:
         return False
-    workflow_name = str(run.get("workflowName") or "")
-    if workflow_name and workflow_name != DEPLOYMENT_WORKFLOW_NAME:
+    if run.get("workflowName") != DEPLOYMENT_WORKFLOW_NAME:
         return False
     return bool(deployment_title(str(run.get("displayTitle") or ""))[0])
 
@@ -380,11 +380,14 @@ def deployment_status_payload(
     record = record or {}
     title_operation, request_id = deployment_title(str(run.get("displayTitle") or ""))
     operation = record.get("operation") or title_operation
+    result, detail = deployment_result(run)
     return {
         "kind": "deployment-status",
         "schema_version": 1,
         "environment": record.get("environment") or DEPLOYMENT_ENVIRONMENT,
         "operation": operation,
+        "deployment_result": result,
+        "deployment_detail": detail,
         "request_id": record.get("request_id") or request_id,
         "run_confirmation": (
             "confirmed" if run else "dispatch response unconfirmed" if record.get("dispatch_acknowledged") == "false"
@@ -422,18 +425,49 @@ def deployment_status_payload(
     }
 
 
+def deployment_result(run: dict[str, Any]) -> tuple[str, str]:
+    """Require production job and operation evidence before reporting success."""
+
+    if not run:
+        return "unconfirmed", "Waiting for GitHub to confirm the workflow run."
+    if not is_deployment_run(run):
+        return "failed", "This run does not identify a production deploy or rollback from main."
+    if run.get("status") in ACTIVE_RUN_STATUSES:
+        return "pending", "The production operation has not reached a conclusion."
+    if run.get("status") != "completed":
+        return "failed", "The workflow status could not be verified."
+    if run.get("conclusion") != "success":
+        return "failed", f"The workflow concluded with {run.get('conclusion') or 'an unknown result'}."
+
+    jobs = run.get("jobs")
+    if not isinstance(jobs, list):
+        return "failed", "The workflow did not report its production job."
+    production_jobs = [job for job in jobs if isinstance(job, dict) and job.get("name") == PRODUCTION_JOB]
+    if len(production_jobs) != 1:
+        return "failed", "A unique production job result was not reported."
+    production = production_jobs[0]
+    if production.get("status") != "completed" or production.get("conclusion") != "success":
+        return "failed", f"The production job did not complete successfully ({production.get('conclusion') or 'unknown'})."
+    operation, _ = deployment_title(str(run["displayTitle"]))
+    required_steps = (
+        ("Terraform apply workload with configured Lambda image", "Smoke test Lambda health endpoint")
+        if operation == "deploy" else ("Restore requested Lambda image",)
+    )
+    steps = production.get("steps")
+    if not isinstance(steps, list):
+        return "failed", "The production job did not report its operation steps."
+    for name in required_steps:
+        matches = [step for step in steps if isinstance(step, dict) and step.get("name") == name]
+        if len(matches) != 1 or matches[0].get("conclusion") != "success":
+            return "failed", f"The required production step '{name}' did not complete successfully."
+    detail = "Production apply and health validation succeeded." if operation == "deploy" else "Production image restore and validation succeeded."
+    return "success", detail
+
+
 def deployment_exit_code(run: dict[str, Any]) -> int:
-    """Map a completed unsuccessful workflow to a failing CLI exit status.
+    """Keep pending observations successful and fail incomplete final results."""
 
-    Queued and in-progress runs remain successful observations; their eventual
-    outcome is handled by the watch command rather than status inspection.
-    """
-
-    status = str(run.get("status") or "")
-    conclusion = str(run.get("conclusion") or "")
-    if status == "completed" and conclusion not in {"success", "neutral", "skipped"}:
-        return 1
-    return 0
+    return 0 if deployment_result(run)[0] in {"success", "pending"} else 1
 
 
 __all__ = [
@@ -448,10 +482,12 @@ __all__ = [
     "DEPLOYMENT_WORKFLOW",
     "DEPLOYMENT_WORKFLOW_PATH",
     "DEPLOYMENT_WORKFLOW_NAME",
+    "PRODUCTION_JOB",
     "DeploymentIntent",
     "DeploymentStateError",
     "active_deployment_runs",
     "deployment_exit_code",
+    "deployment_result",
     "deployment_job_rows",
     "deployment_state_path",
     "deployment_status_payload",

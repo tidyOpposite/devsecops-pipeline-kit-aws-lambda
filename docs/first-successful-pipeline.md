@@ -256,12 +256,17 @@ devsecops deploy prod
 devsecops deploy status --watch
 ```
 
-For a direct GitHub UI launch, select `main` and copy the reviewed `image_uri`,
+For a direct GitHub UI launch, select `mode=deploy`, `environment=prod`, and
+branch `main`. Copy the reviewed `image_uri`,
 `commit_sha`, and `config_sha256` from the preview's `gh workflow run` command.
 Review the same values in the run summary before approving `prod`. If GitHub
 reports that the commit or settings changed, run the preview again. The
 approved deploy creates and applies one saved Terraform plan. Standalone plan
 runs remain previews.
+
+After completion, the CLI verifies that the production job and its apply and
+health steps succeeded. A skipped job or operation returns an error even if
+GitHub reports the overall workflow as successful.
 
 The CLI refuses to overlap an active production run and records non-secret
 intent and run metadata in `.devsecops/deployments.json`. Use `--yes` only for

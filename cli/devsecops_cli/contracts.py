@@ -682,6 +682,8 @@ JSON_OUTPUT_CONTRACTS = [
             "schema_version",
             "environment",
             "operation",
+            "deployment_result",
+            "deployment_detail",
             "request_id",
             "run_confirmation",
             "requested_image_uri",

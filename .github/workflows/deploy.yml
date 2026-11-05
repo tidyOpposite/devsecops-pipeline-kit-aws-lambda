@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Run mode
+        description: Plan any environment, or deploy/rollback prod from main
         required: true
         default: plan
         type: choice
@@ -20,7 +20,7 @@ on:
           - deploy
           - rollback
       environment:
-        description: Terraform workspace
+        description: Terraform workspace (deploy and rollback require prod)
         required: true
         default: dev
         type: choice
@@ -92,6 +92,10 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+
+      - name: Validate workflow operation and environment
+        if: github.event_name == 'workflow_dispatch'
+        run: PYTHONPATH=cli python3 -m devsecops_cli.workflow --validate-request
 
       - name: Verify reviewed production intent before approval
         if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'deploy' || inputs.mode == 'rollback') && inputs.environment == 'prod' && github.ref == 'refs/heads/main'
