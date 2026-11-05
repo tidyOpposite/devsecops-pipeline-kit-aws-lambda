@@ -166,7 +166,7 @@ from .contracts import (
     command_inventory_markdown,
     inventory_payload,
 )
-from .formatting import markdown_table
+from .formatting import display_width, markdown_table, pad_text, terminal_width, wrap_text
 from .github import (
     DEFAULT_BRANCH,
     DEPLOY_ROLE_ENV_NAME,
@@ -413,45 +413,81 @@ def rollback_boundary_lines() -> list[str]:
     ]
 
 
+def print_text(text: str, *, subsequent_indent: str = "") -> None:
+    """Wrap human guidance; machine formats and shell commands stay literal."""
+
+    print("\n".join(wrap_text(text, terminal_width(), subsequent_indent)))
+
+
+def print_command(command: str, label: str = "Next command") -> None:
+    text = f"{label}: {command}"
+    if display_width(text) <= terminal_width():
+        print(text)
+    else:
+        print_text(f"{label}:")
+        # Keep a single copyable command; terminal soft wrapping must not
+        # insert whitespace into quoted values, URLs, or immutable digests.
+        print(command)
+
+
+def read_input(prompt: str = "") -> str:
+    lines = wrap_text(prompt, terminal_width())
+    suffix = " " if display_width(lines[-1]) < terminal_width() else ""
+    try:
+        answer = input("\n".join(lines) + suffix)
+    except EOFError:
+        # input() leaves the cursor after its prompt when stdin closes.
+        print()
+        raise
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        # Piped input is not echoed with the newline an interactive TTY shows.
+        print()
+    return answer
+
+
 def draw_box(title: str, lines: list[str], width: int = 74) -> None:
-    width = max(16, min(width, shutil.get_terminal_size((80, 24)).columns))
+    width = max(1, min(width, terminal_width()))
+    if width < 6:
+        for line in [title, *lines]:
+            print("\n".join(wrap_text(line, width)))
+        return
     print("+" + "-" * (width - 2) + "+")
-    for part in textwrap.wrap(title, width=width - 4) or [""]:
-        print("| " + part.ljust(width - 4) + " |")
+    for part in wrap_text(title, width - 4):
+        print("| " + pad_text(part, width - 4) + " |")
     print("+" + "-" * (width - 2) + "+")
     for line in lines:
-        for wrapped in textwrap.wrap(line, width=width - 4) or [""]:
-            print("| " + wrapped.ljust(width - 4) + " |")
+        for wrapped in wrap_text(line, width - 4):
+            print("| " + pad_text(wrapped, width - 4) + " |")
     print("+" + "-" * (width - 2) + "+")
 
 
 def draw_table(headers: list[str], rows: list[list[str]], title: str | None = None) -> None:
-    widths = [len(header) for header in headers]
+    widths = [display_width(header) for header in headers]
     for row in rows:
         for index, cell in enumerate(row):
-            widths[index] = max(widths[index], len(cell))
+            widths[index] = max(widths[index], display_width(cell))
     border = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
-    available = max(16, shutil.get_terminal_size((80, 24)).columns)
+    available = terminal_width()
     if title:
-        print(info(title))
-    if len(border) > available:
+        print_text(info(title))
+    if len(border) > available or any("\n" in cell for row in [headers, *rows] for cell in row):
         # Keep long diagnostics readable without truncating commands or URLs.
         for row_index, row in enumerate(rows):
             if row_index:
                 print("-" * available)
             for label, cell in zip(headers, row):
-                print("\n".join(textwrap.wrap(f"{label}: {cell}", width=available,
-                                              subsequent_indent="  ") or [f"{label}:"]))
+                print_text(f"{label}: {cell}", subsequent_indent="  ")
         return
     print(border)
-    print("|" + "|".join(f" {headers[index].ljust(widths[index])} " for index in range(len(headers))) + "|")
+    print("|" + "|".join(f" {pad_text(headers[index], widths[index])} " for index in range(len(headers))) + "|")
     print(border)
     for row in rows:
-        print("|" + "|".join(f" {row[index].ljust(widths[index])} " for index in range(len(headers))) + "|")
+        print("|" + "|".join(f" {pad_text(row[index], widths[index])} " for index in range(len(headers))) + "|")
     print(border)
 
 
 def progress_bar(score: int, width: int = 28) -> str:
+    width = max(1, min(width, terminal_width() - 19))
     filled = max(0, min(width, round(width * score / 100)))
     return "[" + "#" * filled + "-" * (width - filled) + f"] {score:3d}%"
 
@@ -473,7 +509,7 @@ def prompt_text(label: str, default: str = "", allow_cancel: bool = False) -> st
     if allow_cancel:
         options.append("b/back/0 to cancel")
     suffix = f" [{', '.join(options)}]" if options else ""
-    value = input(f"{label}{suffix}: ").strip()
+    value = read_input(f"{label}{suffix}: ").strip()
     if allow_cancel and is_cancel_input(value):
         raise InputCancelled
     return value or default
@@ -482,7 +518,7 @@ def prompt_text(label: str, default: str = "", allow_cancel: bool = False) -> st
 def prompt_bool(label: str, default: bool = False, allow_cancel: bool = False) -> bool:
     default_text = "y" if default else "n"
     while True:
-        value = input(f"{label} [y/n, default {default_text}{cancel_hint(allow_cancel)}]: ").strip().lower()
+        value = read_input(f"{label} [y/n, default {default_text}{cancel_hint(allow_cancel)}]: ").strip().lower()
         if allow_cancel and is_cancel_input(value):
             raise InputCancelled
         if not value:
@@ -498,7 +534,7 @@ def prompt_int(
     label: str, default: int, allow_cancel: bool = False, *, choices: tuple[int, ...] | None = None,
 ) -> int:
     while True:
-        value = input(f"{label} [{default}{cancel_hint(allow_cancel)}]: ").strip()
+        value = read_input(f"{label} [{default}{cancel_hint(allow_cancel)}]: ").strip()
         if allow_cancel and is_cancel_input(value):
             raise InputCancelled
         try:
@@ -911,8 +947,8 @@ def next_action_lines(action: dict[str, Any]) -> list[str]:
 def print_next_action(action: dict[str, Any], title: str = "Next Action") -> None:
     lines = next_action_lines(action)
     draw_box(title, lines[:3])
-    print(lines[3])
-    print(lines[4])
+    print_command(action["command"])
+    print_text(lines[4])
 
 
 
@@ -951,11 +987,11 @@ def print_gap_summary(checks: list[Check], limit: int = 3) -> None:
     if not rows:
         print(ok("Readiness gaps: none."))
         return
-    print(info("Readiness gaps ([i] details):"))
+    print(info("Readiness gaps:"))
     for check_name, status, detail, action in rows:
         label = fail(status) if status == "FAIL" else warn(status)
-        print(f"  {label} {check_name}: {detail}")
-        print(f"    Fix: {action}")
+        print_text(f"  {label} {check_name}: {detail}", subsequent_indent="  ")
+        print_text(f"    Fix: {action}", subsequent_indent="  ")
 
 
 def collect_dashboard_checks(root: Path, cfg: dict[str, Any], mode: str = "full", *, include_demo: bool = True) -> list[Check]:
@@ -992,9 +1028,9 @@ def collect_dashboard_checks(root: Path, cfg: dict[str, Any], mode: str = "full"
 
 
 
-def print_readiness_details(root: Path, deep: bool = False) -> None:
+def print_readiness_details(root: Path, deep: bool = False, *, checks: list[Check] | None = None) -> None:
     cfg = load_config(root)
-    checks = collect_checks(root, cfg, deep=deep)
+    checks = checks if checks is not None else collect_checks(root, cfg, deep=deep)
     score = readiness_score(checks)
     draw_box(
         "Readiness Details",
@@ -1011,16 +1047,16 @@ def print_readiness_details(root: Path, deep: bool = False) -> None:
     if rows:
         for check_name, status, detail, action in rows:
             label = fail(status) if status == "FAIL" else warn(status)
-            print(f"{label} {check_name}")
-            print(f"  Current: {detail}")
-            print(f"  Fix: {action}")
+            print_text(f"{label} {check_name}")
+            print_text(f"  Current: {detail}", subsequent_indent="  ")
+            print_text(f"  Fix: {action}", subsequent_indent="  ")
             print()
     else:
         print(ok("All scored readiness checks are OK."))
 
 
 def print_checks(checks: list[Check], title: str = "Readiness") -> None:
-    print(info(f"{title}: ") + progress_bar(readiness_score(checks)))
+    print_text(info(f"{title}: ") + progress_bar(readiness_score(checks)))
     print()
     rows = []
     for check in checks:
@@ -1039,7 +1075,7 @@ def emit_json(payload: dict[str, Any]) -> None:
 
 def print_compact_checks(checks: list[Check], title: str | None = None) -> None:
     if title:
-        print(info(title))
+        print_text(info(title))
     print(f"Score: {readiness_score(checks)}%")
     gaps = [check for check in checks if check.scored and check.status in {"WARN", "FAIL"}]
     if not gaps:
@@ -1047,8 +1083,8 @@ def print_compact_checks(checks: list[Check], title: str | None = None) -> None:
         return
     for check in gaps:
         label = fail(check.status) if check.status == "FAIL" else warn(check.status)
-        print(f"{label} {check.name}: {check.detail}")
-        print(f"  Fix: {readiness_action_for_check(check)}")
+        print_text(f"{label} {check.name}: {check.detail}", subsequent_indent="  ")
+        print_text(f"  Fix: {readiness_action_for_check(check)}", subsequent_indent="  ")
 
 
 def print_strict_validation_summary(checks: list[Check]) -> None:
@@ -1068,8 +1104,8 @@ def print_strict_validation_summary(checks: list[Check]) -> None:
     )
     for check in [*blockers, *promoted]:
         label = fail(check.status) if check.status == "FAIL" else warn(check.status)
-        print(f"{label} {check.name}: {check.detail}")
-        print(f"  Next command: {readiness_action_detail_for_check(check)}")
+        print_text(f"{label} {check.name}: {check.detail}", subsequent_indent="  ")
+        print_text(f"  Fix: {readiness_action_detail_for_check(check)}", subsequent_indent="  ")
 
 
 def emit_check_output(
@@ -1207,7 +1243,7 @@ def print_demo_status(cfg: dict[str, Any], checks: list[Check], action: dict[str
     print(f"Overall: {score_status(readiness_score(checks))} (local demo)")
     print()
     print_next_action(action)
-    print(f"Configure production separately when ready: {PRODUCTION_SETUP_COMMAND}")
+    print_command(PRODUCTION_SETUP_COMMAND, label="Configure production separately when ready")
 
 
 def render_dashboard(root: Path, mode: str = "full", clear: bool = False, *,
@@ -1229,7 +1265,7 @@ def render_dashboard(root: Path, mode: str = "full", clear: bool = False, *,
     header(cfg)
     print()
     for line in menu_status(root, cfg, checks=checks):
-        print(line)
+        print_text(line)
     print()
     print_readiness_breakdown(checks, compact=mode != "full")
     print()
@@ -1237,7 +1273,7 @@ def render_dashboard(root: Path, mode: str = "full", clear: bool = False, *,
     if mode != "full":
         if mode == "compact":
             print()
-            print(info("Run `devsecops status --deep` for GitHub, AWS, and deep Terraform checks."))
+            print_text(info("Run `devsecops status --deep` for GitHub, AWS, and deep Terraform checks."))
         return
     print()
     draw_table(
@@ -1369,8 +1405,10 @@ def render_rich_tui(root: Path) -> bool:
         for check in checks:
             table.add_row(check.name, check.status, check.detail)
         console.print(table)
-        console.print(Panel("\n".join(next_action_lines(action)), title="Next Action"))
-        console.print(f"Configure production separately when ready: {PRODUCTION_SETUP_COMMAND}")
+        console.print(Panel("\n".join(next_action_lines(action)[:3]), title="Next Action"))
+        print_command(action["command"])
+        print_text(f"Docs: {action['docs']}")
+        print_command(PRODUCTION_SETUP_COMMAND, label="Configure production separately when ready")
         return True
     console.print(
         Panel(
@@ -1387,7 +1425,7 @@ def render_rich_tui(root: Path) -> bool:
         table.add_row(area, score, gaps)
     console.print(table)
 
-    gap_table = Table(title="[i] Readiness Details")
+    gap_table = Table(title="Readiness Details")
     gap_table.add_column("Check")
     gap_table.add_column("Status")
     gap_table.add_column("Fix")
@@ -1397,7 +1435,9 @@ def render_rich_tui(root: Path) -> bool:
         console.print(gap_table)
     else:
         console.print(Panel("All scored readiness checks are OK.", title="Readiness Details"))
-    console.print(Panel("\n".join(next_action_lines(action)), title="Next Action"))
+    console.print(Panel("\n".join(next_action_lines(action)[:3]), title="Next Action"))
+    print_command(action["command"])
+    print_text(f"Docs: {action['docs']}")
     console.print("[dim]Full Textual mode is intentionally deferred until doctor workflows stabilize.[/dim]")
     return True
 
@@ -1483,7 +1523,7 @@ def choose_setup_mode(args: argparse.Namespace, state: dict[str, Any] | None) ->
         "production": "production",
     }
     while True:
-        value = input("\nChoose mode [1, b/back/0 to pause]: ").strip().lower()
+        value = read_input("\nChoose mode [1, b/back/0 to pause]: ").strip().lower()
         if not value:
             value = "1"
         if is_cancel_input(value):
@@ -1570,18 +1610,18 @@ def review_setup_preset(
     print()
     if blockers:
         emit_check_output("Mode configuration requirements", blockers, output_format="compact")
-    print(f"Proposed `{preset_name}` preset changes (not saved):")
+    print_text(f"Proposed `{preset_name}` preset changes (not saved):")
     print(diff, end="")
-    print("Project, region, image, admin role, and backend values are preserved.")
+    print_text("Project, region, image, admin role, and backend values are preserved.")
     if not authorized:
         if bool(getattr(args, "yes", False)):
-            print(fail("Existing settings were kept. --yes does not authorize a preset replacement."))
-            print("Review the diff, then rerun with --apply-mode-preset and the same options to accept it, or run setup interactively to keep the current settings.")
+            print_text(fail("Existing settings were kept. --yes does not authorize a preset replacement."))
+            print_text("Review the diff, then rerun with --apply-mode-preset and the same options to accept it, or run setup interactively to keep the current settings.")
             return None, True
         authorized = prompt_bool("Replace existing policy and environment settings with these changes", False, allow_cancel=True)
     if authorized:
         return candidate, False
-    print(info("Keeping existing configuration; unmet mode requirements remain pending."))
+    print_text(info("Keeping existing configuration; unmet mode requirements remain pending."))
     return None, False
 
 
@@ -1623,11 +1663,11 @@ def print_setup_dependencies(mode: str, statuses: dict[str, bool]) -> None:
     missing = [tool for tool in required if not statuses[tool]]
     if missing:
         print()
-        print(
+        print_text(
             warn("Setup can prepare local inputs, but these stages remain incomplete: ")
             + ", ".join(sorted(missing))
         )
-        print("Install guidance: docs/distribution.md and docs/first-successful-pipeline.md")
+        print_text("Install guidance: docs/distribution.md and docs/first-successful-pipeline.md")
 
 
 def write_setup_config_change(root: Path, cfg: dict[str, Any], description: str) -> None:
@@ -1636,7 +1676,7 @@ def write_setup_config_change(root: Path, cfg: dict[str, Any], description: str)
     if config_path(root).exists():
         snapshot_before_change(root, "setup", description)
     write_config(root, cfg)
-    print(ok("Updated ") + str(config_path(root)))
+    print_text(ok("Updated ") + str(config_path(root)))
 
 
 def create_setup_config(
@@ -1682,7 +1722,7 @@ def create_setup_config(
         cfg["backend"]["region"] = cfg["aws_region"]
         cfg["backend"]["lock_table"] = f"{cfg['project_name']}-terraform-locks"
     write_config(root, cfg)
-    print(ok("Created clean config ") + str(config_path(root)))
+    print_text(ok("Created clean config ") + str(config_path(root)))
     return cfg
 
 
@@ -1718,10 +1758,10 @@ def configure_setup_image(
                 "Use an existing ECR URI with an immutable release tag or sha256 digest.",
             ],
         )
-        print("[1] Enter an existing image URI")
-        print("[2] Show the image guide and continue later")
-        print("[0] Pause setup")
-        choice = input("\nChoose: ").strip().lower()
+        print_text("[1] Enter an existing image URI")
+        print_text("[2] Show the image guide and continue later")
+        print_text("[0] Pause setup")
+        choice = read_input("\nChoose: ").strip().lower()
         if is_cancel_input(choice):
             raise InputCancelled
         if choice == "2":
@@ -1887,7 +1927,7 @@ def setup_backend_resource_checks(
 
 def print_setup_aws_identity(check: Check | None, mode: str) -> None:
     if not setup_profile(mode)["cloud_required"]:
-        print(info("Step 6/9 - AWS identity: not required in demo mode."))
+        print_text(info("Step 6/9 - AWS identity: not required in demo mode."))
         return
     if check is None:
         print(warn("Step 6/9 - AWS identity: waiting for a valid local config."))
@@ -1912,7 +1952,7 @@ def setup_github_connection(
     """
 
     if not setup_profile(mode)["cloud_required"]:
-        print(info("Step 7/9 - GitHub repository / OIDC: not required in demo mode."))
+        print_text(info("Step 7/9 - GitHub repository / OIDC: not required in demo mode."))
         return [], False
 
     checks = collect_github_checks(root, cfg)
@@ -1988,12 +2028,12 @@ def print_setup_summary(state: dict[str, Any], stages: list[SetupStage]) -> None
     pending = first_pending_stage(stages)
     print()
     print(f"Progress: {complete}/{required} required stages complete")
-    print(f"Saved progress: {SETUP_STATE_FILE}")
+    print_text(f"Saved progress: {SETUP_STATE_FILE}")
     next_command = setup_next_command(pending, str(state["mode"]))
     if pending:
-        print(f"Resume point: {pending.title} - {pending.detail}")
+        print_text(f"Resume point: {pending.title} - {pending.detail}")
     else:
-        print(ok("Demo complete. Local config and preview are verified." if state["mode"] == "demo"
+        print_text(ok("Demo complete. Local config and preview are verified." if state["mode"] == "demo"
                  else "Guided setup complete. No deployment was started."))
     print()
     draw_box(
@@ -2004,9 +2044,9 @@ def print_setup_summary(state: dict[str, Any], stages: list[SetupStage]) -> None
             "Rerunning setup rechecks observable state and resumes without repeating completed work.",
         ],
     )
-    print(f"Next command: {next_command}")
+    print_command(next_command)
     if state["mode"] == "demo" and pending is None:
-        print(f"Configure production separately when ready: {PRODUCTION_SETUP_COMMAND}")
+        print_command(PRODUCTION_SETUP_COMMAND, label="Configure production separately when ready")
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
@@ -2043,22 +2083,22 @@ def cmd_setup(args: argparse.Namespace) -> int:
             new_interactive_config=not config_path(root).exists() and not bool(getattr(args, "yes", False)),
         )
         if argument_error:
-            print(fail(argument_error))
+            print_text(fail(argument_error))
             return EXIT_VALIDATION_FAILED
         preset_candidate, review_required = review_setup_preset(root, cfg, args, mode, preset_name)
         if review_required:
             return EXIT_VALIDATION_FAILED
         if state is None:
             state = new_setup_state(mode, preset=preset_name)
-            print(info(f"Starting {mode} setup with the `{preset_name}` preset."))
+            print_text(info(f"Starting {mode} setup with the `{preset_name}` preset."))
         else:
             previous_mode = str(state["mode"])
             previous_preset = str(state.get("preset", ""))
             if previous_mode != mode or previous_preset != preset_name:
                 state = switch_setup_mode(state, mode, preset=preset_name)
-                print(info(f"Switched saved setup from {previous_mode} to {mode} mode."))
+                print_text(info(f"Switched saved setup from {previous_mode} to {mode} mode."))
             else:
-                print(
+                print_text(
                     info(
                         f"Resuming saved {mode} setup from step "
                         f"`{state.get('last_step', 'mode')}`."
@@ -2097,8 +2137,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 and not is_immutable_image(str(cfg.get("lambda_image_uri", "")))
             ):
                 print()
-                print(info("Step 4/9 - Lambda image: demo mode will use a sample URI only for dry-run."))
-                print("Bring-your-own-image guide: docs/bring-your-own-image.md")
+                print_text(info("Step 4/9 - Lambda image: demo mode will use a sample URI only for dry-run."))
+                print_text("Bring-your-own-image guide: docs/bring-your-own-image.md")
             else:
                 print()
                 cfg, image_error = configure_setup_image(
@@ -2115,7 +2155,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 cfg, backend_error = configure_setup_backend(root, cfg, args, interactive)
                 input_error = input_error or backend_error
             else:
-                print(info("Step 5/9 - Terraform backend: not required in demo mode."))
+                print_text(info("Step 5/9 - Terraform backend: not required in demo mode."))
 
         if bool(getattr(args, "render", False)) and config_exists:
             print()
@@ -2168,9 +2208,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
             else:
                 input_error = True
         elif dry_run_can_run:
-            print(ok("Step 8/9 - Dry-run is already current; no need to repeat it."))
+            print_text(ok("Step 8/9 - Dry-run is already current; no need to repeat it."))
         else:
-            print(warn("Step 8/9 - Dry-run is waiting for a valid config and immutable image."))
+            print_text(warn("Step 8/9 - Dry-run is waiting for a valid config and immutable image."))
 
         cfg = load_config(root)
         dependency_status = setup_dependency_status()
@@ -2204,10 +2244,10 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 return EXIT_AUTH_FAILED
             return EXIT_VALIDATION_FAILED
         return EXIT_OK
-    except InputCancelled:
+    except (InputCancelled, EOFError):
         if setup_started and state is not None:
             save_setup_state(root, state)
-            print(
+            print_text(
                 info(
                     f"Setup paused at step `{state.get('last_step', 'mode')}`. "
                     "Rerun `devsecops setup` to resume."
@@ -2873,7 +2913,7 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         print(info("Snapshot matches current files. Nothing to roll back."))
         return 0
     if not args.yes:
-        confirmation = input(f"\nRollback to {snapshot.get('id')}? Type yes to continue: ").strip().lower()
+        confirmation = read_input(f"\nRollback to {snapshot.get('id')}? Type yes to continue: ").strip().lower()
         if confirmation != "yes":
             print(info("Rollback cancelled."))
             return 0
@@ -3246,7 +3286,7 @@ def confirm_cloud_deployment(operation: str) -> bool:
 
     expected = DEPLOYMENT_ENVIRONMENT if operation == "deploy" else "rollback"
     try:
-        answer = input(f"Type {expected} to dispatch this {operation} workflow: ").strip().lower()
+        answer = read_input(f"Type {expected} to dispatch this {operation} workflow: ").strip().lower()
     except EOFError:
         return False
     return answer == expected
@@ -4034,11 +4074,11 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
         if failures:
             print_checks(failures, title="Demo configuration")
         else:
-            print(ok("Demo configuration is valid. Cloud connections are not required."))
+            print_text(ok("Demo configuration is valid. Cloud connections are not required."))
     else:
         print_gap_summary(readiness_checks, limit=8)
     print()
-    print(info("Next documented path: docs/first-successful-pipeline.md"))
+    print_text(info("Next documented path: docs/first-successful-pipeline.md"))
     validation = validate_config(cfg)
     return EXIT_VALIDATION_FAILED if any(check.status == "FAIL" for check in [*image_checks, *validation]) else EXIT_OK
 
@@ -4483,7 +4523,7 @@ def menu_status(root: Path, cfg: dict[str, Any], checks: list[Check] | None = No
         f"Backend: {backend_state}",
         f"Health check: {'enabled' if cfg['enable_http_validation'] else 'disabled'}",
         f"DAST: {'enabled' if cfg['enable_dast'] else 'disabled'}",
-        "Readiness: " + progress_bar(breakdown_score) + "  [i] details",
+        "Readiness: " + progress_bar(breakdown_score),
     ]
 
 
@@ -4495,7 +4535,7 @@ def clear_screen() -> None:
 
 
 def pause_for_menu() -> None:
-    input("\n[Enter] Back to main menu")
+    read_input("\n[Enter] Back to main menu")
     clear_screen()
 
 
@@ -4520,8 +4560,10 @@ def print_main_menu(root: Path) -> None:
         print()
         for key, label in MAIN_MENU_ITEMS:
             if key == "0" and all(check.status == "OK" for check in checks):
-                print("[7] Configure production setup")
-            print(f"[{key}] {label}")
+                print_text("[7] Configure production setup")
+            if key == "0":
+                print_text("[i] Readiness details")
+            print_text(f"[{key}] {label}")
         return
     image_state = "set" if cfg["lambda_image_uri"] else "missing"
     backend_state = "set" if not cfg["backend"]["bucket"].startswith("replace-with") else "missing"
@@ -4529,13 +4571,15 @@ def print_main_menu(root: Path) -> None:
     dast_state = "on" if cfg["enable_dast"] else "off"
 
     print(color("DevSecOps Pipeline Kit", Style.BOLD))
-    print(f"{cfg['project_name']} | {cfg['aws_region']} | status {breakdown_score}%")
-    print(f"image: {image_state} | backend: {backend_state} | health: {health_state} | DAST: {dast_state}")
+    print_text(f"{cfg['project_name']} | {cfg['aws_region']} | status {breakdown_score}%")
+    print_text(f"image: {image_state} | backend: {backend_state} | health: {health_state} | DAST: {dast_state}")
     print()
     print_next_action(action)
     print()
     for key, label in MAIN_MENU_ITEMS:
-        print(f"[{key}] {label}")
+        if key == "0":
+            print_text("[i] Readiness details")
+        print_text(f"[{key}] {label}")
 
 
 def open_menu_section(title: str, handler: Any, *args: Any) -> None:
@@ -4597,17 +4641,17 @@ def menu_deploy_hub() -> None:
         ],
     )
     print()
-    print("[1] Current deployment status")
-    print("[2] Deploy production (review and confirmation required)")
-    print("[3] Deployment logs")
-    print("[4] Deployed AWS resources")
-    print("[5] Validate production health endpoint")
-    print("[6] Roll back production (review and confirmation required)")
-    print("[7] Preview production deployment")
-    print("[8] Preview production rollback")
-    print("[9] Check production prerequisites")
-    print("[0] Back")
-    choice = input("\nChoose: ").strip().lower()
+    print_text("[1] Current deployment status")
+    print_text("[2] Deploy production (review and confirmation required)")
+    print_text("[3] Deployment logs")
+    print_text("[4] Deployed AWS resources")
+    print_text("[5] Validate production health endpoint")
+    print_text("[6] Roll back production (review and confirmation required)")
+    print_text("[7] Preview production deployment")
+    print_text("[8] Preview production rollback")
+    print_text("[9] Check production prerequisites")
+    print_text("[0] Back")
+    choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
@@ -4649,15 +4693,15 @@ def menu_config_hub(root: Path) -> None:
     clear_screen()
     draw_box("Configuration", ["Inspect, validate, and edit local source configuration."])
     print()
-    print("[1] Project setup")
-    print("[2] Show config")
-    print("[3] Validate config")
-    print("[4] Edit one setting")
-    print("[5] Apply policy preset")
-    print("[6] Compare config with canonical form")
-    print("[7] Advanced control setup")
-    print("[0] Back")
-    choice = input("\nChoose: ").strip().lower()
+    print_text("[1] Project setup")
+    print_text("[2] Show config")
+    print_text("[3] Validate config")
+    print_text("[4] Edit one setting")
+    print_text("[5] Apply policy preset")
+    print_text("[6] Compare config with canonical form")
+    print_text("[7] Advanced control setup")
+    print_text("[0] Back")
+    choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
@@ -4695,7 +4739,12 @@ def menu_config_hub(root: Path) -> None:
 
 def menu_readiness_section(root: Path) -> None:
     clear_screen()
-    print_readiness_details(root)
+    cfg = load_config(root)
+    checks = collect_dashboard_checks(root, cfg, mode="compact")
+    if any(check.name == "Demo dry-run" for check in checks):
+        print_demo_status(cfg, checks, next_action(root, cfg, observations=checks, local_only=True))
+    else:
+        print_readiness_details(root, checks=checks)
     pause_for_menu()
 
 
@@ -4705,15 +4754,15 @@ def menu_doctor_hub(root: Path) -> None:
     clear_screen()
     draw_box("Diagnose Problems", ["Check local setup, integrations, deployments, or all areas together."])
     print()
-    print("[1] Local setup")
-    print("[2] Local setup with Terraform/AWS checks")
-    print("[3] GitHub connection")
-    print("[4] AWS connection and prod resources")
-    print("[5] Recent deployment runs")
-    print("[6] Main branch protection")
-    print("[7] All checks (compact)")
-    print("[0] Back")
-    choice = input("\nChoose: ").strip().lower()
+    print_text("[1] Local setup")
+    print_text("[2] Local setup with Terraform/AWS checks")
+    print_text("[3] GitHub connection")
+    print_text("[4] AWS connection and prod resources")
+    print_text("[5] Recent deployment runs")
+    print_text("[6] Main branch protection")
+    print_text("[7] All checks (compact)")
+    print_text("[0] Back")
+    choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
@@ -4751,13 +4800,13 @@ def menu_terraform_hub(root: Path) -> None:
     clear_screen()
     draw_box("Terraform", ["Plan environments or inspect backend bootstrap changes."])
     print()
-    print("[1] Bootstrap backend plan")
-    print("[2] Plan dev")
-    print("[3] Plan staging")
-    print("[4] Plan prod")
-    print("[5] Custom plan")
-    print("[0] Back")
-    choice = input("\nChoose: ").strip().lower()
+    print_text("[1] Bootstrap backend plan")
+    print_text("[2] Plan dev")
+    print_text("[3] Plan staging")
+    print_text("[4] Plan prod")
+    print_text("[5] Custom plan")
+    print_text("[0] Back")
+    choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
@@ -4783,12 +4832,12 @@ def menu_github_hub() -> None:
     clear_screen()
     draw_box("GitHub Connection", ["Prepare repository settings and inspect GitHub readiness."])
     print()
-    print("[1] Repository setup commands")
-    print("[2] Diagnose GitHub connection")
-    print("[3] Recent workflow runs")
-    print("[4] Main branch protection")
-    print("[0] Back")
-    choice = input("\nChoose: ").strip().lower()
+    print_text("[1] Repository setup commands")
+    print_text("[2] Diagnose GitHub connection")
+    print_text("[3] Recent workflow runs")
+    print_text("[4] Main branch protection")
+    print_text("[0] Back")
+    choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
@@ -4817,12 +4866,12 @@ def menu_reference_hub() -> None:
     clear_screen()
     draw_box("Reference", ["Inspect controls, environments, architecture, or a focused control explanation."])
     print()
-    print("[1] Security controls")
-    print("[2] Environment table")
-    print("[3] Architecture")
-    print("[4] Explain control")
-    print("[0] Back")
-    choice = input("\nChoose: ").strip().lower()
+    print_text("[1] Security controls")
+    print_text("[2] Environment table")
+    print_text("[3] Architecture")
+    print_text("[4] Explain control")
+    print_text("[0] Back")
+    choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
@@ -4855,10 +4904,10 @@ def menu_generated_files_hub(root: Path) -> None:
         ],
     )
     print()
-    print("[1] Preview generated file changes")
-    print("[2] Generate deployment files")
-    print("[0] Back")
-    choice = input("\nChoose: ").strip().lower()
+    print_text("[1] Preview generated file changes")
+    print_text("[2] Generate deployment files")
+    print_text("[0] Back")
+    choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
@@ -4880,12 +4929,12 @@ def menu_reports_hub() -> None:
         ["Export readiness evidence or collect maintainer-focused release artifacts."],
     )
     print()
-    print("[1] Export readiness report (Markdown)")
-    print("[2] Export audit report (JSON)")
-    print("[3] Collect release-candidate evidence")
-    print("[4] Check stable-release criteria")
-    print("[0] Back")
-    choice = input("\nChoose: ").strip().lower()
+    print_text("[1] Export readiness report (Markdown)")
+    print_text("[2] Export audit report (JSON)")
+    print_text("[3] Collect release-candidate evidence")
+    print_text("[4] Check stable-release criteria")
+    print_text("[0] Back")
+    choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
@@ -4911,14 +4960,14 @@ def menu_advanced_hub(root: Path) -> None:
         ["Direct access to generated files, providers, evidence, controls, and recovery."],
     )
     print()
-    print("[1] Deployment files")
-    print("[2] Terraform")
-    print("[3] GitHub connection")
-    print("[4] Reports and release evidence")
-    print("[5] Security and reference")
-    print("[6] Snapshots / local rollback")
-    print("[0] Back")
-    choice = input("\nChoose: ").strip().lower()
+    print_text("[1] Deployment files")
+    print_text("[2] Terraform")
+    print_text("[3] GitHub connection")
+    print_text("[4] Reports and release evidence")
+    print_text("[5] Security and reference")
+    print_text("[6] Snapshots / local rollback")
+    print_text("[0] Back")
+    choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         clear_screen()
         return
@@ -4965,10 +5014,10 @@ def menu_rollback_section(root: Path) -> None:
     print()
     print_snapshot_detail(root, snapshot)
     print()
-    print("[1] Preview rollback")
-    print("[2] Roll back to this snapshot")
-    print("[0] Back to main menu")
-    action = input("\nChoose: ").strip()
+    print_text("[1] Preview rollback")
+    print_text("[2] Roll back to this snapshot")
+    print_text("[0] Back to main menu")
+    action = read_input("\nChoose: ").strip()
 
     if action == "1":
         print()
@@ -4981,7 +5030,7 @@ def menu_rollback_section(root: Path) -> None:
             print(info("Snapshot matches current files. Nothing to roll back."))
             pause_for_menu()
             return
-        confirmation = input(f"\nRollback to {snapshot.get('id')}? Type yes to continue: ").strip().lower()
+        confirmation = read_input(f"\nRollback to {snapshot.get('id')}? Type yes to continue: ").strip().lower()
         if confirmation != "yes":
             print(info("Rollback cancelled."))
             pause_for_menu()
@@ -4995,11 +5044,18 @@ def menu_rollback_section(root: Path) -> None:
 def cmd_menu(args: argparse.Namespace) -> int:
     """Run the interactive menu loop until the operator exits."""
 
-    root = repo_root()
+    try:
+        return run_menu_loop(repo_root())
+    except EOFError:
+        print_text(info("\nInput closed. Exiting menu."))
+        return EXIT_OK
+
+
+def run_menu_loop(root: Path) -> int:
     while True:
         clear_screen()
         print_main_menu(root)
-        choice = input("\nChoose: ").strip().lower()
+        choice = read_input("\nChoose: ").strip().lower()
         if choice in {"1", "continue", "setup", "next"}:
             menu_continue_setup(root)
         elif choice in {"2", "status", "dashboard", "d"}:
@@ -5081,7 +5137,7 @@ def emit_command_error(args: argparse.Namespace, message: str, code: int) -> int
         emit_json({"kind": "command-error", "schema_version": CONTRACT_SCHEMA_VERSION,
                    "command": getattr(args, "command", None), "error": message, "exit_code": code})
     else:
-        print(fail(message))
+        print_text(fail(message))
     return code
 
 
@@ -5103,10 +5159,12 @@ def main(argv: list[str] | None = None) -> int:
                 print_next_postlude()
             except (ConfigValidationError, ConfigMigrationError, SetupStateError, OSError, subprocess.SubprocessError):
                 # Guidance must not undo a completed command or contact providers.
-                print(warn("Next step unavailable. Run `devsecops setup` or `devsecops config validate` for details."))
+                print_text(warn("Next step unavailable. Run `devsecops setup` or `devsecops config validate` for details."))
         return result
     except KeyboardInterrupt:
         return emit_command_error(args, "Interrupted.", EXIT_INTERRUPTED)
+    except EOFError:
+        return emit_command_error(args, "Input closed. Command cancelled before completing interactive input.", EXIT_INTERRUPTED)
     except SetupStateError as exc:
         return emit_command_error(args, "Setup state error: " + str(exc), EXIT_VALIDATION_FAILED)
     except DeploymentStateError as exc:

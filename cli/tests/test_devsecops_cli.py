@@ -2516,7 +2516,7 @@ devsecops dry-run
                 cli.print_main_menu(root)
             output = buffer.getvalue()
             readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
-        self.assertTrue(any("[i] details" in line for line in status))
+        self.assertFalse(any("[i]" in line for line in status))
         expected_items = [
             "[1] Continue setup",
             "[2] Status",
@@ -2524,6 +2524,7 @@ devsecops dry-run
             "[4] Diagnose problems",
             "[5] Configuration",
             "[6] Advanced",
+            "[i] Readiness details",
             "[0] Exit",
         ]
         self.assertEqual(

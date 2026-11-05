@@ -157,7 +157,7 @@ class SetupTransitionTests(unittest.TestCase):
         code, output = self.run_isolated(["--mode", "production"], ["y"])
         self.assertEqual(code, cli.EXIT_OK, output)
         self.assertIn("Proposed `enterprise`", output)
-        self.assertLess(output.index("setup preset:enterprise"), output.index("Updated "))
+        self.assertLess(output.index("setup preset:enterprise"), output.index("Updated"))
         self.assertEqual(cli.load_config(self.root), cli.config_with_preset(cfg, "enterprise"))
         self.assertEqual(cli.load_setup_state(self.root)["mode"], "production")
         snapshots = cli.list_snapshots(self.root)

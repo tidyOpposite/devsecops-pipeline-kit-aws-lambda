@@ -343,8 +343,8 @@ The main menu uses section-style navigation: selecting an item clears the
 terminal, opens that section, and returns to the main menu when you press
 Enter. Input sections can be cancelled by typing `b`, `back`, `0`, or
 `cancel`; the configuration wizard returns without saving when cancelled. The
-readiness indicator includes an `[i] details` shortcut that shows the checks
-blocking 100% readiness and the concrete fix for each one.
+main menu offers `[i] Readiness details` for the current demo or production
+scope. Status, dry-run and TUI output are reports; they do not accept menu keys.
 
 ```text
 [1] Continue setup
@@ -353,8 +353,18 @@ blocking 100% readiness and the concrete fix for each one.
 [4] Diagnose problems
 [5] Configuration
 [6] Advanced
+[i] Readiness details
 [0] Exit
 ```
+
+Human guidance and tables adapt to terminal width, including ANSI colors and
+wide characters. Each next action has one copyable command. Long commands stay
+intact on their own line so wrapping cannot change quoted values or digests.
+JSON, TOML, scripts and configuration diffs retain their literal format.
+
+Closing input exits the menu normally. During setup it pauses at the current
+step; rerun `devsecops setup` to resume. EOF never accepts a confirmation or a
+prompt's default value. Other interrupted prompts return exit code `130`.
 
 The main path stays focused on setup, validation, and deployment. Generated
 deployment files, Terraform, GitHub setup, reports and release evidence,

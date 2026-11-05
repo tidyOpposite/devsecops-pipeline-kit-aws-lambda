@@ -149,6 +149,22 @@ it never runs real AWS tests. Follow [Security gate acceptance](security-gate-ac
 for permissions, variables, evidence and cleanup. The fixture requires
 Terraform 1.10.5 or newer; the manual workflow pins 1.10.5.
 
+## Terminal Layout And Closed Input
+
+Ordinary status, dry-run and TUI reports no longer advertise menu keys. The
+menu lists its working `[i] Readiness details` action explicitly and keeps
+completed-demo details in local scope. Prose, boxes, tables and prompts adapt
+to terminal width and account for ANSI colors and wide characters. Long shell
+commands stay literal on a separate line, once per next action; machine
+formats and config diffs are unchanged.
+
+`menu </dev/null` now exits normally (`0`). Setup pauses on EOF (`0`) and can
+resume, while EOF at preset review preserves existing config and progress.
+Other interactive EOFs return `130`, without accepting defaults or confirmations.
+Malformed health URLs are endpoint validation failures (`1`), including invalid
+ports, empty arguments and unencoded whitespace. They do not reach the network
+or SigV4 signing and no longer appear as internal errors.
+
 ## Reviewed Setup Mode Changes
 
 `setup --mode production --yes` no longer silently replaces existing policy

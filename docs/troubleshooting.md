@@ -23,11 +23,22 @@ devsecops aws outputs --environment prod
 devsecops health --aws-sigv4
 ```
 
-Use `[i] details` from the main menu or `devsecops status` to see only the
+Use `[i] Readiness details` from the main menu or `devsecops status` to see the
 checks that block 100% readiness and the concrete fix for each one. Use
 `devsecops doctor` when you need the full local check list. Project status
 groups readiness into Local, Terraform, GitHub, AWS, Security, and Deployment
 scores.
+
+Status and dry-run output do not handle menu keys. Human text and tables wrap
+to the terminal width; long copyable commands stay on one line. On closed
+input, the menu exits with code `0` and setup pauses with code `0`, preserving
+its resume point. Other interactive prompts return `130` without accepting a
+default or confirmation. Rerun interactively to continue.
+
+An invalid `health --url` returns validation code `1` before a network request.
+Use an absolute HTTP(S) URL with a valid hostname/port and no embedded user
+information. Percent-encode spaces and non-ASCII path/query characters; use an
+ASCII/IDNA hostname. A malformed URL is reported as an endpoint input problem.
 
 Use `devsecops criteria --strict` when preparing a stable release. It checks
 every Version 1.0 criterion plus the external production and WSL2 evidence

@@ -75,6 +75,20 @@ The protected workflow serializes production runs. Inferred rollback reads the
 recovery artifact from a completed, successful deployment attempt and verifies
 that its deployed image is still active.
 
+## Terminal Output And Closed Input
+
+Menu shortcuts appear only in the interactive menu. Human guidance, boxes,
+tables and prompts adapt to terminal width. Each next action prints its shell
+command once; long commands remain literal on a separate line for copying.
+Machine formats, generated scripts and config diffs are never prose-wrapped.
+
+EOF exits `menu` with code `0` and pauses `setup` with code `0` at its saved
+step. EOF before review approval does not update progress or config. Other
+unhandled interactive EOFs return `130`; EOF never accepts a prompt's default
+or authorizes changes. Malformed explicit health URLs fail as endpoint
+validation with code `1` before signing or network access; the JSON health
+envelope stays unchanged.
+
 ## Project Root And Relative Paths
 
 The CLI discovers the project from the current directory and its ancestors.

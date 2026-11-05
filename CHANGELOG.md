@@ -7,6 +7,9 @@ semantic versioning.
 
 ### Fixed
 
+* Show working shortcuts only in the menu, adapt human terminal output to narrow
+  widths, preserve copyable commands, and handle closed input as exit/pause.
+  Reject malformed health URLs before requests and report endpoint validation.
 * Review the exact mode-preset diff before replacing existing settings in setup;
   require explicit acceptance or `--apply-mode-preset`, preserve deployment
   identity/backend, and reject invalid supplied arguments before any writes.

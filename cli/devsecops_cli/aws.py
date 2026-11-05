@@ -525,8 +525,8 @@ def resolve_health_url(
     callers can present the decision without reproducing resolution logic.
     """
 
-    if url:
-        return url.strip(), "argument"
+    if url is not None:
+        return url.strip(), "argument" if url.strip() else "Health URL cannot be empty. Provide an absolute HTTP(S) URL."
     if not command_exists_fn("terraform"):
         return "", "`terraform` not found on PATH and --url was not provided."
     result = run_command_fn(["terraform", "-chdir=terraform", "output", "-no-color", "-raw", "api_gateway_health_url"], root)
@@ -641,6 +641,29 @@ class _NoRedirectResponseProcessor(urllib.request.HTTPErrorProcessor):
     https_response = http_response
 
 
+def health_url_error(url: str) -> str | None:
+    """Validate URL input before constructing a request or signing headers."""
+
+    if any(char.isspace() or ord(char) < 32 or ord(char) == 127 or char == "\\" for char in url):
+        return "Invalid health URL. Whitespace, control characters and backslashes are not allowed."
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host, port = parsed.hostname, parsed.port
+        url.encode("ascii")
+    except (ValueError, UnicodeError):
+        return "Invalid health URL. Use an absolute HTTP(S) URL with a valid host and port; encode non-ASCII characters."
+    if parsed.scheme not in {"http", "https"} or not host:
+        return "Health URL must be an absolute http or https URL with a hostname."
+    if parsed.username is not None or parsed.password is not None:
+        return "Health URL must not contain user information."
+    bracket_suffix = parsed.netloc.partition("]")[2] if parsed.netloc.startswith("[") else ""
+    if (bracket_suffix and not re.fullmatch(r":\d+", bracket_suffix)) or parsed.netloc.endswith(":"):
+        return "Invalid health URL. Use a valid hostname and optional numeric port."
+    if port is not None and not 1 <= port <= 65535:
+        return "Invalid health URL port. Use a port between 1 and 65535."
+    return None
+
+
 def fetch_health_url(
     url: str,
     timeout: int = 20,
@@ -659,16 +682,17 @@ def fetch_health_url(
     if type(timeout) is not int or timeout <= 0:
         return None, "Health timeout must be a positive number of seconds."
     stripped_url = url.strip()
-    try:
-        parsed = urllib.parse.urlparse(stripped_url)
-    except ValueError:
-        return None, "Invalid health URL. Provide a valid absolute HTTP(S) URL."
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return None, "Health URL must be an absolute http or https URL."
+    error = health_url_error(stripped_url)
+    if error:
+        return None, error
+    parsed = urllib.parse.urlparse(stripped_url)
     if trusted_host is not None and not aws_sigv4:
         return None, "--trusted-host requires --aws-sigv4."
 
-    request = urllib.request.Request(stripped_url, headers={"User-Agent": f"devsecops-cli/{VERSION}"})
+    try:
+        request = urllib.request.Request(stripped_url, headers={"User-Agent": f"devsecops-cli/{VERSION}"})
+    except (ValueError, UnicodeError, http.client.InvalidURL):
+        return None, "Invalid health URL. Provide a valid absolute HTTP(S) URL."
     open_url = urllib.request.urlopen
     if aws_sigv4:
         if parsed.scheme != "https":
@@ -710,6 +734,8 @@ def fetch_health_url(
         return None, str(exc.reason)
     except TimeoutError:
         return None, f"Timed out after {timeout}s."
+    except (ValueError, UnicodeError, http.client.InvalidURL):
+        return None, "Invalid health URL. Provide a valid absolute HTTP(S) URL."
 
 
 def collect_health_checks(
@@ -727,14 +753,15 @@ def collect_health_checks(
     """Resolve and probe the workload health endpoint as readiness checks."""
 
     health_url, source = resolve_health_fn(root, url)
+    url_error = health_url_error(health_url) if health_url else None
     checks = [
         Check(
             "Health endpoint URL",
-            "OK" if health_url else "FAIL",
-            f"{health_url} ({source})" if health_url else source,
+            "OK" if health_url and not url_error else "FAIL",
+            url_error or (f"{health_url} ({source})" if health_url else source),
         )
     ]
-    if not health_url:
+    if not health_url or url_error:
         return checks
     status, detail = fetch_health_fn(health_url, timeout=timeout, aws_sigv4=aws_sigv4, aws_region=aws_region, trusted_host=trusted_host)
     ok_status = status is not None and 200 <= status < 300
