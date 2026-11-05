@@ -169,7 +169,8 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
         ),
     )
     setup_parser.add_argument("--mode", choices=SETUP_MODES, help="Setup depth: local demo (default for a new setup), standard cloud connection, or production. Saved modes resume unchanged.")
-    setup_parser.add_argument("--preset", choices=PRESET_ORDER, help="Advanced preset override used only when creating config.")
+    setup_parser.add_argument("--preset", choices=PRESET_ORDER, help="Preset for new config or a reviewed replacement with --apply-mode-preset.")
+    setup_parser.add_argument("--apply-mode-preset", action="store_true", help="Accept the displayed preset diff and replace existing policy/environment settings; preserves project identity and backend.")
     setup_parser.add_argument("--image-uri", help="Existing immutable ECR Lambda image URI to save in local config.")
     setup_parser.add_argument("--backend-bucket", help="Existing or planned S3 Terraform state bucket name.")
     setup_parser.add_argument("--backend-region", help="AWS region for the Terraform state backend.")
@@ -179,7 +180,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     setup_parser.add_argument("--plan-role-arn", help="Separate AWS plan role ARN used only with --apply-github.")
     setup_parser.add_argument("--snyk-token", help="Snyk token used only with --apply-github; never stored in setup progress.")
     setup_parser.add_argument("--generate", dest="render", action="store_true", help="Generate local deployment files from the resulting config.")
-    setup_parser.add_argument("--yes", action="store_true", help="Use safe local defaults without prompts; does not imply --apply-github.")
+    setup_parser.add_argument("--yes", action="store_true", help="Use safe local defaults without prompts; does not imply --apply-github or --apply-mode-preset.")
     setup_parser.add_argument("--strict", action="store_true", help="Exit non-zero while a required setup stage remains incomplete.")
     setup_parser.set_defaults(func=handlers.cmd_setup)
 

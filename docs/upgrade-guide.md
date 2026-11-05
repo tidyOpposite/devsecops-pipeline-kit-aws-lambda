@@ -149,6 +149,23 @@ it never runs real AWS tests. Follow [Security gate acceptance](security-gate-ac
 for permissions, variables, evidence and cleanup. The fixture requires
 Terraform 1.10.5 or newer; the manual workflow pins 1.10.5.
 
+## Reviewed Setup Mode Changes
+
+`setup --mode production --yes` no longer silently replaces existing policy
+or per-environment settings. When the config needs the selected mode preset,
+setup prints the exact diff and returns a validation error without changing
+config, progress, snapshots or generated files. Review it, then rerun with
+`--apply-mode-preset` and the same options to accept replacement explicitly.
+The flag also allows a deliberate preset replacement when mode requirements
+already pass. Without a replacement request, compliant settings are reused.
+
+Interactive setup displays the same diff before saving; Enter keeps existing
+settings and leaves unmet requirements pending. Canceling at review preserves
+saved progress too. Accepted changes retain project, region, image, admin role
+and backend, and create a recovery snapshot. Invalid supplied image/backend/role
+arguments or incompatible options fail before any setup writes or provider calls.
+Update scripts that relied on `--yes` to replace existing settings.
+
 ## Demo Completion And Status Scope
 
 For a new setup, `setup --yes` and Enter at the mode prompt select local demo

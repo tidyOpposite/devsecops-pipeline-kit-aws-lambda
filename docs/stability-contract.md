@@ -26,7 +26,7 @@ devsecops inventory --status stable --format markdown
 
 | Workflow | Stable commands and flags |
 | --- | --- |
-| First success | `devsecops`, `devsecops setup --mode --preset --image-uri --backend-bucket --backend-region --backend-lock-table --apply-github --deploy-role-arn --plan-role-arn --snyk-token --generate --yes --strict`, `devsecops status --deep --pre-deploy --strict --format --watch --interval`, `devsecops dry-run --preset --image-uri --environment`, `devsecops image validate --image-uri --environment --format` |
+| First success | `devsecops`, `devsecops setup --mode --preset --apply-mode-preset --image-uri --backend-bucket --backend-region --backend-lock-table --apply-github --deploy-role-arn --plan-role-arn --snyk-token --generate --yes --strict`, `devsecops status --deep --pre-deploy --strict --format --watch --interval`, `devsecops dry-run --preset --image-uri --environment`, `devsecops image validate --image-uri --environment --format` |
 | Deployment | `devsecops deploy prod --dry-run --yes --watch --interval`, `devsecops deploy status --run-id --watch --interval --format`, `devsecops deploy logs --run-id --failed`, `devsecops deploy rollback --run-id --image-uri --dry-run --yes --watch --interval` |
 | Troubleshooting | `devsecops doctor local --deep --strict --format`, `devsecops doctor github --strict --format`, `devsecops doctor aws --environment --strict --format`, `devsecops doctor branch --branch --strict --format`, `devsecops doctor actions --limit --strict --format`, `devsecops doctor all --deep --branch --environment --strict --format` |
 | Configuration and generation | `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops generate --dry-run`, `devsecops report --deep --format --output --print` |
@@ -49,6 +49,15 @@ status, and non-secret check details; credentials, role secret values, GitHub
 tokens, and Snyk tokens are forbidden. `--yes` authorizes safe local defaults
 only. Repository mutation requires an interactive confirmation or the explicit
 `--apply-github` flag.
+
+Supplied setup arguments are validated before any setup progress, config or
+snapshot writes and before provider inspection. Existing-config preset
+replacements display the actual diff with project identity and backend kept.
+Interactive acceptance defaults to keeping the config; canceling this review
+does not update saved progress. Noninteractive replacement requires
+`--apply-mode-preset`; `--yes` alone returns a validation error without writes
+when replacement needs review. Accepted replacements create a recovery snapshot.
+Selecting a mode by itself changes required checks and reuses compliant settings.
 
 New setup defaults to local demo; a saved standard/production mode is resumed
 unchanged. Normal status uses the saved demo scope and reconciles local config

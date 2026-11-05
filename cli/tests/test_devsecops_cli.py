@@ -698,6 +698,7 @@ devsecops dry-run
         setup_help = setup_buffer.getvalue()
         for flag in [
             "--mode",
+            "--apply-mode-preset",
             "--image-uri",
             "--backend-bucket",
             "--apply-github",
@@ -1029,7 +1030,7 @@ devsecops dry-run
             cli.save_setup_state(root, cli.new_setup_state("demo"))
             with patch.object(cli, "repo_root", return_value=root), patch.object(cli, "command_exists", return_value=False):
                 with redirect_stdout(io.StringIO()):
-                    result = cli.main(["setup", "--mode", "standard", "--yes"])
+                    result = cli.main(["setup", "--mode", "standard", "--yes", "--apply-mode-preset"])
             cfg = cli.load_config(root)
             snapshots = cli.list_snapshots(root)
 

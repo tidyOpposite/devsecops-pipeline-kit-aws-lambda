@@ -63,6 +63,13 @@ devsecops setup --mode production
 ```
 
 The completed-demo menu offers the same interactive action as option `7`.
+Setup shows a diff before a mode preset replaces existing settings. Enter keeps
+the current config with unmet production requirements still pending; accept
+explicitly to apply the displayed changes with a recovery snapshot. Canceling
+at this review preserves both config and progress. For scripts, first run
+`setup --mode production --yes` to review; it stops without writes if a
+replacement is needed. Rerun with `--apply-mode-preset` only after accepting
+that replacement. `--yes` alone does not authorize it.
 `status --strict`, `--pre-deploy` and `--deep` retain production verification
 semantics; a completed local demo cannot satisfy those requirements.
 

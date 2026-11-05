@@ -55,6 +55,12 @@ separate `devsecops setup --mode production` action. Explicit `status --strict`,
 adds `context.scope=demo` and `demo_complete`, with deployment gates remaining
 unverified until the production checks are requested and pass.
 
+Setup validates supplied arguments before writes. Before replacing existing
+policy/environment settings with a mode preset, it displays the exact diff and
+asks for acceptance (default: keep). Noninteractive replacement requires
+`--apply-mode-preset`; `--yes` alone stops without writes when review is needed.
+Accepted replacements preserve project identity/backend and create a snapshot.
+
 ## Preferred Terminology
 
 | Preferred product term | Compatibility names | Use it for |

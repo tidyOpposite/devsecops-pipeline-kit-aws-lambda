@@ -50,6 +50,7 @@ COMMAND_CONTRACTS: list[dict[str, Any]] = [
         "stable_flags": [
             "--mode",
             "--preset",
+            "--apply-mode-preset",
             "--image-uri",
             "--backend-bucket",
             "--backend-region",

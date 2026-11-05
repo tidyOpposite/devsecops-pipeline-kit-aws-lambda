@@ -7,6 +7,9 @@ semantic versioning.
 
 ### Fixed
 
+* Review the exact mode-preset diff before replacing existing settings in setup;
+  require explicit acceptance or `--apply-mode-preset`, preserve deployment
+  identity/backend, and reject invalid supplied arguments before any writes.
 * Default new setup to a credential-free demo, report `Demo complete` with a
   local `dev` preview and demo status/menu/TUI scope, and expose production
   setup as a separate action. Strict/deep status still requires cloud evidence.

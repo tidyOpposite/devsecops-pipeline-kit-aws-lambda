@@ -52,6 +52,7 @@ COMPLETION_OPTIONS = {
         "--help",
         "--mode",
         "--preset",
+        "--apply-mode-preset",
         "--image-uri",
         "--backend-bucket",
         "--backend-region",

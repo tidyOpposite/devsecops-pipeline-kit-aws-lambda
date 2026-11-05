@@ -839,6 +839,15 @@ def canonical_config_text(cfg: dict[str, Any]) -> str:
     return dump_config_toml(cfg)
 
 
+def config_with_preset(current: dict[str, Any], name: str) -> dict[str, Any]:
+    """Build a preset replacement while preserving deployment identity."""
+
+    cfg = preset_config(name)
+    for key in ("project_name", "aws_region", "lambda_image_uri", "terraform_admin_role_name", "backend"):
+        cfg[key] = current[key]
+    return cfg
+
+
 def unified_text_diff(before: str, after: str, fromfile: str, tofile: str) -> str:
     """Build a newline-terminated unified diff, or an empty string if equal."""
 
@@ -1133,6 +1142,7 @@ __all__ = [
     "config_preset_diff",
     "config_schema",
     "config_schema_markdown",
+    "config_with_preset",
     "config_shape_errors",
     "control_by_id",
     "control_catalog",

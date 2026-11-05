@@ -160,6 +160,24 @@ devsecops setup --mode production
 
 The completed-demo menu exposes this interactive action as option `7`.
 
+When existing settings need a mode preset, setup shows the exact configuration
+diff before saving anything. Press Enter to keep your settings, choose yes to
+accept the replacement, or pause without changing saved progress. Project
+identity, region, image, admin role and backend are preserved; policy and
+environment settings are replaced only after acceptance, with a recovery snapshot.
+
+For a noninteractive transition, first review the diff:
+
+```bash
+devsecops setup --mode production --yes
+# Stops without writes if existing settings would need replacement.
+devsecops setup --mode production --yes --apply-mode-preset
+```
+
+Use the second command only after reviewing the proposed replacement. `--yes`
+alone never accepts it. If the existing config already meets the selected
+mode's requirements, setup reuses it without applying a preset.
+
 Progress is atomically saved to `.devsecops/setup-state.json`, which is ignored
 by Git and never stores AWS credentials, GitHub tokens, Snyk tokens, or secret
 values. Press `Ctrl-C`, `b`, `back`, or `0` at a prompt and rerun
@@ -167,8 +185,8 @@ values. Press `Ctrl-C`, `b`, `back`, or `0` at a prompt and rerun
 the first incomplete stage is shown. A config change invalidates the saved
 dry-run result so stale progress cannot be reported as complete.
 
-`--yes` accepts only safe local defaults and never implies permission to change
-GitHub. To apply repository variables and encrypted secrets non-interactively,
+`--yes` accepts only safe local defaults and never implies permission to replace
+existing settings or change GitHub. To apply repository variables and encrypted secrets non-interactively,
 authorization must be explicit:
 
 ```bash

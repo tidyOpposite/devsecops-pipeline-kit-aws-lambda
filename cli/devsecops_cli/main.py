@@ -111,6 +111,7 @@ from .config import (
     config_preset_diff,
     config_schema,
     config_schema_markdown,
+    config_with_preset,
     control_by_id,
     control_catalog,
     control_state,
@@ -130,6 +131,7 @@ from .config import (
     prod_approval_environment,
     production_policy_blockers,
     uses_strict_cors,
+    unified_text_diff,
     validate_config,
     toml_value,
     write_config,
@@ -1499,25 +1501,88 @@ def begin_setup_step(root: Path, state: dict[str, Any], step: str, detail: str =
     save_setup_state(root, state)
 
 
-def setup_argument_error(args: argparse.Namespace, mode: str) -> str | None:
-    """Reject option combinations that cross the selected setup boundary."""
+def setup_argument_error(
+    args: argparse.Namespace, mode: str, cfg: dict[str, Any], *, new_interactive_config: bool = False,
+) -> str | None:
+    """Validate supplied inputs before creating progress, snapshots or config."""
 
     github_values = [
         getattr(args, "deploy_role_arn", None),
         getattr(args, "plan_role_arn", None),
         getattr(args, "snyk_token", None),
     ]
-    if any(github_values) and not bool(getattr(args, "apply_github", False)):
+    if any(value is not None for value in github_values) and not bool(getattr(args, "apply_github", False)):
         return "Role ARN and Snyk token options require --apply-github."
     cloud_options = [
         getattr(args, "backend_bucket", None),
         getattr(args, "backend_region", None),
         getattr(args, "backend_lock_table", None),
-        bool(getattr(args, "apply_github", False)),
     ]
-    if mode == "demo" and any(cloud_options):
+    if mode == "demo" and (any(value is not None for value in cloud_options) or bool(getattr(args, "apply_github", False))):
         return "Backend and GitHub apply options require --mode standard or --mode production."
+    role_failures = [check for check in _github_adapter.role_argument_checks(args) if check.status == "FAIL"]
+    if role_failures:
+        return " ".join(check.detail for check in role_failures)
+    for option in ("deploy_role_arn", "plan_role_arn", "snyk_token"):
+        value = getattr(args, option, None)
+        if value is not None and not value.strip():
+            return f"--{option.replace('_', '-')} cannot be empty."
+    image = getattr(args, "image_uri", None)
+    image_ref = parse_ecr_image_uri(image.strip()) if image is not None else None
+    # A new interactive config has no chosen region yet. Validate the supplied
+    # image now, then offer its region when gathering the new config inputs.
+    image_cfg = dict(cfg, aws_region=image_ref.region) if new_interactive_config and image_ref else cfg
+    if image is not None and any(check.status == "FAIL" for check in validate_setup_image(image_cfg, image)):
+        return "Invalid --image-uri. Use an immutable ECR image URI in the configured AWS region."
+    bucket = getattr(args, "backend_bucket", None)
+    if bucket is not None and not is_backend_bucket_configured(bucket):
+        return "Invalid --backend-bucket. Supply a valid, non-placeholder S3 bucket name."
+    region = getattr(args, "backend_region", None)
+    if region is not None and not AWS_REGION_RE.fullmatch(region):
+        return "Invalid --backend-region. Use an AWS region such as us-east-1."
+    lock_table = getattr(args, "backend_lock_table", None)
+    if lock_table is not None and not lock_table.strip():
+        return "--backend-lock-table cannot be empty."
     return None
+
+
+def review_setup_preset(
+    root: Path, cfg: dict[str, Any], args: argparse.Namespace, mode: str, preset_name: str,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Review the exact replacement before any setup writes or provider calls.
+
+    Return an approved candidate and whether noninteractive setup must stop.
+    Keeping the existing config is an explicit interactive choice; --yes alone
+    cannot authorize replacing policy or per-environment settings.
+    """
+
+    if not config_path(root).exists():
+        return None, False
+    authorized = bool(getattr(args, "apply_mode_preset", False))
+    blockers = setup_config_blockers(cfg, mode)
+    needs_posture = bool(blockers) and not any(check.status == "FAIL" for check in blockers)
+    if not authorized and not needs_posture:
+        return None, False
+    candidate = config_with_preset(cfg, preset_name)
+    diff = unified_text_diff(canonical_config_text(cfg), canonical_config_text(candidate), CONFIG_FILE, f"setup preset:{preset_name}")
+    if not diff:
+        return None, False
+    print()
+    if blockers:
+        emit_check_output("Mode configuration requirements", blockers, output_format="compact")
+    print(f"Proposed `{preset_name}` preset changes (not saved):")
+    print(diff, end="")
+    print("Project, region, image, admin role, and backend values are preserved.")
+    if not authorized:
+        if bool(getattr(args, "yes", False)):
+            print(fail("Existing settings were kept. --yes does not authorize a preset replacement."))
+            print("Review the diff, then rerun with --apply-mode-preset and the same options to accept it, or run setup interactively to keep the current settings.")
+            return None, True
+        authorized = prompt_bool("Replace existing policy and environment settings with these changes", False, allow_cancel=True)
+    if authorized:
+        return candidate, False
+    print(info("Keeping existing configuration; unmet mode requirements remain pending."))
+    return None, False
 
 
 def prompt_matching_text(label: str, default: str, pattern: Any, guidance: str) -> str:
@@ -1574,7 +1639,9 @@ def write_setup_config_change(root: Path, cfg: dict[str, Any], description: str)
     print(ok("Updated ") + str(config_path(root)))
 
 
-def create_setup_config(root: Path, state: dict[str, Any], interactive: bool) -> dict[str, Any] | None:
+def create_setup_config(
+    root: Path, state: dict[str, Any], interactive: bool, image_uri: str | None = None,
+) -> dict[str, Any] | None:
     """Create or reuse the local source configuration for guided setup."""
 
     if config_path(root).exists():
@@ -1593,18 +1660,25 @@ def create_setup_config(root: Path, state: dict[str, Any], interactive: bool) ->
 
     cfg = clean_config(preset_name)
     if interactive:
+        image_ref = parse_ecr_image_uri(image_uri.strip()) if image_uri is not None else None
+        if image_ref:
+            cfg["aws_region"] = image_ref.region
         cfg["project_name"] = prompt_matching_text(
             "Project name",
             str(cfg["project_name"]),
             PROJECT_NAME_RE,
             "Use 3-32 lowercase letters, digits, or hyphens; start with a letter.",
         )
-        cfg["aws_region"] = prompt_matching_text(
-            "AWS region",
-            str(cfg["aws_region"]),
-            AWS_REGION_RE,
-            "Use an AWS region such as us-east-1 or eu-central-1.",
-        )
+        while True:
+            cfg["aws_region"] = prompt_matching_text(
+                "AWS region",
+                str(cfg["aws_region"]),
+                AWS_REGION_RE,
+                "Use an AWS region such as us-east-1 or eu-central-1.",
+            )
+            if image_ref is None or cfg["aws_region"] == image_ref.region:
+                break
+            print(warn(f"The supplied image requires AWS region {image_ref.region}. Choose that region or pause setup."))
         cfg["backend"]["region"] = cfg["aws_region"]
         cfg["backend"]["lock_table"] = f"{cfg['project_name']}-terraform-locks"
     write_config(root, cfg)
@@ -1961,8 +2035,19 @@ def cmd_setup(args: argparse.Namespace) -> int:
         return EXIT_VALIDATION_FAILED
 
     state = load_setup_state(root)
+    setup_started = False
     try:
         mode, preset_name = choose_setup_mode(args, state)
+        argument_error = setup_argument_error(
+            args, mode, cfg,
+            new_interactive_config=not config_path(root).exists() and not bool(getattr(args, "yes", False)),
+        )
+        if argument_error:
+            print(fail(argument_error))
+            return EXIT_VALIDATION_FAILED
+        preset_candidate, review_required = review_setup_preset(root, cfg, args, mode, preset_name)
+        if review_required:
+            return EXIT_VALIDATION_FAILED
         if state is None:
             state = new_setup_state(mode, preset=preset_name)
             print(info(f"Starting {mode} setup with the `{preset_name}` preset."))
@@ -1981,11 +2066,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 )
         mark_setup_step(state, "mode", "complete", f"Mode: {mode}; preset: {preset_name}")
         save_setup_state(root, state)
-
-        argument_error = setup_argument_error(args, mode)
-        if argument_error:
-            print(fail(argument_error))
-            return EXIT_VALIDATION_FAILED
+        setup_started = True
 
         interactive = not bool(getattr(args, "yes", False))
         input_error = False
@@ -1996,37 +2077,14 @@ def cmd_setup(args: argparse.Namespace) -> int:
         print_setup_dependencies(mode, dependency_status)
 
         begin_setup_step(root, state, "config")
-        cfg = create_setup_config(root, state, interactive) or load_config(root)
+        cfg = create_setup_config(root, state, interactive, getattr(args, "image_uri", None)) or load_config(root)
+        if preset_candidate is not None:
+            write_setup_config_change(root, preset_candidate, f"Before applying `{preset_name}` preset in guided setup.")
+            cfg = load_config(root)
 
         config_exists = config_path(root).exists()
         config_blockers = setup_config_blockers(cfg, mode) if config_exists else []
         config_valid = config_exists and not config_blockers
-        repairable_mode_posture = (
-            config_exists
-            and config_blockers
-            and not any(check.status == "FAIL" for check in config_blockers)
-        )
-        should_apply_mode_preset = False
-        if repairable_mode_posture:
-            print()
-            emit_check_output("Step 3/9 - Mode Posture", config_blockers, output_format="compact")
-            if interactive:
-                should_apply_mode_preset = prompt_bool(
-                    f"Apply the `{preset_name}` mode preset while preserving "
-                    "project, region, image, and backend values",
-                    True,
-                    allow_cancel=True,
-                )
-            elif getattr(args, "mode", None) or getattr(args, "preset", None):
-                should_apply_mode_preset = True
-                print(info(f"Applying the explicitly selected `{preset_name}` mode preset."))
-            if should_apply_mode_preset:
-                apply_result = apply_preset(root, preset_name, render=False)
-                if apply_result != EXIT_OK:
-                    return apply_result
-                cfg = load_config(root)
-                config_blockers = setup_config_blockers(cfg, mode)
-                config_valid = not config_blockers
         if config_exists and not config_valid:
             print()
             emit_check_output("Step 3/9 - Config", config_blockers, output_format="compact")
@@ -2147,7 +2205,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
             return EXIT_VALIDATION_FAILED
         return EXIT_OK
     except InputCancelled:
-        if state is not None:
+        if setup_started and state is not None:
             save_setup_state(root, state)
             print(
                 info(
@@ -2156,7 +2214,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 )
             )
         else:
-            print(info("Setup paused before progress was created."))
+            print(info("Setup paused before any changes were saved."))
         return EXIT_OK
 
 
@@ -2623,9 +2681,7 @@ def apply_preset(root: Path, name: str, render: bool = False) -> int:
         print("Available presets: " + ", ".join(PRESET_ORDER))
         return 1
     current = load_config(root)
-    cfg = preset_config(name)
-    for key in ["project_name", "aws_region", "lambda_image_uri", "terraform_admin_role_name", "backend"]:
-        cfg[key] = current[key]
+    cfg = config_with_preset(current, name)
     snapshot_before_change(root, "preset", f"Before applying `{name}` preset.")
     write_config(root, cfg)
     print(ok("Applied preset ") + name)
