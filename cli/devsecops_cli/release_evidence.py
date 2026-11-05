@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import VERSION
+from .cloud_evidence import validate_cloud_context
 from .config import config_shape_errors, validate_config
 from .deploy import PRODUCTION_JOB, deployment_title, is_commit_sha
 from .images import parse_ecr_image_uri
@@ -23,7 +24,7 @@ PRODUCTION_EVIDENCE_REQUIRED_FILES = [
     "audit-report.json", "terraform-generated.auto.tfvars", "github-setup.sh",
     "github-variables.env", "setup-checklist.md", "github-doctor.json", "branch-doctor.json",
     "github-status.json", "workflow-run.json", "automatic-rollback-run.json", "manual-rollback-run.json",
-    "terraform-output.json", "aws-outputs.json", "aws-doctor.json", "health.json", "health-response.txt",
+    "terraform-output.json", "terraform-context.json", "aws-outputs.json", "aws-doctor.json", "health.json", "health-response.txt", "health-status.txt",
     "cloudwatch-log-groups.json", "cloudwatch-tail.txt", "active-lambda-image.txt", "notes.md",
 ]
 WSL2_EVIDENCE_REQUIRED_FILES = ["wsl2-transcript.txt"]
@@ -54,7 +55,7 @@ def read_evidence(directory: Path, names: list[str]) -> tuple[dict[str, Any], li
             if path.stat().st_size > MAX_EVIDENCE_FILE_BYTES:
                 raise ValueError("Evidence file exceeds the size limit")
             content = path.read_text(encoding="utf-8").strip()
-            if not content:
+            if not content and name != "health-response.txt":
                 raise ValueError("Evidence file is empty")
             if path.suffix == ".json":
                 content = json.loads(content)
@@ -110,6 +111,7 @@ def workflow_run_checks(document: dict, proof: dict, requirement: tuple, expecte
 
 
 def cloud_checks(documents: dict[str, Any], image: str, cfg: dict) -> bool:
+    validate_cloud_context(documents["terraform-context.json"], documents["terraform-output.json"], cfg)
     terraform = {key: value["value"] for key, value in documents["terraform-output.json"].items()}
     aws = documents["aws-outputs.json"]
     outputs = aws["outputs"]
@@ -130,6 +132,7 @@ def cloud_checks(documents: dict[str, Any], image: str, cfg: dict) -> bool:
         and passing_checks(health, "health", {"Health endpoint URL", "Health response"})
         and any(check["name"] == "Health endpoint URL" and check["detail"].startswith(health_url + " (") for check in health["checks"])
         and re.match(r"HTTP 2\d\d:", health_response["detail"]) is not None
+        and re.fullmatch(r"2[0-9]{2}", documents["health-status.txt"]) is not None
     )
 
 

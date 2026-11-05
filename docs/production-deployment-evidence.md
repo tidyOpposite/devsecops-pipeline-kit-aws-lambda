@@ -35,9 +35,9 @@ The final bundle should contain:
 | Rendered/audit evidence | `readiness-report.md`, `audit-report.json`, generated helper artifacts |
 | GitHub setup and branch protection | `github-doctor.json`, `branch-doctor.json` |
 | Workflow dispatch and run result | `workflow-run.json`, `github-status.json` |
-| Terraform deployed outputs | `terraform-output.json` |
+| Terraform backend, workspace, AWS identity and deployed outputs | `terraform-context.json`, `terraform-output.json` |
 | AWS live resource outputs | `aws-outputs.json`, `aws-doctor.json` |
-| Health and API verification | `health.json`, `health-response.txt` |
+| Health and API verification | `health.json`, `health-response.txt`, `health-status.txt` |
 | CloudWatch log proof | `cloudwatch-log-groups.json`, `cloudwatch-tail.txt` |
 | Rollback readiness proof | `active-lambda-image.txt`, `automatic-rollback-run.json`, `manual-rollback-run.json` |
 | WSL2 compatibility proof | `wsl2-transcript.txt` |
@@ -185,17 +185,39 @@ devsecops deploy rollback --dry-run \
 ## 5. Prove Terraform And AWS Outputs
 
 Capture Terraform outputs and read-only AWS inspection after the workflow
-succeeds. Deep status requires HTTP 2xx from the deployed API's `/health`
+succeeds. Use Bash with `set -euo pipefail` for the following blocks, so failed
+commands stop evidence collection. Independently confirm the workload account
+ID in the AWS console; do not derive the expected account from the current CLI
+session. Initialize the reviewed backend and select the existing `prod`
+workspace explicitly. Do not create a workspace during evidence collection.
+Deep status requires HTTP 2xx from the deployed API's `/health`
 route. For `AWS_IAM`, export `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
 and `AWS_SESSION_TOKEN` when using temporary credentials. The caller needs
 `execute-api:Invoke` on the route.
 
 ```bash
-terraform -chdir=terraform output -json > "${EVIDENCE_DIR}/terraform-output.json"
+set -euo pipefail
+export EXPECTED_AWS_ACCOUNT_ID="123456789012" # replace with the confirmed workload account
+unset TF_WORKSPACE TF_DATA_DIR TF_CLI_ARGS TF_CLI_ARGS_init TF_CLI_ARGS_output TF_CLI_ARGS_workspace
+devsecops config validate --strict
+devsecops generate
+terraform -chdir=terraform init -reconfigure -input=false -no-color \
+  -backend-config=../dist/devsecops/backend.hcl
+terraform -chdir=terraform workspace select prod
+python -m devsecops_cli.cloud_evidence \
+  --expected-account-id "${EXPECTED_AWS_ACCOUNT_ID}" --directory "${EVIDENCE_DIR}"
 devsecops status --deep --strict --format json > "${EVIDENCE_DIR}/readiness.json"
 devsecops aws outputs --environment prod --format json > "${EVIDENCE_DIR}/aws-outputs.json"
 devsecops doctor aws --environment prod --strict --format json > "${EVIDENCE_DIR}/aws-doctor.json"
 ```
+
+The collector reads only the initialized backend metadata, selected workspace,
+STS identity, Terraform outputs and `lambda get-function`. It refuses a backend
+that differs from local config, a workspace other than `prod`, a different AWS
+account, or a live Lambda ARN/digest that disagrees with the outputs. It records
+only backend identifiers, never backend credentials or the full state file.
+`terraform-context.json` and `active-lambda-image.txt` must stay with these
+outputs. The release evidence gate validates their agreement too.
 
 The evidence should prove:
 
@@ -209,7 +231,10 @@ The evidence should prove:
 ## 6. Prove Health And Logs
 
 Extract the health URL from Terraform output and validate it through the CLI.
-Production APIs default to `AWS_IAM`, so use SigV4 signing:
+Read the deployed authorization mode from Terraform outputs: `AWS_IAM` checks
+use SigV4 and explicitly public `NONE` APIs use an unsigned request. Both checks
+require 2xx and reject redirects. The curl request has a 5-second connect
+timeout and a 20-second total timeout:
 
 ```bash
 HEALTH_URL="$(
@@ -223,12 +248,31 @@ print(payload["api_gateway_health_url"]["value"])
 PY
 )"
 
-devsecops health --url "${HEALTH_URL}" --aws-sigv4 --format json > "${EVIDENCE_DIR}/health.json"
-curl --fail --silent --show-error \
-  --aws-sigv4 "aws:amz:${AWS_REGION}:execute-api" \
-  --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
-  -H "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
-  "${HEALTH_URL}" | tee "${EVIDENCE_DIR}/health-response.txt"
+AWS_REGION="$(python -c 'import json,os; from pathlib import Path; print(json.loads((Path(os.environ["EVIDENCE_DIR"])/"terraform-context.json").read_text())["aws_region"])')"
+export AWS_REGION
+AUTH_TYPE="$(python -c 'import json,os; from pathlib import Path; print(json.loads((Path(os.environ["EVIDENCE_DIR"])/"terraform-output.json").read_text())["api_gateway_authorization_type"]["value"])')"
+health_args=(--timeout 20 --format json)
+curl_args=(--silent --show-error --proto '=https' --connect-timeout 5 --max-time 20)
+case "${AUTH_TYPE}" in
+  AWS_IAM)
+    health_args+=(--aws-sigv4 --aws-region "${AWS_REGION}")
+    curl_args+=(--aws-sigv4 "aws:amz:${AWS_REGION}:execute-api" \
+      --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}")
+    if [ -n "${AWS_SESSION_TOKEN:-}" ]; then
+      curl_args+=(-H "x-amz-security-token: ${AWS_SESSION_TOKEN}")
+    fi ;;
+  NONE) ;;
+  *) printf 'Unexpected API authorization mode: %s\n' "${AUTH_TYPE}" >&2; exit 1 ;;
+esac
+rm -f "${EVIDENCE_DIR}/health-status.txt"
+devsecops health --url "${HEALTH_URL}" "${health_args[@]}" > "${EVIDENCE_DIR}/health.json"
+http_status="$(curl "${curl_args[@]}" \
+  --output "${EVIDENCE_DIR}/health-response.txt" --write-out '%{http_code}' "${HEALTH_URL}")"
+printf '%s\n' "${http_status}" > "${EVIDENCE_DIR}/health-status.txt"
+case "${http_status}" in
+  2[0-9][0-9]) cat "${EVIDENCE_DIR}/health-response.txt" ;;
+  *) printf 'Health failed: HTTP %s\n' "${http_status}" >&2; exit 1 ;;
+esac
 ```
 
 Then capture recent Lambda logs:
@@ -264,14 +308,11 @@ The production workflow captures the previous Lambda image before applying the
 new image and contains the rollback step
 `Roll back Lambda image on failed deployment validation`.
 
-Capture the currently active image after the successful deployment:
-
-```bash
-aws lambda get-function \
-  --function-name "${LAMBDA_FUNCTION}" \
-  --query 'Code.ResolvedImageUri' \
-  --output text > "${EVIDENCE_DIR}/active-lambda-image.txt"
-```
+The collector in section 5 already saved the currently active image from
+`lambda get-function` → `Code.ResolvedImageUri` in `active-lambda-image.txt`
+and checked it against Terraform. `get-function-configuration` does not return
+this `Code` field. Preserve this snapshot from the successful deployment before
+starting rollback drills; do not overwrite it with a later rollback's image.
 
 In a controlled deployment account with a working image already deployed,
 deploy a test image that fails `/health`. Capture the failed run and verify

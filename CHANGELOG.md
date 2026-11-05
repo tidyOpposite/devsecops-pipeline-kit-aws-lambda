@@ -5,6 +5,14 @@ semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+* Require HTTP 2xx without redirects in public and signed health checks, reuse
+  that check in the deployment smoke step, and bound the step execution time.
+* Capture and validate the configured Terraform backend, `prod` workspace,
+  confirmed AWS account and live Lambda digest with production evidence;
+  record curl's HTTP status separately and accept empty HTTP 204 bodies.
+
 ## v0.15.0 - 2026-11-04
 
 ### Fixed

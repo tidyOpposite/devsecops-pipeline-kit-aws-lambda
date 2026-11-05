@@ -488,7 +488,8 @@ devsecops health --url https://abc123.execute-api.us-east-1.amazonaws.com/health
 devsecops github status --format compact --strict
 ```
 
-Signed health checks require HTTPS and reject redirects. For a custom API
+All health checks require HTTP 2xx and reject redirects. Signed checks also
+require HTTPS. The default HTTP timeout is 20 seconds. For a custom API
 Gateway domain you control, pass its exact hostname with `--trusted-host`:
 
 ```bash

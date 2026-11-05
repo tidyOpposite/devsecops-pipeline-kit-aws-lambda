@@ -73,7 +73,7 @@ but they are hidden from primary help and shell completion.
 | `devsecops status` | Stable | First success | Shows one overall score, status by area, blockers, and one next action. Supports `--deep`, `--pre-deploy`, `--strict`, `--watch`, and `--format human\|compact\|json`. |
 | `devsecops dry-run` | Stable | First success | Previews the first-success path without writing files or requiring AWS credentials. |
 | `devsecops image validate` | Stable | First success | Checks Lambda image URI shape, immutability, and region before production deploy. |
-| `devsecops health` | Stable | Operations | Validates the deployed `/health` endpoint outside GitHub Actions. Uses Terraform output unless `--url` is provided. Signed checks require HTTPS without redirects. Use `--aws-sigv4 --trusted-host HOST` to allow the exact hostname of a custom API Gateway domain. |
+| `devsecops health` | Stable | Operations | Requires HTTP 2xx without redirects; uses Terraform output unless `--url` is provided. `--timeout` must be positive (default 20 seconds). Signed checks require HTTPS; use `--aws-sigv4 --trusted-host HOST` for an exact custom API Gateway domain. |
 | `devsecops deploy prod` | Stable | Deployment | Runs production preflight, prevents an overlapping manual run, confirms the exact immutable image, and dispatches the protected workflow. Supports `--dry-run`, `--yes`, and `--watch`. |
 | `devsecops deploy status` | Stable | Deployment | Resolves an explicit run or reconciles the journaled request ID. Verifies the production job and operation steps before reporting success. Supports human, compact, and JSON output. |
 | `devsecops deploy logs` | Stable | Deployment | Reads full or failed-step Actions logs for the same selected deployment run. |

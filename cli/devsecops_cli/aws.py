@@ -648,7 +648,7 @@ def fetch_health_url(
     aws_region: str | None = None,
     *,
     trusted_host: str | None = None,
-    allow_redirects: bool = True,
+    allow_redirects: bool = False,
 ) -> tuple[int | None, str]:
     """Fetch a health endpoint and return its status plus a short detail.
 
@@ -656,6 +656,8 @@ def fetch_health_url(
     preserve their numeric status so readiness reporting can distinguish them.
     """
 
+    if type(timeout) is not int or timeout <= 0:
+        return None, "Health timeout must be a positive number of seconds."
     stripped_url = url.strip()
     try:
         parsed = urllib.parse.urlparse(stripped_url)
@@ -735,7 +737,7 @@ def collect_health_checks(
     if not health_url:
         return checks
     status, detail = fetch_health_fn(health_url, timeout=timeout, aws_sigv4=aws_sigv4, aws_region=aws_region, trusted_host=trusted_host)
-    ok_status = status is not None and 200 <= status < (300 if aws_sigv4 else 400)
+    ok_status = status is not None and 200 <= status < 300
     checks.append(
         Check(
             "Health response",

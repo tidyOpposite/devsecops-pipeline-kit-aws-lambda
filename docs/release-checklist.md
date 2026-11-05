@@ -176,9 +176,10 @@ bundle must include:
 * strict config validation and readiness JSON;
 * Markdown readiness report and JSON audit report;
 * GitHub doctor, branch doctor, and workflow run evidence;
-* Terraform outputs and `devsecops aws outputs` JSON;
+* verified Terraform backend/workspace and AWS identity in `terraform-context.json`,
+  Terraform outputs and `devsecops aws outputs` JSON;
 * `devsecops doctor aws --strict` JSON;
-* `/health` validation output and response body;
+* `/health` validation output, response body and explicit 2xx in `health-status.txt`;
 * CloudWatch log group/tail evidence;
 * active Lambda image and rollback-readiness notes.
 

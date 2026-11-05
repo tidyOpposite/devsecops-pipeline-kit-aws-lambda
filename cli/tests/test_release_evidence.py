@@ -1,7 +1,9 @@
 """Stable publication rejects evidence that cannot prove the release outcomes."""
 
+import copy
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -9,7 +11,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from devsecops_cli import VERSION, config, release_evidence as evidence, render
+from devsecops_cli import VERSION, cloud_evidence, config, release_evidence as evidence, render
 from devsecops_cli.main import v1_criteria_payload
 
 
@@ -78,12 +80,18 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "terraform-output.json": {name: {"value": value} for name, value in {
                 "environment": "prod", "terraform_workspace": "prod", "lambda_current_image_uri": IMAGE,
                 "api_gateway_health_url": HEALTH, "lambda_function_name": FUNCTION}.items()},
+            "terraform-context.json": {
+                "schema_version": 1, "captured_at": "2026-11-05T10:00:00Z", "expected_account_id": "123456789012",
+                "aws_identity": {"Account": "123456789012", "Arn": "arn:aws:sts::123456789012:assumed-role/deploy/session", "UserId": "fixture"},
+                "aws_region": cfg["aws_region"], "workspace": "prod", "backend": cloud_evidence.expected_backend(cfg),
+                "lambda_function_arn": f"arn:aws:lambda:{cfg['aws_region']}:123456789012:function:{FUNCTION}", "lambda_image_uri": IMAGE,
+            },
             "aws-outputs.json": {"kind": "aws-outputs", "environment": "prod", "outputs": {
                 "aws_region": cfg["aws_region"], "lambda_state": "Active", "lambda_last_update_status": "Successful",
                 "lambda_image_uri": IMAGE, "api_gateway_health_url": HEALTH, "cloudwatch_log_group": LOG_GROUP,
                 "lambda_function_name": FUNCTION}},
             "health.json": checks("health", **{"Health endpoint URL": f"{HEALTH} (argument)", "Health response": "HTTP 200: ok"}),
-            "health-response.txt": "ok", "cloudwatch-log-groups.json": {"logGroups": [{"logGroupName": LOG_GROUP}]},
+            "health-response.txt": "ok", "health-status.txt": "200", "cloudwatch-log-groups.json": {"logGroups": [{"logGroupName": LOG_GROUP}]},
             "cloudwatch-tail.txt": "request completed", "active-lambda-image.txt": IMAGE, "notes.md": "Protected prod walkthrough",
             "wsl2-transcript.txt": f"Release commit: {self.commit}\nLinux host 6.6-microsoft-standard-WSL2 x86_64\n"
                 f"Successfully installed devsecops-pipeline-cli-{VERSION}\ndevsecops {VERSION}\n"
@@ -105,6 +113,13 @@ class ReleaseEvidenceTests(unittest.TestCase):
         payload = v1_criteria_payload(ROOT, self.directory, artifacts_dir=self.directory)
         self.assertTrue(payload["stable_ready"], payload["stable_release_gates"])
 
+    def test_http_204_evidence_allows_an_empty_response_body(self):
+        self.write("health-response.txt", "")
+        self.write("health-status.txt", "204")
+        self.write("health.json", checks("health", **{"Health endpoint URL": f"{HEALTH} (argument)", "Health response": "HTTP 204: HTTP 204"}))
+        payload = v1_criteria_payload(ROOT, self.directory)
+        self.assertTrue(payload["stable_ready"], payload["stable_release_gates"])
+
     def test_blocks_wrong_commit_skipped_apply_digest_mismatch_and_unproven_wsl(self):
         proof = self.documents["release-proof.json"]
         for name, content in [
@@ -113,6 +128,10 @@ class ReleaseEvidenceTests(unittest.TestCase):
             ("automatic-rollback-run.json", workflow_run(12, self.commit, ("DevSecOps deploy prod", "failure", evidence.DEPLOY_STEPS))),
             ("active-lambda-image.txt", ROLLBACK),
             ("health.json", checks("health", **{"Health endpoint URL": f"{HEALTH} (argument)", "Health response": "HTTP 302: moved"})),
+            ("health-status.txt", "302"),
+            ("terraform-context.json", self.documents["terraform-context.json"] | {"workspace": "staging"}),
+            ("terraform-context.json", self.documents["terraform-context.json"] | {"expected_account_id": "999999999999"}),
+            ("terraform-context.json", self.documents["terraform-context.json"] | {"backend": {"type": "local"}}),
             ("wsl2-transcript.txt", f"devsecops {VERSION}"),
         ]:
             with self.subTest(name=name):
@@ -149,6 +168,59 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertTrue(v1_criteria_payload(ROOT, self.directory, repository=REPOSITORY)["stable_ready"])
             response["actions/jobs/121/logs"] = response["actions/jobs/131/logs"]
             self.assertFalse(v1_criteria_payload(ROOT, self.directory, repository=REPOSITORY)["stable_ready"])
+
+    def test_production_capture_checks_context_before_writing_evidence(self):
+        for mismatch in (None, "backend", "workspace", "account", "digest", "lambda_arn"):
+            with self.subTest(mismatch=mismatch), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                cfg = copy.deepcopy(self.documents["config.json"])
+                config.write_config(root, cfg)
+                backend = cloud_evidence.expected_backend(cfg)
+                backend_type = backend.pop("type")
+                backend["secret_key"] = "never-copy-backend-credentials"
+                if mismatch == "backend":
+                    backend["bucket"] = "another-project-state"
+                metadata = root / "terraform/.terraform/terraform.tfstate"
+                metadata.parent.mkdir(parents=True)
+                metadata.write_text(json.dumps({"backend": {"type": backend_type, "config": backend}}))
+                identity = self.documents["terraform-context.json"]["aws_identity"] | {}
+                live = {"Code": {"ResolvedImageUri": IMAGE}, "Configuration": {
+                    "FunctionArn": self.documents["terraform-context.json"]["lambda_function_arn"]}}
+                if mismatch == "account":
+                    identity["Account"] = "999999999999"
+                if mismatch == "digest":
+                    live["Code"]["ResolvedImageUri"] = ROLLBACK
+                if mismatch == "lambda_arn":
+                    live["Configuration"]["FunctionArn"] = live["Configuration"]["FunctionArn"].replace("123456789012", "999999999999")
+                commands = []
+
+                def provider(command, **kwargs):
+                    commands.append(command)
+                    self.assertEqual(kwargs["timeout"], 60)
+                    if command[0] == "terraform":
+                        payload = ("staging" if mismatch == "workspace" else "prod") if command[2] == "workspace" else json.dumps(self.documents["terraform-output.json"])
+                    else:
+                        self.assertEqual(command[2], "get-caller-identity" if command[1] == "sts" else "get-function")
+                        payload = json.dumps(identity if command[1] == "sts" else live)
+                    return subprocess.CompletedProcess(command, 0, payload, "")
+
+                directory = root / "evidence"
+                with patch.dict(os.environ, {}, clear=True), patch.object(cloud_evidence.subprocess, "run", side_effect=provider):
+                    if mismatch:
+                        with self.assertRaises(ValueError):
+                            cloud_evidence.capture_cloud_evidence(root, directory, "123456789012")
+                        self.assertFalse(directory.exists())
+                    else:
+                        cloud_evidence.capture_cloud_evidence(root, directory, "123456789012")
+                        context = json.loads((directory / "terraform-context.json").read_text())
+                        self.assertEqual(context["workspace"], "prod")
+                        self.assertEqual((directory / "active-lambda-image.txt").read_text().strip(), IMAGE)
+                        self.assertNotIn("never-copy", "".join(path.read_text() for path in directory.iterdir()))
+                if mismatch == "backend":
+                    self.assertFalse(commands)
+                if mismatch == "workspace":
+                    self.assertFalse([command for command in commands if command[0] == "aws"])
+                self.assertFalse([command for command in commands if "apply" in command or "init" in command or "update-function-code" in command])
 
     def test_archive_copies_only_known_root_files(self):
         archive = self.directory / "bundle.zip"

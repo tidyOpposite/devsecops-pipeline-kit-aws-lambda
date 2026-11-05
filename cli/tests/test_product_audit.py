@@ -9,11 +9,14 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
+import threading
 import unittest
 import urllib.request
 import urllib.response
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from email.message import Message
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -754,8 +757,10 @@ class SignedHealthTests(unittest.TestCase):
             self.assertEqual(requests[0].get_header("X-amz-security-token"), "fixture-session")
 
             requests.clear()
-            self.assertEqual(aws.fetch_health_url(source), (200, "ok"))
-            self.assertEqual([request.full_url for request in requests], [source, target])
+            status, detail = aws.fetch_health_url(source)
+            self.assertEqual(status, 302)
+            self.assertIn("reject HTTP redirects", detail)
+            self.assertEqual([request.full_url for request in requests], [source])
             self.assertIsNone(requests[-1].get_header("Authorization"))
             self.assertIsNone(requests[-1].get_header("X-amz-security-token"))
 
@@ -765,6 +770,110 @@ class SignedHealthTests(unittest.TestCase):
             self.assertEqual(code, cli.EXIT_OK)
             self.assertEqual([request.full_url for request in requests], [target])
             self.assertEqual(requests[0].get_header("X-amz-security-token"), "fixture-session")
+
+    def test_signed_and_public_health_require_2xx_and_use_a_positive_timeout(self):
+        for signed in (False, True):
+            for status in (200, 204, 302, 500, None):
+                with self.subTest(signed=signed, status=status), patch.object(
+                    cli, "fetch_health_url", return_value=(status, "fixture response"),
+                ) as fetch:
+                    command = ["health", "--url", "https://abc123.execute-api.us-east-1.amazonaws.com/health",
+                               "--timeout", "20", "--format", "json"] + (["--aws-sigv4"] if signed else [])
+                    code, output = invoke(ROOT, command)
+                    self.assertEqual(code, 0 if status in (200, 204) else 1, output)
+                    self.assertEqual(fetch.call_args.kwargs["timeout"], 20)
+        with patch.object(urllib.request, "build_opener") as opener:
+            opener.return_value.open.side_effect = TimeoutError
+            self.assertEqual(aws.fetch_health_url("https://example.org/health", timeout=20), (None, "Timed out after 20s."))
+            self.assertEqual(opener.return_value.open.call_args.kwargs["timeout"], 20)
+            opener.reset_mock()
+            for timeout in (0, -1):
+                self.assertIn("positive", aws.fetch_health_url("https://example.org/health", timeout=timeout)[1])
+            opener.assert_not_called()
+
+    def test_workflow_smoke_script_rejects_redirects_and_errors_on_a_local_server(self):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                status = int(self.path.strip("/"))
+                self.send_response(status)
+                if status == 302:
+                    self.send_header("Location", "/200")
+                self.end_headers()
+                if status != 204:
+                    self.wfile.write(b"health fixture")
+
+            def log_message(self, *args):
+                pass
+
+        workflow = (ROOT / ".github/workflows/deploy.yml").read_text()
+        step = workflow.split("      - name: Smoke test Lambda health endpoint\n", 1)[1].split("\n      # The baseline", 1)[0]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        self.assertIn("timeout-minutes: 1", step)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                config.write_config(root, customer_config())
+                (root / "cli").symlink_to(ROOT / "cli", target_is_directory=True)
+                for status in (200, 204, 302, 500):
+                    with self.subTest(status=status):
+                        requests.clear()
+                        environment = dict(os.environ, API_AUTHORIZATION_TYPE="NONE",
+                                           HEALTH_URL=f"http://127.0.0.1:{server.server_port}/{status}")
+                        result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", script], cwd=root,
+                                                env=environment, text=True, capture_output=True, timeout=10, check=False)
+                        self.assertEqual(result.returncode, 0 if status < 300 else 1, result.stdout + result.stderr)
+                        self.assertEqual(requests, [f"/{status}"])
+        finally:
+            server.shutdown()
+            worker.join(timeout=5)
+            server.server_close()
+
+    def test_evidence_health_runbook_rejects_non_2xx_and_supports_public_and_signed_apis(self):
+        document = (ROOT / "docs/production-deployment-evidence.md").read_text()
+        script = "set -euo pipefail\n" + document.split("## 6. Prove Health And Logs", 1)[1].split("```bash\n", 1)[1].split("```", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binaries = root / "bin"
+            binaries.mkdir()
+            for interpreter in ("python", "python3"):
+                (binaries / interpreter).symlink_to(sys.executable)
+            for name, body in {
+                "devsecops": 'printf \'{"kind":"health"}\\n\'\n',
+                "curl": ('while [ "$#" -gt 0 ]; do\n'
+                         '  if [ "$1" = --output ]; then shift; : > "$1"; fi\n'
+                         '  shift\n'
+                         'done\n'
+                         'printf "%s" "$TEST_HTTP_STATUS"\n'),
+            }.items():
+                path = binaries / name
+                path.write_text("#!/bin/sh\n" + body)
+                path.chmod(0o755)
+            (root / "terraform-context.json").write_text(json.dumps({"aws_region": "us-east-1"}))
+            for auth_type in ("NONE", "AWS_IAM"):
+                (root / "terraform-output.json").write_text(json.dumps({
+                    "api_gateway_health_url": {"value": "https://abc123.execute-api.us-east-1.amazonaws.com/health"},
+                    "api_gateway_authorization_type": {"value": auth_type},
+                }))
+                for status in (200, 204, 302, 500):
+                    with self.subTest(auth_type=auth_type, status=status):
+                        environment = dict(os.environ, PATH=str(binaries) + os.pathsep + os.environ["PATH"],
+                                           EVIDENCE_DIR=str(root), TEST_HTTP_STATUS=str(status),
+                                           AWS_ACCESS_KEY_ID="fixture", AWS_SECRET_ACCESS_KEY="fixture")
+                        environment.pop("AWS_SESSION_TOKEN", None)
+                        result = subprocess.run(["/bin/bash", "-c", script], env=environment,
+                                                capture_output=True, text=True, timeout=10, check=False)
+                        if status < 300:
+                            self.assertEqual(result.returncode, 0, result.stderr)
+                            self.assertEqual((root / "health-status.txt").read_text().strip(), str(status))
+                        else:
+                            self.assertNotEqual(result.returncode, 0)
+                            self.assertEqual((root / "health-status.txt").read_text().strip(), str(status))
 
 
 class ValidationAndUiTests(unittest.TestCase):

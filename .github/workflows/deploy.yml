@@ -398,17 +398,16 @@ jobs:
       # explicitly public endpoints use a normal unauthenticated request.
       - name: Smoke test Lambda health endpoint
         if: env.DEPLOY_MODE == 'deploy'
+        timeout-minutes: 1
+        env:
+          HEALTH_URL: ${{ steps.deployment-outputs.outputs.api_gateway_health_url }}
         run: |
-          health_url="${{ steps.deployment-outputs.outputs.api_gateway_health_url }}"
+          health_args=(--timeout 20 --format json)
           if [ "${API_AUTHORIZATION_TYPE}" = "AWS_IAM" ]; then
-            auth_args=(--aws-sigv4 "aws:amz:${AWS_REGION}:execute-api" --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}")
-            if [ -n "${AWS_SESSION_TOKEN:-}" ]; then
-              auth_args+=(-H "x-amz-security-token: ${AWS_SESSION_TOKEN}")
-            fi
-            curl --fail --silent --show-error --max-time 20 "${auth_args[@]}" "${health_url}"
-          else
-            curl --fail --silent --show-error --max-time 20 "${health_url}"
+            health_args+=(--aws-sigv4 --aws-region "${AWS_REGION}")
           fi
+          PYTHONPATH=cli python3 -m devsecops_cli health --url "${HEALTH_URL}" \
+            "${health_args[@]}"
 
       # The baseline scanner is unauthenticated, so it is safe and useful only for
       # an API intentionally configured as public.

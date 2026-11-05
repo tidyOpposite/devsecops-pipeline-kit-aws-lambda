@@ -75,6 +75,20 @@ Generated output drift now requires regeneration. Informational checks no longer
 reduce category scores. The menu resumes saved setup and supports confirmed
 production deployment and rollback directly.
 
+## Health And Production Evidence
+
+Public and IAM-protected `health` checks now require HTTP 2xx and reject
+redirects. Use the final endpoint URL and a positive `--timeout` (default 20
+seconds). The deployment smoke step uses the same check, with a one-minute
+workflow step limit in addition to the HTTP timeout.
+
+Existing production evidence bundles need `terraform-context.json` and
+`health-status.txt`. Follow the updated production evidence runbook to
+initialize the configured backend, select the existing `prod` workspace and
+capture the independently confirmed AWS account, backend identifiers and live
+Lambda digest. The evidence gate rejects inconsistent context; HTTP 204 may
+have an empty `health-response.txt` body.
+
 ## AWS Constraints And Bucket Names
 
 CloudWatch retention now uses the AWS-supported discrete values shown by
