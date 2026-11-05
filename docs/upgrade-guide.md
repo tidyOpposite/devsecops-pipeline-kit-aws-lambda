@@ -129,6 +129,24 @@ and account ID. Storage and its KMS encryption context use the same naming
 module. Run `terraform init` after updating the checkout so Terraform loads
 the new local module, then review the plan in the existing workspace.
 
+## Installer Upgrade Safety
+
+The updated installer keeps the active environment while preparing a replacement
+under `<install-dir>/environments/venv-*`. It validates both CLI startup and the
+temporary launcher's `--version` against the selected release, then atomically
+replaces the launcher within its existing bin directory. A failed venv, pip,
+optional TUI install, startup check or activation preserves the working CLI.
+Legacy installer-managed `<install-dir>/venv` installations migrate without
+deleting that environment. Unmanaged environments and unrelated launchers are
+not overwritten, and concurrent updates to the same destination are blocked.
+
+Successful upgrades retain previous environments for running commands. Their
+disk space can be reclaimed manually after verifying the active launcher path
+and closing processes using an older environment. Use the updated installer
+when choosing `--version vX.Y.Z` to reinstall an older release safely; historical
+installer assets do not gain these guarantees retroactively. See
+[Distribution and compatibility](distribution.md#upgrade).
+
 ## Standard Upgrade Flow
 
 Before upgrading:

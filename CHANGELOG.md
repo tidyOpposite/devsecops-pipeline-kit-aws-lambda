@@ -7,6 +7,10 @@ semantic versioning.
 
 ### Fixed
 
+* Stage installer upgrades in separate environments, verify CLI/launcher startup
+  and release version, then atomically publish the launcher. Preserve working
+  environments on failure, refuse unrelated launchers, and serialize installers
+  targeting the same installation or bin directory.
 * Keep all PR validation free of AWS credentials. Restrict optional AWS-backed
   sandbox plans to explicit manual runs from `main`, `dev`, and a separate
   backend; remove PR comments/write permission and PR subjects from IAM guidance.

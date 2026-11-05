@@ -25,7 +25,7 @@ Options:
   --version VERSION    Install a release tag or version, for example v0.11.0.
   --python PATH       Use this Python interpreter instead of auto-detecting one.
   --bin-dir DIR       Write the devsecops launcher to DIR.
-  --install-dir DIR   Install the private virtual environment under DIR.
+  --install-dir DIR   Store verified private environments under DIR.
   --with-tui          Install optional Rich/Textual dependencies.
   --no-verify         Skip SHA256SUMS verification.
   --run               Run the CLI after installation when stdin is interactive.
@@ -322,45 +322,153 @@ PY
   log "Verified SHA256 checksum"
 fi
 
-VENV_DIR="$INSTALL_DIR/venv"
-MANAGED_MARKER="$INSTALL_DIR/.devsecops-installer-managed"
-
-mkdir -p "$INSTALL_DIR" "$BIN_DIR"
-# Refuse to replace an unrelated virtual environment.  Only a directory carrying
-# this installer's marker is eligible for managed upgrades.
-if [ -d "$VENV_DIR" ] && [ ! -f "$MANAGED_MARKER" ]; then
-  fail "$VENV_DIR already exists and was not created by this installer"
-fi
-
-rm -rf "$VENV_DIR"
-log "Creating private virtual environment at $VENV_DIR"
-"$PYTHON_BIN" -m venv "$VENV_DIR" || fail "Python venv is unavailable. Install the venv package for $PYTHON_BIN, then rerun."
-touch "$MANAGED_MARKER"
-
-VENV_PYTHON="$VENV_DIR/bin/python"
-"$VENV_PYTHON" -m pip install "$WHEEL_PATH"
-
-if [ "$WITH_TUI" = "1" ]; then
-  log "Installing optional TUI dependencies"
-  "$VENV_PYTHON" -m pip install "rich>=13.7" "textual>=0.79"
-fi
-
-# Generate a small launcher bound to the private environment's exact interpreter
-# so activation is never required and PATH lookup cannot select another Python.
-"$VENV_PYTHON" - "$BIN_DIR/$COMMAND_NAME" "$VENV_PYTHON" <<'PY'
+# Build the replacement at its permanent path: virtual environments contain
+# absolute paths and must not be renamed after pip has created entry points.
+installed_version="$("$PYTHON_BIN" - "$INSTALL_DIR" "$BIN_DIR/$COMMAND_NAME" "$WHEEL_PATH" "$RELEASE_TAG" "$WITH_TUI" <<'PYINSTALL'
+import fcntl
+import os
 import pathlib
 import shlex
-import stat
+import shutil
+import signal
+import subprocess
 import sys
+import tempfile
 
-launcher_path = pathlib.Path(sys.argv[1])
-venv_python = sys.argv[2]
-launcher = f"#!/bin/sh\nexec {shlex.quote(venv_python)} -m devsecops_cli.main \"$@\"\n"
-launcher_path.write_text(launcher, encoding="utf-8")
-launcher_path.chmod(launcher_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-PY
+install_dir = pathlib.Path(sys.argv[1]).expanduser().resolve()
+launcher_path = pathlib.Path(sys.argv[2]).expanduser().absolute()
+wheel_path = sys.argv[3]
+release_tag = sys.argv[4]
+with_tui = sys.argv[5] == "1"
+marker = install_dir / ".devsecops-installer-managed"
+staged_env = None
+staged_launcher = None
+created_marker = False
+activated = False
+locks = []
+phase = "preparing installation paths"
 
-installed_version="$("$BIN_DIR/$COMMAND_NAME" --version)"
+
+def interrupted(signum, frame):
+    raise KeyboardInterrupt
+
+
+signal.signal(signal.SIGTERM, interrupted)
+
+
+def owned_launcher() -> bool:
+    """Recognize both the legacy launcher and the versioned launcher format."""
+    if launcher_path.is_symlink() or not launcher_path.is_file() or not marker.is_file():
+        return False
+    lines = launcher_path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != "#!/bin/sh":
+        return False
+    commands = [line for line in lines[1:] if line and not line.startswith("#")]
+    if len(commands) != 1:
+        return False
+    parts = shlex.split(commands[0])
+    if not parts or parts[0] != "exec" or parts[2:] not in (
+        ["-m", "devsecops_cli.main", "$@"], ["-I", "-m", "devsecops_cli.main", "$@"]
+    ):
+        return False
+    # Normalize directory aliases such as macOS /var -> /private/var, while
+    # leaving the interpreter symlink unresolved for ownership checks.
+    interpreter = pathlib.Path(os.path.abspath(parts[1]))
+    interpreter = interpreter.parent.resolve() / interpreter.name
+    legacy = install_dir / "venv/bin/python"
+    return interpreter == legacy or (
+        interpreter.name == "python" and interpreter.parent.name == "bin"
+        and interpreter.parent.parent.parent == install_dir / "environments"
+        and interpreter.parent.parent.name.startswith("venv-")
+    )
+
+
+try:
+    install_dir.mkdir(parents=True, exist_ok=True)
+    launcher_path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep lock files in place so concurrent processes lock the same inodes.
+    # Lock both paths: distinct install roots may share the same bin directory.
+    for lock_path in (install_dir / ".install.lock", launcher_path.parent / ".devsecops.install.lock"):
+        lock = lock_path.open("a")
+        locks.append(lock)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError("Another installation is running for this install or bin directory; retry after it finishes.") from None
+    if marker.is_symlink() or (marker.exists() and not marker.is_file()):
+        raise ValueError("The installer ownership marker is not a regular file.")
+    if (install_dir / "venv").exists() and not marker.is_file():
+        raise ValueError("The existing venv was not created by this installer.")
+    if os.path.lexists(launcher_path) and not owned_launcher():
+        raise ValueError(f"Refusing to replace an unrelated launcher: {launcher_path}")
+
+    environments = install_dir / "environments"
+    environments.mkdir(exist_ok=True)
+    staged_env = pathlib.Path(tempfile.mkdtemp(prefix="venv-", dir=environments))
+    phase = "creating the replacement virtual environment"
+    print(f"devsecops-install: Creating private virtual environment at {staged_env}", file=sys.stderr)
+    subprocess.run([sys.executable, "-I", "-m", "venv", str(staged_env)], check=True, stdout=sys.stderr)
+    venv_python = staged_env / "bin/python"
+    phase = "installing the release wheel"
+    subprocess.run([str(venv_python), "-I", "-m", "pip", "install", wheel_path], check=True, stdout=sys.stderr)
+    if with_tui:
+        phase = "installing optional TUI dependencies"
+        print("devsecops-install: Installing optional TUI dependencies", file=sys.stderr)
+        subprocess.run([str(venv_python), "-I", "-m", "pip", "install", "rich>=13.7", "textual>=0.79"],
+                       check=True, stdout=sys.stderr)
+
+    phase = "verifying the replacement CLI"
+    expected_version = f"devsecops {release_tag.removeprefix('v')}"
+    version = subprocess.run([str(venv_python), "-I", "-m", "devsecops_cli.main", "--version"],
+                             check=True, capture_output=True, text=True, timeout=30).stdout.strip()
+    if version != expected_version:
+        raise ValueError("The installed CLI version does not match the selected release.")
+    # The temporary launcher lives alongside its destination, guaranteeing
+    # the final replace stays on one filesystem and is atomic.
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=".devsecops-install-",
+                                     dir=launcher_path.parent, delete=False) as handle:
+        staged_launcher = pathlib.Path(handle.name)
+        handle.write("#!/bin/sh\n# Managed by DevSecOps Pipeline Kit installer.\n"
+                     f'exec {shlex.quote(str(venv_python))} -I -m devsecops_cli.main "$@"\n')
+    staged_launcher.chmod(0o755)
+    phase = "verifying the replacement launcher"
+    launcher_version = subprocess.run([str(staged_launcher), "--version"], check=True,
+                                      capture_output=True, text=True, timeout=30).stdout.strip()
+    if launcher_version != expected_version:
+        raise ValueError("The replacement launcher did not start the selected CLI version.")
+
+    phase = "activating the verified CLI"
+    if not marker.exists():
+        marker.touch(mode=0o600, exist_ok=False)
+        created_marker = True
+    # Recheck immediately before publication in case a different install
+    # directory targets this same bin path while we prepare the candidate.
+    if os.path.lexists(launcher_path) and not owned_launcher():
+        raise ValueError(f"The destination launcher changed during installation: {launcher_path}")
+    # A signal after publication must never remove the now-active environment.
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+    try:
+        os.replace(staged_launcher, launcher_path)
+        activated = True
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+    print(version)
+except (OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
+    detail = str(exc) if isinstance(exc, (OSError, ValueError)) else type(exc).__name__
+    outcome = "The verified replacement CLI is active." if activated else "The previous CLI was preserved."
+    raise SystemExit(f"Installation failed while {phase}: {detail}. {outcome}") from None
+finally:
+    if staged_launcher is not None:
+        staged_launcher.unlink(missing_ok=True)
+    if not activated:
+        if staged_env is not None:
+            shutil.rmtree(staged_env, ignore_errors=True)
+        if created_marker:
+            marker.unlink(missing_ok=True)
+    for lock in reversed(locks):
+        lock.close()
+PYINSTALL
+)"
 log "Installed $installed_version"
 
 # Colon-delimited matching avoids false positives from partial directory names.
@@ -379,6 +487,7 @@ if [ "$RUN_AFTER" = "1" ]; then
   # Never start an interactive CLI when the installer is running in a pipe or
   # unattended bootstrap environment.
   if [ -t 0 ]; then
+    cleanup
     exec "$BIN_DIR/$COMMAND_NAME"
   fi
   warn "--run was requested, but installer stdin is not interactive. Run: $BIN_DIR/$COMMAND_NAME"

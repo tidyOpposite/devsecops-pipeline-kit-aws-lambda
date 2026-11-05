@@ -278,8 +278,10 @@ docs/                               CLI-first security, scanner, cost, and troub
 
 ## Detailed CLI Usage
 
-The installer verifies the release wheel against `SHA256SUMS`, installs it into
-a private virtual environment, and writes a `devsecops` launcher. See
+The installer verifies the release wheel against `SHA256SUMS`, prepares a fresh
+private environment, checks `--version`, and atomically switches the `devsecops`
+launcher. Failed upgrades preserve the working CLI; previous environments are
+retained. See
 [Distribution and compatibility](docs/distribution.md) for pinned installs,
 manual wheel installation, upgrades, shell completion, checksum verification,
 and supported tool versions.

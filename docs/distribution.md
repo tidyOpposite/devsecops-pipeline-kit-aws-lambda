@@ -82,6 +82,30 @@ devsecops generate --dry-run
 Read [Upgrade guide](upgrade-guide.md) before upgrading across a release that
 changes `.devsecops-pipeline.toml` schema behavior.
 
+Each installer run prepares a fresh environment under
+`~/.local/share/devsecops-pipeline-cli/environments/venv-*` (or the configured
+`--install-dir`). It checks the selected release's exact CLI version and tests
+the replacement launcher before atomically replacing `devsecops`. The launcher
+uses that environment's Python in isolated mode, so `PYTHONPATH` and the current
+directory cannot substitute a different installed module.
+
+Failures while creating the environment, installing the wheel/TUI dependencies,
+checking startup, or publishing the launcher leave the existing launcher and
+environment intact. Incomplete candidates are removed. The legacy managed
+`<install-dir>/venv` layout upgrades automatically and remains available.
+Unrelated launchers and unmarked legacy environments are refused; use a
+different `--bin-dir`/`--install-dir` rather than overwriting another tool.
+Concurrent installers targeting the same install or bin directory are refused
+with a retry message; OS locks are released when the process exits.
+
+Old environments are retained so already-running commands can finish. They
+consume disk space until explicitly removed. Inspect the active launcher to
+identify its environment, and only remove other environments after their CLI
+processes have exited. To return to an earlier release, rerun this installer
+with `--version vX.Y.Z`; it verifies and activates that release through the same
+process. Older release-specific installer assets retain their historical
+behavior, so use the updated installer for this upgrade protection.
+
 ## Manual Wheel Install With pipx
 
 The installer is the recommended user path. For controlled environments that
