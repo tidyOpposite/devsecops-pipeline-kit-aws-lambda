@@ -214,6 +214,7 @@ from .paths import (
     SNAPSHOT_DIR,
     SNAPSHOT_FILES,
     SNAPSHOT_FILE_PATHS,
+    find_project_root,
 )
 from .render import (
     backend_tf,
@@ -355,9 +356,9 @@ def info(text: str) -> str:
 
 
 def repo_root() -> Path:
-    """Use the current working directory as the explicit project boundary."""
+    """Resolve the caller's project, including commands run in subdirectories."""
 
-    return Path.cwd()
+    return find_project_root()
 
 
 # Local snapshot presentation delegates storage and allowlist enforcement to

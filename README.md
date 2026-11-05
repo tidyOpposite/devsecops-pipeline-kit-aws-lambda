@@ -34,10 +34,12 @@ security controls rather than an opaque deployment service.
 
 For the no-credentials quick start below, you need:
 
-- Linux, macOS, or WSL2 with `curl` and Python 3.11, 3.12, 3.13, or 3.14.
-- A local checkout of this repository; run the commands from its root.
-- An immutable ECR-style image URI for validation. The example URI is safe to
-  use for the dry run because the CLI does not contact AWS in that step.
+- Linux, macOS, or WSL2 with Git and Python 3.11, 3.12, 3.13, or 3.14.
+- Internet access to clone the repository and download the CLI release.
+
+The commands below create the checkout and enter it before installing the CLI.
+Demo setup uses a built-in sample image URI; no AWS/GitHub credentials or real
+container image are needed.
 
 A real deployment additionally requires an AWS account, a GitHub repository,
 Terraform, AWS CLI, GitHub CLI, configured OIDC roles, a remote Terraform
@@ -59,28 +61,37 @@ boundary and image requirements.
 
 ## Quick Start
 
-Install the latest published release:
+Copy this block from a directory where you want to keep the project. It obtains
+the Terraform/workflow files, installs the latest published CLI, and runs the
+local demo:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/main/install.sh | sh
+git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
+cd devsecops-pipeline-kit &&
+sh install.sh &&
+export PATH="${DEVSECOPS_BIN_DIR:-$HOME/.local/bin}:$PATH" &&
+devsecops --version &&
+devsecops setup --mode demo --yes --strict &&
+devsecops generate --dry-run
 ```
 
-Then run the complete three-command first experience from the repository root:
-
-```bash
-devsecops setup --preset balanced --yes
-devsecops status
-devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
-```
+For an existing checkout, enter it and start with `sh install.sh`.
 
 Expected result:
 
-- `setup` starts or resumes the standard nine-stage setup, checks dependencies,
+- `setup --mode demo` starts or resumes the local nine-stage demo, checks dependencies,
   creates `.devsecops-pipeline.toml`, and saves non-secret progress under
-  `.devsecops/`. With `--yes` it never changes GitHub or AWS.
-- `status` shows one overall score, the remaining blockers, and one next action.
-- `dry-run` validates the immutable image URI and previews the files that would
-  be generated. It does not write files and does not require AWS credentials.
+  `.devsecops/`. Demo mode makes no AWS or GitHub requests.
+- Setup includes the sample-image dry run. `generate --dry-run` then previews
+  the files for the saved config without writing generated files.
+
+The installed wheel provides the CLI; the checkout provides Terraform and
+GitHub workflows. Keep both. Inside the checkout, commands also work from
+subdirectories such as `terraform/` or `docs/`: configuration, progress,
+snapshots and generated artifacts remain at the detected project root. A
+closer config or nested Git repository stops the search for an outer project.
+If no project is found, setup reports the missing files and leaves that
+directory unchanged.
 
 Run `devsecops` without arguments at any time to see compact project status
 and the single recommended next command. Human-readable commands finish with

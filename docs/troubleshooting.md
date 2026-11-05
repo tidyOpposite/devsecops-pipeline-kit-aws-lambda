@@ -159,6 +159,21 @@ terraform/modules/lambda/main.tf
 Restore those files from the repository before running `devsecops generate`,
 Terraform plans, or production workflow dispatch.
 
+The installed wheel provides the executable, not a checkout. From a directory
+where you want to keep a new project:
+
+```bash
+git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
+cd devsecops-pipeline-kit &&
+devsecops setup --mode demo --yes --strict
+```
+
+For an existing checkout, enter its directory instead of cloning a second copy.
+The CLI finds the project from `terraform/`, `docs/`, and other subdirectories.
+It stops at a closer config or nested Git repository, so it will not silently
+write into an outer project. If a nested project is incomplete, restore its
+files or leave that nested repository and enter the intended checkout.
+
 ### Config validation fails
 
 Run config validation and fix the reported key:

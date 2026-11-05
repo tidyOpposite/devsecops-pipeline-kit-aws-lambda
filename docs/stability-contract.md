@@ -59,6 +59,19 @@ The protected workflow serializes production runs. Inferred rollback reads the
 recovery artifact from a completed, successful deployment attempt and verifies
 that its deployed image is still active.
 
+## Project Root And Relative Paths
+
+The CLI discovers the project from the current directory and its ancestors.
+The nearest local config or complete kit checkout is selected. A Git directory
+or worktree marker stops searching for an outer project; a closer config also
+defines a boundary even if required source files are missing. Without a match,
+the current directory remains the boundary. Setup then reports missing project
+files before writing config or progress.
+
+Config, setup/deployment state, snapshots, generated artifacts and relative
+report/evidence paths use this root. Absolute output paths retain their explicit
+destination. The installed package directory is never used as a fallback root.
+
 ## JSON Output Contract
 
 JSON output is stable by `kind`. Fields may be added within the same

@@ -149,6 +149,19 @@ it never runs real AWS tests. Follow [Security gate acceptance](security-gate-ac
 for permissions, variables, evidence and cleanup. The fixture requires
 Terraform 1.10.5 or newer; the manual workflow pins 1.10.5.
 
+## Project Root Discovery
+
+Commands can now run from subdirectories of a kit checkout. The CLI searches
+upward from the caller for a local config or complete project sources and
+stops at the nearest Git repository boundary. Config, progress, snapshots,
+generated files and relative report/evidence paths use the discovered root.
+A closer config takes precedence even if that nested checkout is incomplete.
+Outside a project, the current directory remains the boundary; setup reports
+missing source files and does not create progress or configuration there.
+
+The installed wheel still contains only the CLI. Use the updated Quick Start's
+`git clone` and `cd` steps to obtain Terraform and workflows before setup.
+
 ## Installer Upgrade Safety
 
 The updated installer keeps the active environment while preparing a replacement

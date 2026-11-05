@@ -7,6 +7,9 @@ semantic versioning.
 
 ### Fixed
 
+* Start the documented demo with an explicit repository clone and directory
+  change; discover the project root from subdirectories without crossing
+  nested Git/config boundaries or writing into an unrelated directory.
 * Pin Snyk by CLI version and image digest, prepare it before AWS access, and
   scan a read-only archive in an unprivileged container without AWS/OIDC/GitHub
   credentials. Add a real Docker credential-boundary probe to CI.

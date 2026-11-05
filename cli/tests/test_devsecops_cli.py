@@ -107,7 +107,7 @@ class DevSecOpsCliTests(unittest.TestCase):
         self.assertIn('requires-python = ">=3.11,<3.15"', distribution_doc)
         self.assertIn("Python 3.11, 3.12, 3.13, or 3.14", readme)
 
-    def test_readme_opens_with_a_three_command_first_experience(self) -> None:
+    def test_readme_provides_checkout_before_install_and_demo(self) -> None:
         readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
         first_screen_sections = [
             "## What This Product Does",
@@ -125,9 +125,13 @@ class DevSecOpsCliTests(unittest.TestCase):
         self.assertLess(readme.index("## Quick Start"), readme.index("## Repository Layout"))
         self.assertIn(
             """```bash
-devsecops setup --preset balanced --yes
-devsecops status
-devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
+git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
+cd devsecops-pipeline-kit &&
+sh install.sh &&
+export PATH="${DEVSECOPS_BIN_DIR:-$HOME/.local/bin}:$PATH" &&
+devsecops --version &&
+devsecops setup --mode demo --yes --strict &&
+devsecops generate --dry-run
 ```""",
             readme,
         )

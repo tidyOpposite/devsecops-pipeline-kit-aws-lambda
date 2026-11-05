@@ -46,6 +46,24 @@ SNAPSHOT_FILE_PATHS = frozenset(str(path) for path in SNAPSHOT_FILES)
 GENERATED_ARTIFACT_DOC = "docs/generated-artifacts.md"
 
 
+def find_project_root(start: Path | None = None) -> Path:
+    """Find the nearest kit checkout/config without crossing another Git root.
+
+    Start at the caller, never the installed package. A closer config is an
+    explicit project boundary even when its checkout is incomplete.
+    """
+
+    current = (start if start is not None else Path.cwd()).resolve()
+    for candidate in (current, *current.parents):
+        config = candidate / CONFIG_FILE
+        if config.exists() or config.is_symlink() or all((candidate / name).is_file() for name in REQUIRED_PROJECT_FILES):
+            return candidate
+        git = candidate / ".git"
+        if git.exists() or git.is_symlink():
+            break
+    return current
+
+
 __all__ = [
     "AUDIT_REPORT",
     "CONFIG_FILE",
@@ -60,4 +78,5 @@ __all__ = [
     "SNAPSHOT_FILES",
     "SNAPSHOT_FILE_PATHS",
     "SETUP_STATE_FILE",
+    "find_project_root",
 ]

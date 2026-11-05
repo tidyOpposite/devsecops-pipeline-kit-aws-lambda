@@ -27,14 +27,28 @@ Use the installer for the shortest supported path. It finds Python 3.11, 3.12,
 installs into a private virtual environment, and writes a launcher to
 `~/.local/bin/devsecops`.
 
+Obtain the project files before running setup. The wheel contains the CLI;
+Terraform and GitHub workflows come from the checkout:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/main/install.sh | sh
-devsecops --version
-devsecops
+git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
+cd devsecops-pipeline-kit &&
+sh install.sh &&
+export PATH="${DEVSECOPS_BIN_DIR:-$HOME/.local/bin}:$PATH" &&
+devsecops --version &&
+devsecops setup --mode demo --yes --strict
 ```
 
 If the current shell does not have `~/.local/bin` on `PATH`, the installer
 prints the absolute command path to run immediately.
+
+When using a manual wheel or pipx installation, keep a checkout too; installing
+the package does not download the Terraform/workflow source. Follow the
+[Quick Start](../README.md#quick-start) for the complete local demonstration.
+Commands run from project subdirectories find the root automatically. The
+nearest config or complete kit checkout wins, and a nested Git repository is
+a boundary; unrelated working directories never use the installed package as
+their project root.
 
 Pinned install with the release asset for tags that include `install.sh`:
 

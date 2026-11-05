@@ -9,8 +9,9 @@ contract in [Stability contract](stability-contract.md).
 
 ## 1. Install And Run The No-Credentials Guided Demo
 
-Install the latest published CLI release with the commands in
-[Distribution and compatibility](distribution.md), then run demo setup. Demo
+Start with the [copyable Quick Start](../README.md#quick-start), which clones
+the repository, enters it, and installs the CLI. Installing a wheel alone does
+not provide Terraform modules or workflows. From that checkout, run demo setup. Demo
 mode creates local config and runs a no-write dry-run with a clearly marked
 sample image URI. It neither queries nor changes AWS or GitHub.
 
@@ -46,6 +47,10 @@ If you only want to preview generated files from an existing config:
 ```bash
 devsecops generate --dry-run
 ```
+
+Commands also work from subdirectories of the checkout, with config and
+generated artifacts kept at its root. A nested Git repository or closer
+configuration defines an independent boundary.
 
 Expected output includes:
 
