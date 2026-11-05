@@ -1,9 +1,11 @@
 # Roadmap
 
-DevSecOps Pipeline Kit is currently an alpha-stage CLI-first product. The
-core direction is promising, but the project should be treated as a developing
-product rather than a finished platform. This roadmap turns the current
-Terraform/GitHub/AWS reference kit into a polished `devsecops` CLI experience.
+Current source: **`0.16.0.dev0` beta hardening, awaiting final acceptance**.
+The published baseline is `v0.15.0`. The current source contains further audit
+fixes; it is installed from a checkout until a new release is accepted and
+published. See the [product audit](docs/product-audit-v0.15.0.md) for local
+verification and open issues. Final AWS/GitHub, sandbox and WSL2 acceptance
+remains deferred until all fixes are complete.
 
 ## Product Direction
 
@@ -355,7 +357,7 @@ Acceptance criteria:
 Target release: `v0.11.0`.
 Status: release candidate shipped in `v0.11.0`.
 
-Current stage: `v0.11.0` ships the release-candidate evidence checklist,
+Historical milestone: `v0.11.0` shipped the release-candidate evidence checklist,
 blocker register, guided onboarding UX, and local evidence helper. Do not mark
 `v1.0.0` stable until the blocker register in
 [`docs/v1.0.0-release-candidate-checklist.md`](docs/v1.0.0-release-candidate-checklist.md)

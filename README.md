@@ -1,15 +1,19 @@
 # DevSecOps Pipeline Kit CLI for AWS Lambda
 
-![Stage: early alpha](https://img.shields.io/badge/stage-early_alpha-orange)
+![Stage: beta hardening](https://img.shields.io/badge/stage-beta_hardening-yellow)
 ![Development: active](https://img.shields.io/badge/development-active-brightgreen)
-![Releases: frequent](https://img.shields.io/badge/releases-frequent-blue)
-![Security controls: evolving](https://img.shields.io/badge/security_controls-evolving-blue)
+![Acceptance: pending](https://img.shields.io/badge/acceptance-pending-yellow)
 ![API stability: 0.x](https://img.shields.io/badge/API_stability-0.x_changes_expected-yellow)
 
 DevSecOps Pipeline Kit helps you prepare, validate, and operate a secure AWS
 Lambda container deployment pipeline from one terminal CLI. It turns a local
 configuration into reviewable Terraform and GitHub setup artifacts, then shows
 what still blocks a deployment.
+
+Current source version: **`0.16.0.dev0`**, unpublished beta hardening.
+Published baseline: [v0.15.0](https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/tag/v0.15.0).
+The current fixes require the source install below. Final AWS/GitHub and WSL2
+acceptance is pending; a production-ready release has not been declared.
 
 ## What This Product Does
 
@@ -35,7 +39,7 @@ security controls rather than an opaque deployment service.
 For the no-credentials quick start below, you need:
 
 - Linux, macOS, or WSL2 with Git and Python 3.11, 3.12, 3.13, or 3.14.
-- Internet access to clone the repository and download the CLI release.
+- venv/pip support and Internet access to clone and install pinned build tools.
 
 The commands below create the checkout and enter it before installing the CLI.
 Demo setup uses a built-in sample image URI; no AWS/GitHub credentials or real
@@ -62,21 +66,32 @@ boundary and image requirements.
 ## Quick Start
 
 Copy this block from a directory where you want to keep the project. It obtains
-the Terraform/workflow files, installs the latest published CLI, and runs the
-local demo:
+the current source, installs that same checkout into an isolated environment,
+and runs the local demo. This includes the unpublished hardening fixes; the
+published `v0.15.0` wheel does not contain them.
 
 ```bash
 git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
 cd devsecops-pipeline-kit &&
-sh install.sh &&
-export PATH="${DEVSECOPS_BIN_DIR:-$HOME/.local/bin}:$PATH" &&
+python3 -m venv .venv &&
+.venv/bin/python -m pip install --no-deps . &&
+export PATH="$PWD/.venv/bin:$PATH" &&
 devsecops --version &&
 devsecops setup --yes --strict &&
 devsecops status &&
 devsecops dry-run
 ```
 
-For an existing checkout, enter it and start with `sh install.sh`.
+For an existing checkout, enter it and start with `python3 -m venv .venv`.
+Record `git rev-parse HEAD` alongside `devsecops --version` when evaluating a
+source build. Repeat the same source commit and wheel checksum for acceptance.
+
+For a reproducible published baseline, use the
+[pinned v0.15.0 install](docs/distribution.md#pinned-published-baseline).
+That path pins the source tag, installer and wheel version and checks the
+installer before execution. It uses `setup --mode demo` explicitly, as required
+by that historical release. Use a newly accepted release for the final thesis
+demonstration after all fixes and final acceptance are complete.
 
 Expected result:
 
@@ -208,23 +223,20 @@ for a safe plan before any explicit apply.
 
 ## Development Status
 
-This project is in early alpha and is changing quickly. The CLI is usable for
-experimentation, review, demos, and guided pipeline setup, but it should not be
-treated as a stable platform yet.
+The current checkout is **`0.16.0.dev0` beta hardening, awaiting acceptance**.
+The published baseline remains `v0.15.0` (4 November 2026). Local fixes and
+tests are tracked in the [product audit](docs/product-audit-v0.15.0.md);
+their presence in source does not update an existing release asset.
 
-Expect frequent releases while the project moves toward `v1.0`. Command names,
-configuration fields, generated artifacts, operational diagnostics, and
-security controls may change across `0.x` versions as the product boundary gets
-sharper. Pin a release tag for repeatable demos or evaluations, read the
-[Changelog](CHANGELOG.md) before upgrading, and review generated Terraform and
-GitHub artifacts before applying them in real AWS accounts.
+Complete the remaining fixes, then run the AWS/GitHub deployment and recovery
+walkthrough, sandbox acceptance and WSL2 checks against one reviewed commit
+and wheel. Publish a new version only after those results are attached. Keep
+`v0.15.0` and its assets unchanged. The [RC checklist](docs/v1.0.0-release-candidate-checklist.md)
+and `devsecops criteria --strict` define the stable-release evidence gate.
 
-Security is an active development area. GitHub OIDC, immutable image inputs,
-Terraform validation, IaC scanning, optional Snyk, production `/health`
-validation, optional DAST, and rollback behavior are already present, but the
-controls, defaults, and audit outputs are still evolving. Follow the
-[Roadmap](ROADMAP.md) to see what is implemented, what is next, and what is not
-yet considered stable.
+The [stability contract](docs/stability-contract.md) identifies scriptable
+commands and compatibility rules. [Known limitations](docs/known-limitations.md)
+separates intentional product boundaries from outstanding acceptance blockers.
 
 ## Product Contract
 
@@ -858,6 +870,7 @@ devsecops health --aws-sigv4
 * [Upgrade guide](docs/upgrade-guide.md)
 * [Known limitations](docs/known-limitations.md)
 * [Changelog](CHANGELOG.md)
+* [Current unpublished hardening notes](docs/release-v0.16.0.dev0.md)
 * [v0.15.0 release notes](docs/release-v0.15.0.md)
 * [v0.14.0 release notes](docs/release-v0.14.0.md)
 * [v0.13.1 release notes](docs/release-v0.13.1.md)

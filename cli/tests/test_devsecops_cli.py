@@ -91,7 +91,6 @@ class DevSecOpsCliTests(unittest.TestCase):
 
     # Distribution metadata and first-success documentation stay synchronized.
     def test_version_metadata_is_consistent(self) -> None:
-        self.assertEqual(cli.VERSION, "0.15.0")
         self.assertEqual(package.VERSION, cli.VERSION)
         self.assertEqual(package.__version__, cli.VERSION)
         self.assertEqual(project_version(ROOT_DIR / "pyproject.toml"), cli.VERSION)
@@ -127,8 +126,9 @@ class DevSecOpsCliTests(unittest.TestCase):
             """```bash
 git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
 cd devsecops-pipeline-kit &&
-sh install.sh &&
-export PATH="${DEVSECOPS_BIN_DIR:-$HOME/.local/bin}:$PATH" &&
+python3 -m venv .venv &&
+.venv/bin/python -m pip install --no-deps . &&
+export PATH="$PWD/.venv/bin:$PATH" &&
 devsecops --version &&
 devsecops setup --yes --strict &&
 devsecops status &&

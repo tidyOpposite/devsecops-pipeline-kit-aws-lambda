@@ -5,6 +5,12 @@ and GitHub repository. The goal is to produce a reviewable evidence bundle that
 can be attached to a release record without requiring reviewers to inspect the
 source tree.
 
+Current source is `0.16.0.dev0` (unpublished beta hardening); the published
+baseline is `v0.15.0`. This walkthrough remains unexecuted for the final
+hardening candidate. After all audit fixes, select a new publishable version,
+synchronize metadata/notes, then collect this bundle from one reviewed commit
+and its CI wheel. Do not use the old published wheel to prove current fixes.
+
 Do not mark a release or roadmap item as production-proven until this workflow
 has been run against the intended AWS account, GitHub repository, immutable
 Lambda image, and protected `main` branch.

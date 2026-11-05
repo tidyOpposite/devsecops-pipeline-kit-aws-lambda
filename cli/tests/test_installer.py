@@ -158,6 +158,24 @@ os.replace = controlled_replace
         self.assertEqual(len(list((self.install / "environments").iterdir())), 1)
         self.assertFalse(list(self.bin.glob(".devsecops-install-*")))
 
+    def test_semantic_prerelease_tag_uses_the_canonical_python_wheel_version(self):
+        fixtures = Path(self.environment["INSTALLER_TEST_FIXTURES"])
+        version = "9.8.7rc1"
+        name = f"devsecops_pipeline_cli-{version}-py3-none-any.whl"
+        wheel = fixtures / name
+        with zipfile.ZipFile(fixtures / self.wheel_name) as original, zipfile.ZipFile(wheel, "w") as candidate:
+            for entry in original.infolist():
+                candidate.writestr(entry.filename.replace(VERSION, version),
+                                  original.read(entry).replace(VERSION.encode(), version.encode()))
+        (fixtures / "SHA256SUMS").write_text(f"{hashlib.sha256(wheel.read_bytes()).hexdigest()}  {name}\n")
+        (fixtures / "release.json").write_text(json.dumps({"tag_name": "v9.8.7-rc.1", "assets": [
+            {"name": asset, "browser_download_url": f"https://installer.test/{asset}"}
+            for asset in (name, "SHA256SUMS")
+        ]}))
+        result = self.install_release("", "--version", "v9.8.7-rc.1")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.version(), f"devsecops {version}")
+
     def test_failed_upgrade_preserves_working_launcher_and_cleans_only_candidate(self):
         original = self.legacy_install()
         for failure in ("venv", "pip", "tui", "startup", "version", "launcher", "activation"):

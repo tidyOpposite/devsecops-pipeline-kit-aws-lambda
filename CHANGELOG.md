@@ -7,6 +7,10 @@ semantic versioning.
 
 ### Fixed
 
+* Distinguish unpublished `0.16.0.dev0` beta hardening from the published
+  `v0.15.0` baseline, document a verified pinned baseline install, derive release
+  notes from the current version, and require matching tag/package/notes before
+  publication. Final AWS/GitHub and WSL2 acceptance remains pending.
 * Show working shortcuts only in the menu, adapt human terminal output to narrow
   widths, preserve copyable commands, and handle closed input as exit/pause.
   Reject malformed health URLs before requests and report endpoint validation.

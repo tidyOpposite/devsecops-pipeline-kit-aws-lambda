@@ -328,6 +328,7 @@ installed_version="$("$PYTHON_BIN" - "$INSTALL_DIR" "$BIN_DIR/$COMMAND_NAME" "$W
 import fcntl
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import signal
@@ -418,7 +419,12 @@ try:
                        check=True, stdout=sys.stderr)
 
     phase = "verifying the replacement CLI"
-    expected_version = f"devsecops {release_tag.removeprefix('v')}"
+    release_version = release_tag.removeprefix("v")
+    prerelease = re.fullmatch(r"(\d+\.\d+\.\d+)-(a|alpha|b|beta|rc)\.(\d+)", release_version)
+    if prerelease:
+        base, label, number = prerelease.groups()
+        release_version = base + {"alpha": "a", "beta": "b"}.get(label, label) + number
+    expected_version = f"devsecops {release_version}"
     version = subprocess.run([str(venv_python), "-I", "-m", "devsecops_cli.main", "--version"],
                              check=True, capture_output=True, text=True, timeout=30).stdout.strip()
     if version != expected_version:

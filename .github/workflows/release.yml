@@ -49,6 +49,11 @@ jobs:
             echo "stable=false" >> "${GITHUB_OUTPUT}"
           fi
 
+      - name: Verify release version and notes
+        env:
+          PYTHONPATH: cli
+        run: python -m devsecops_cli.release_version "${GITHUB_REF_NAME}" .
+
       - name: Verify stable release evidence and retrieve reviewed assets
         if: steps.tag.outputs.stable == 'true'
         env:
@@ -92,14 +97,13 @@ jobs:
           sha256sum install.sh *.whl *.tar.gz > SHA256SUMS
           sha256sum -c SHA256SUMS
 
-      # Prefer notes dedicated to this tag, with the changelog as a safe fallback.
+      # Publish the version-specific notes already checked before building.
       - name: Resolve release notes
         id: notes
         run: |
-          notes_path="docs/release-${GITHUB_REF_NAME}.md"
-          if [ ! -f "${notes_path}" ]; then
-            notes_path="CHANGELOG.md"
-          fi
+          version="$(PYTHONPATH=cli python -c 'from devsecops_cli import VERSION; print(VERSION)')"
+          notes_path="docs/release-v${version}.md"
+          test -f "${notes_path}"
           echo "path=${notes_path}" >> "${GITHUB_OUTPUT}"
 
       # The commit-pinned publisher uploads only files produced by this job.

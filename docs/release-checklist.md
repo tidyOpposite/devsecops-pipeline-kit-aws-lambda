@@ -1,7 +1,9 @@
 # Release Checklist
 
-Use this checklist for every `vX.Y.Z` release. Replace `0.14.0` and `v0.14.0`
-with the target version.
+Use this checklist for every new release. The published baseline is `v0.15.0`;
+current source is `0.16.0.dev0`, unpublished beta hardening. Do not reuse the
+existing tag or publish the development version. Choose a new final version
+after all fixes, then complete acceptance against that commit and CI wheel.
 
 ## 1. Prepare The Version
 
@@ -14,14 +16,31 @@ Update all version references together:
 * `cli/devsecops_cli/__init__.py`
 * `pyproject.toml`
 * `cli/pyproject.toml`
-* `cli/tests/test_devsecops_cli.py`
 
-Update release documentation:
+Update release documentation before validating:
 
 * `CHANGELOG.md`
-* `docs/release-v0.14.0.md`
+* version-specific notes at `docs/release-v<VERSION>.md`
 * `README.md` release links when a new release note is added
 * `ROADMAP.md` milestone status when a milestone ships
+
+Confirm the CLI and both package versions agree. Before building/tagging,
+derive the release identity from source instead of copying an old example:
+
+```bash
+export VERSION="$(PYTHONPATH=cli python3 -c 'from devsecops_cli import VERSION; print(VERSION)')"
+export TAG="${TAG:-v${VERSION}}"
+export NOTES="docs/release-v${VERSION}.md"
+PYTHONPATH=cli python3 -m devsecops_cli.release_version "${TAG}" . || exit 1
+if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+  echo "Choose a new version; this tag already exists." >&2
+  exit 1
+fi
+```
+
+For a prerelease, set `TAG` explicitly (for example `v0.16.0-rc.1`) and use its
+canonical Python version (`0.16.0rc1`) in CLI/package metadata and notes. The
+publisher validates this mapping and the installer checks the canonical version.
 
 ## 2. Validate Locally
 
@@ -57,15 +76,19 @@ devsecops doctor aws --environment prod --format compact
 ```bash
 PYTHON="${PYTHON:-python3.11}"
 
-rm -rf build dist
-"${PYTHON}" -m build
-cp install.sh dist/install.sh
-chmod 0755 dist/install.sh
-cd dist
-shasum -a 256 install.sh *.whl *.tar.gz > SHA256SUMS
-shasum -a 256 -c SHA256SUMS
-cd ..
+export PACKAGE_OUT="$(mktemp -d)"
+"${PYTHON}" -m build --outdir "${PACKAGE_OUT}"
+cp install.sh "${PACKAGE_OUT}/install.sh"
+chmod 0755 "${PACKAGE_OUT}/install.sh"
+(
+  cd "${PACKAGE_OUT}"
+  shasum -a 256 install.sh *.whl *.tar.gz > SHA256SUMS
+  shasum -a 256 -c SHA256SUMS
+)
 ```
+
+Keep `dist/devsecops/production-evidence` intact. Package staging uses a fresh
+directory and must not delete the walkthrough evidence needed for publication.
 
 The tag workflow repeats this build on GitHub Actions and publishes:
 
@@ -118,9 +141,9 @@ git add -- \
   docs/stability-contract.md \
   docs/v1.0.0-release-candidate-checklist.md \
   docs/upgrade-guide.md \
-  docs/release-v0.14.0.md \
+  "${NOTES}" \
   docs/command-inventory.md
-git commit -m "Release v0.14.0"
+git commit -m "Release ${TAG}"
 ```
 
 ## 5. Tag And Push
@@ -128,9 +151,9 @@ git commit -m "Release v0.14.0"
 Create an annotated tag from the release commit:
 
 ```bash
-git tag -a v0.14.0 -m "Release v0.14.0"
+git tag -a "${TAG}" -m "Release ${TAG}"
 git push origin main
-git push origin v0.14.0
+git push origin "${TAG}"
 ```
 
 The `Publish GitHub Release` workflow runs on `v*.*.*` tags.
@@ -144,8 +167,6 @@ reviewed CI candidate artifacts. A missing or invalid bundle fails publication.
 After the workflow finishes:
 
 ```bash
-VERSION="0.14.0"
-TAG="v${VERSION}"
 BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
 WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
 
@@ -161,7 +182,7 @@ devsecops --version
 ```
 
 Confirm the release page includes the expected notes from
-`docs/release-v0.14.0.md`.
+the version-specific notes at `${NOTES}`.
 
 ## 7. Production Evidence Gate
 
@@ -219,7 +240,7 @@ Confirm:
 
 ## 9. v1.0 Release Candidate Hardening Gate
 
-For `v0.14.0` release-candidate hardening and the final pre-`v1.0.0` release
+For the current hardening candidate and the final pre-`v1.0.0` release
 record, complete [v1.0.0 release candidate checklist](v1.0.0-release-candidate-checklist.md).
 
 At minimum, attach evidence for:

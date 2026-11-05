@@ -2486,15 +2486,15 @@ def v1_criteria_payload(root: Path, evidence_dir: Path | None = None, *, reposit
                 "docs/distribution.md",
                 "docs/release-checklist.md",
                 "docs/upgrade-guide.md",
-                "docs/release-v0.14.0.md",
+                f"docs/release-v{VERSION}.md",
             ],
             [
                 file_exists_check(root, "Distribution guide", "docs/distribution.md"),
                 file_exists_check(root, "Release checklist", "docs/release-checklist.md"),
                 file_exists_check(root, "Upgrade guide", "docs/upgrade-guide.md"),
-                file_exists_check(root, "Latest release notes", "docs/release-v0.14.0.md"),
+                file_exists_check(root, "Current version release notes", f"docs/release-v{VERSION}.md"),
             ],
-            "Update distribution, release, upgrade, and latest release-note docs.",
+            "Update distribution, release, upgrade, and current version release-note docs.",
         ),
         make_criterion(
             "known-limitations-explicit",
