@@ -259,7 +259,7 @@ def wsl_evidence_checks(directory: Path, root: Path) -> list[dict[str, str]]:
                  and f"Release commit: {commit}" in text.splitlines() and f"devsecops {VERSION}" in text.splitlines()
                  and re.search(r"^Linux .*microsoft.*WSL2", text, flags=re.MULTILINE | re.IGNORECASE) is not None
                  and f"Successfully installed devsecops-pipeline-cli-{VERSION}" in text
-                 and "Guided setup complete" in text and "# bash completion for devsecops" in text
+                 and any(marker in text for marker in ("Demo complete", "Guided setup complete")) and "# bash completion for devsecops" in text
                  and re.search(r"^Ran [1-9]\d* tests? in .*\n(?:\s*\n)?OK(?:\s|$)", text, flags=re.MULTILINE) is not None)
     except (OSError, subprocess.TimeoutExpired):
         valid = False

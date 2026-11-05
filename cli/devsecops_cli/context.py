@@ -19,6 +19,7 @@ from .models import Check
 from .paths import CONFIG_FILE, DIST_DIR, GENERATED_TFVARS, REQUIRED_PROJECT_FILES
 from .readiness import WORKLOAD_CHECKS, deployment_gate
 from .render import generated_artifact_gaps
+from .setup import collect_demo_checks
 
 PRODUCTION_DEPLOY_COMMAND = "devsecops deploy prod"
 
@@ -30,7 +31,7 @@ def _command_exists(name: str) -> bool:
 def missing_project_files(root: Path) -> list[str]:
     """Return required repository paths that are absent below ``root``."""
 
-    return [path for path in REQUIRED_PROJECT_FILES if not (root / path).exists()]
+    return [path for path in REQUIRED_PROJECT_FILES if not (root / path).is_file()]
 
 
 def project_context(root: Path, cfg: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -151,8 +152,8 @@ def next_action(
             action_id="missing_config",
             title="Local source configuration is missing",
             why=f"{CONFIG_FILE} is the source of truth for generated deployment files and status checks.",
-            changes=f"Creates {CONFIG_FILE} from the balanced preset; GitHub and AWS are not changed.",
-            command="devsecops setup --preset balanced --yes",
+            changes=f"Creates {CONFIG_FILE} for a new local demo or resumes the saved setup mode.",
+            command="devsecops setup --yes",
             docs="docs/first-successful-pipeline.md",
             context=context,
         )
@@ -166,6 +167,19 @@ def next_action(
             docs="docs/troubleshooting.md#config-validation-fails",
             context=context,
         )
+    if local_only and (observations is None or any(check.name == "Demo dry-run" for check in observations)):
+        demo = observations if observations is not None else collect_demo_checks(root, cfg)
+        if demo is not None:
+            complete = all(check.status == "OK" for check in demo)
+            return _next_action(
+                action_id="demo_complete" if complete else "demo_needs_refresh",
+                title="Demo complete" if complete else "Demo preview needs a refresh",
+                why="Local config and the current preview are verified." if complete else "The local preview must match the current configuration.",
+                changes="Previews generated files locally; cloud services are not queried." if complete else "Rechecks and resumes the saved local demo.",
+                command="devsecops generate --dry-run" if complete else "devsecops setup --yes",
+                docs="docs/first-successful-pipeline.md#1-install-and-run-the-no-credentials-guided-demo",
+                context=context, blocked=not complete,
+            )
     image_uri = str(cfg.get("lambda_image_uri", ""))
     if not image_uri or not is_immutable_image(image_uri):
         return _next_action(

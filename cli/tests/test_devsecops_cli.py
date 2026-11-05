@@ -130,8 +130,9 @@ cd devsecops-pipeline-kit &&
 sh install.sh &&
 export PATH="${DEVSECOPS_BIN_DIR:-$HOME/.local/bin}:$PATH" &&
 devsecops --version &&
-devsecops setup --mode demo --yes --strict &&
-devsecops generate --dry-run
+devsecops setup --yes --strict &&
+devsecops status &&
+devsecops dry-run
 ```""",
             readme,
         )
@@ -564,8 +565,8 @@ devsecops generate --dry-run
         help_text = cli.build_parser().format_help()
         self.assertIn("CLI product", help_text)
         self.assertIn("Product boundary:", help_text)
-        self.assertIn("devsecops setup --preset balanced --yes", help_text)
-        self.assertIn("devsecops dry-run --image-uri <immutable-ecr-image-uri>", help_text)
+        self.assertIn("devsecops setup --yes --strict", help_text)
+        self.assertIn("devsecops dry-run", help_text)
         self.assertIn("devsecops status", help_text)
         self.assertIn("without arguments shows compact status and one next action", help_text)
         self.assertIn("Human-readable commands finish with the same recommended next step", help_text)
@@ -918,7 +919,7 @@ devsecops generate --dry-run
         self.assertTrue(state["dry_run_fingerprint"])
         self.assertEqual(state["steps"]["summary"]["status"], "complete")
         self.assertEqual(state_mode, 0o600)
-        self.assertIn("Guided setup complete", buffer.getvalue())
+        self.assertIn("Demo complete", buffer.getvalue())
         self.assertIn("not required in demo mode", buffer.getvalue())
 
     def test_setup_resumes_at_saved_step_after_interactive_pause(self) -> None:

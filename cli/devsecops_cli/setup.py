@@ -19,7 +19,9 @@ from typing import Any
 from .config import PRESETS, config_path, validate_config
 from .images import is_immutable_image
 from .models import Check
-from .paths import SETUP_STATE_FILE
+from .paths import REQUIRED_PROJECT_FILES, SETUP_STATE_FILE
+
+PRODUCTION_SETUP_COMMAND = "devsecops setup --mode production"
 
 
 # Modes describe how much evidence setup requires, not authorization levels.
@@ -245,7 +247,7 @@ def demo_image_uri(cfg: dict[str, Any]) -> str:
 
     region = str(cfg.get("aws_region") or "us-east-1")
     project = str(cfg.get("project_name") or "devsecops-pipeline")
-    return f"123456789012.dkr.ecr.{region}.amazonaws.com/{project}-prod-lambda-repo:sha-demo123"
+    return f"123456789012.dkr.ecr.{region}.amazonaws.com/{project}-dev-lambda-repo:sha-demo123"
 
 
 def is_backend_bucket_configured(value: str) -> bool:
@@ -481,7 +483,7 @@ def setup_stages(
             "summary",
             "Review summary and next command",
             "complete" if summary_ready else "pending",
-            "Guided setup is complete."
+            ("Demo complete; local config and preview are verified." if mode == "demo" else "Guided setup is complete.")
             if summary_ready
             else "One or more required stages still need attention.",
         )
@@ -502,11 +504,31 @@ def completed_stage_count(stages: list[SetupStage]) -> tuple[int, int]:
     return sum(stage.status == "complete" for stage in required), len(required)
 
 
+def collect_demo_checks(root: Path, cfg: dict[str, Any]) -> list[Check] | None:
+    """Observe the local demo independently from production prerequisites."""
+
+    state = load_setup_state(root)
+    exists = config_path(root).is_file()
+    if (state is not None and state["mode"] != "demo") or (state is None and exists):
+        return None
+    failures = [check for check in validate_config(cfg) if check.status == "FAIL"]
+    missing = [name for name in REQUIRED_PROJECT_FILES if not (root / name).is_file()]
+    image = None if is_immutable_image(str(cfg.get("lambda_image_uri", ""))) else demo_image_uri(cfg)
+    preview_current = bool(state and state.get("dry_run_fingerprint") == setup_config_fingerprint(cfg, image_override=image))
+    return [
+        Check("Project files", "FAIL" if missing else "OK", "Missing: " + ", ".join(missing) if missing else "Project checkout is available."),
+        Check("Local config", "OK" if exists else "WARN", "Demo configuration is saved." if exists else "Run `devsecops setup --yes` to start the demo."),
+        Check("Config schema", "FAIL" if failures else "OK", "; ".join(check.name for check in failures) if failures else "Local configuration values are valid."),
+        Check("Demo dry-run", "OK" if preview_current and exists and not failures else "WARN",
+              "Local preview matches the current config." if preview_current and exists and not failures else "Run `devsecops setup --yes` to complete or refresh the local preview."),
+    ]
+
+
 def setup_next_command(stage: SetupStage | None, mode: str) -> str:
     """Return the most direct command for the next reconciled setup stage."""
 
     if stage is None:
-        return "devsecops status --deep" if mode != "demo" else "devsecops status"
+        return "devsecops status --deep" if mode != "demo" else "devsecops generate --dry-run"
     if stage.id == "backend" and "bucket name is still required" not in stage.detail:
         return "devsecops terraform bootstrap"
     return {
@@ -530,6 +552,8 @@ __all__ = [
     "SetupStage",
     "SetupStateError",
     "completed_stage_count",
+    "collect_demo_checks",
+    "PRODUCTION_SETUP_COMMAND",
     "demo_image_uri",
     "first_pending_stage",
     "github_setup_ready",

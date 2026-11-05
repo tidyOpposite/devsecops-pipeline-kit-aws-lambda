@@ -991,6 +991,19 @@ class ValidationAndUiTests(unittest.TestCase):
         self.assertEqual(result, 0, text)
         self.assertIn("Next Action", text)
         self.assertNotIn("Unexpected error", text)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cfg = project(root)
+            result, text = invoke(root, ["tui"])
+            self.assertEqual(result, 0, text)
+            self.assertIn("Next Action", text)
+            state = cli.new_setup_state("demo")
+            state["dry_run_fingerprint"] = cli.setup_config_fingerprint(cfg)
+            cli.save_setup_state(root, state)
+            result, text = invoke(root, ["tui"])
+            self.assertEqual(result, 0, text)
+            self.assertIn("Demo complete", text)
+            self.assertNotIn("Blocked", text)
 
     def test_wide_tables_preserve_text_at_narrow_terminal_widths(self):
         value = "https://example.test/" + "a" * 140

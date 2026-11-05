@@ -149,6 +149,24 @@ it never runs real AWS tests. Follow [Security gate acceptance](security-gate-ac
 for permissions, variables, evidence and cleanup. The fixture requires
 Terraform 1.10.5 or newer; the manual workflow pins 1.10.5.
 
+## Demo Completion And Status Scope
+
+For a new setup, `setup --yes` and Enter at the mode prompt select local demo
+with the `student-demo` preset. Existing saved modes and explicit presets/modes
+keep their meaning. Demo completion now says `Demo complete`, previews `dev`,
+and ordinary status/menu/TUI surfaces show local checks without production
+backend or credential gaps. The sample image is never saved as a real workload.
+The legacy `dashboard` command also uses the local demo view by default;
+explicit `dashboard --mode full` keeps the cloud diagnostics view.
+
+`status --format json` in demo scope adds `context.scope=demo` and
+`demo_complete`; the score describes local demo checks. Production readiness
+gates remain unverified. Existing `status --strict`, `--pre-deploy` and `--deep`
+continue to require production evidence, even in a demo project. Use the
+separate interactive `setup --mode production` action (also menu option `7`
+after demo completion) to connect cloud deployment. Config drift invalidates
+the demo preview and requires a local setup refresh.
+
 ## Project Root Discovery
 
 Commands can now run from subdirectories of a kit checkout. The CLI searches

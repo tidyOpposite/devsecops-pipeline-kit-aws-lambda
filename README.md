@@ -71,19 +71,20 @@ cd devsecops-pipeline-kit &&
 sh install.sh &&
 export PATH="${DEVSECOPS_BIN_DIR:-$HOME/.local/bin}:$PATH" &&
 devsecops --version &&
-devsecops setup --mode demo --yes --strict &&
-devsecops generate --dry-run
+devsecops setup --yes --strict &&
+devsecops status &&
+devsecops dry-run
 ```
 
 For an existing checkout, enter it and start with `sh install.sh`.
 
 Expected result:
 
-- `setup --mode demo` starts or resumes the local nine-stage demo, checks dependencies,
+- `setup --yes --strict` starts a new local demo or resumes the saved mode, checks dependencies,
   creates `.devsecops-pipeline.toml`, and saves non-secret progress under
   `.devsecops/`. Demo mode makes no AWS or GitHub requests.
-- Setup includes the sample-image dry run. `generate --dry-run` then previews
-  the files for the saved config without writing generated files.
+- Setup includes a sample-image preview. `status` shows `Demo complete` once
+  its local checks pass; `dry-run` repeats the preview without cloud requests.
 
 The installed wheel provides the CLI; the checkout provides Terraform and
 GitHub workflows. Keep both. Inside the checkout, commands also work from
@@ -123,8 +124,9 @@ are ready to connect GitHub and AWS.
 
 ## Guided Setup
 
-Run `devsecops setup` without flags for the interactive path. It is a resumable
-state machine rather than a one-shot config generator:
+Run `devsecops setup` without flags for the interactive path. A new setup
+defaults to demo (Enter at the mode prompt); saved modes resume unchanged. It
+is a resumable state machine:
 
 ```text
 1. Choose mode: demo, standard, or production
@@ -143,6 +145,20 @@ state machine rather than a one-shot config generator:
 | `demo` | `student-demo` | Creates local config and completes a dry-run with a clearly marked sample image URI. It does not query or change AWS or GitHub. |
 | `standard` | `balanced` | Requires Git, Terraform, AWS CLI, GitHub CLI, a real image/backend, AWS identity, and repository variables/OIDC role secrets. |
 | `production` | `enterprise` | Uses the production-oriented preset and keeps every standard cloud connection and strict control in scope. |
+
+After a demo, the default screen, status, menu, and TUI show local demo
+completion. A configuration change requires a fresh local preview. JSON status
+labels this with `context.scope=demo` and `demo_complete`; its score describes
+the demo, while production gates remain unverified. `status --strict`,
+`--pre-deploy`, and `--deep` retain production verification requirements.
+
+Connect production separately when ready:
+
+```bash
+devsecops setup --mode production
+```
+
+The completed-demo menu exposes this interactive action as option `7`.
 
 Progress is atomically saved to `.devsecops/setup-state.json`, which is ignored
 by Git and never stores AWS credentials, GitHub tokens, Snyk tokens, or secret

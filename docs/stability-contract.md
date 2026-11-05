@@ -50,6 +50,13 @@ tokens, and Snyk tokens are forbidden. `--yes` authorizes safe local defaults
 only. Repository mutation requires an interactive confirmation or the explicit
 `--apply-github` flag.
 
+New setup defaults to local demo; a saved standard/production mode is resumed
+unchanged. Normal status uses the saved demo scope and reconciles local config
+and the current preview fingerprint. It adds `context.scope=demo` and
+`demo_complete` to JSON, while production gates remain unverified. Explicit
+`status --strict`, `--pre-deploy` and `--deep` retain production requirements.
+The separate `setup --mode production` action begins cloud configuration.
+
 `devsecops deploy prod` and `devsecops deploy rollback` store only non-secret
 run metadata in `.devsecops/deployments.json`. Its schema is fail-closed and
 history is bounded. Status and logs can reconcile the local journal once

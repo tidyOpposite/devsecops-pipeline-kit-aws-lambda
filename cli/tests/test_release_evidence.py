@@ -95,7 +95,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "cloudwatch-tail.txt": "request completed", "active-lambda-image.txt": IMAGE, "notes.md": "Protected prod walkthrough",
             "wsl2-transcript.txt": f"Release commit: {self.commit}\nLinux host 6.6-microsoft-standard-WSL2 x86_64\n"
                 f"Successfully installed devsecops-pipeline-cli-{VERSION}\ndevsecops {VERSION}\n"
-                "Guided setup complete\n# bash completion for devsecops\nRan 200 tests in 2s\n\nOK\n",
+                "Demo complete\n# bash completion for devsecops\nRan 200 tests in 2s\n\nOK\n",
         }
         documents.update({name: workflow_run(identifier, self.commit, requirement)
                           for identifier, (name, requirement) in enumerate(evidence.RUN_REQUIREMENTS.items(), 11)})

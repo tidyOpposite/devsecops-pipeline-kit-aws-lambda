@@ -7,6 +7,9 @@ semantic versioning.
 
 ### Fixed
 
+* Default new setup to a credential-free demo, report `Demo complete` with a
+  local `dev` preview and demo status/menu/TUI scope, and expose production
+  setup as a separate action. Strict/deep status still requires cloud evidence.
 * Start the documented demo with an explicit repository clone and directory
   change; discover the project root from subdirectories without crossing
   nested Git/config boundaries or writing into an unrelated directory.

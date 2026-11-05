@@ -30,16 +30,14 @@ Files that would be generated
 Lambda image shape          OK
 Lambda image immutability   OK
 Guided Setup Summary
-Guided setup complete. No deployment was started.
+Demo complete. Local config and preview are verified.
 ```
 
 The equivalent standalone preview remains available when you do not want to
 create setup progress:
 
 ```bash
-devsecops dry-run \
-  --preset balanced \
-  --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
+devsecops dry-run --preset student-demo
 ```
 
 If you only want to preview generated files from an existing config:
@@ -51,6 +49,22 @@ devsecops generate --dry-run
 Commands also work from subdirectories of the checkout, with config and
 generated artifacts kept at its root. A nested Git repository or closer
 configuration defines an independent boundary.
+
+For a new setup, `devsecops setup --yes --strict` selects demo automatically;
+interactive setup selects demo when you press Enter at the mode prompt.
+Saved standard/production modes resume unchanged. `devsecops status`, the
+default screen, and the menu report local demo progress after a demo. A stale
+preview prompts you to resume demo setup; it does not require AWS credentials.
+
+Configure production as a separate action when ready:
+
+```bash
+devsecops setup --mode production
+```
+
+The completed-demo menu offers the same interactive action as option `7`.
+`status --strict`, `--pre-deploy` and `--deep` retain production verification
+semantics; a completed local demo cannot satisfy those requirements.
 
 Expected output includes:
 

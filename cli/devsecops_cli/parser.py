@@ -51,9 +51,9 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
               Terraform, GitHub Actions, AWS, and scanners are transparent execution layers.
 
             Recommended three-command first run:
-              devsecops setup --preset balanced --yes
+              devsecops setup --yes --strict
               devsecops status
-              devsecops dry-run --image-uri <immutable-ecr-image-uri>
+              devsecops dry-run
 
             `devsecops` without arguments shows compact status and one next action.
             Human-readable commands finish with the same recommended next step.
@@ -133,7 +133,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     dashboard_parser = subparsers.add_parser("dashboard", help=argparse.SUPPRESS)
     dashboard_parser.add_argument("--watch", action="store_true", help="Auto-refresh the dashboard until interrupted.")
     dashboard_parser.add_argument("--interval", type=int, default=5, help="Seconds between dashboard refreshes in watch mode.")
-    dashboard_parser.add_argument("--mode", choices=["compact", "full"], default="full", help="Dashboard detail level.")
+    dashboard_parser.add_argument("--mode", choices=["compact", "full"], help="Dashboard detail level: compact for demos, full otherwise.")
     dashboard_parser.set_defaults(func=handlers.cmd_dashboard)
 
     completion_parser = subparsers.add_parser("completion", help=argparse.SUPPRESS)
@@ -158,7 +158,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_help_epilog(
             (
-                "devsecops setup --mode demo --yes",
+                "devsecops setup --yes --strict",
                 "devsecops setup --mode standard --image-uri <immutable-ecr-image-uri>",
             ),
             (
@@ -168,7 +168,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
             ),
         ),
     )
-    setup_parser.add_argument("--mode", choices=SETUP_MODES, help="Setup depth: local demo, standard cloud connection, or production.")
+    setup_parser.add_argument("--mode", choices=SETUP_MODES, help="Setup depth: local demo (default for a new setup), standard cloud connection, or production. Saved modes resume unchanged.")
     setup_parser.add_argument("--preset", choices=PRESET_ORDER, help="Advanced preset override used only when creating config.")
     setup_parser.add_argument("--image-uri", help="Existing immutable ECR Lambda image URI to save in local config.")
     setup_parser.add_argument("--backend-bucket", help="Existing or planned S3 Terraform state bucket name.")
@@ -298,7 +298,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     )
     dry_run_parser.add_argument("--preset", choices=PRESET_ORDER, default="balanced", help="Preset to preview when no local config exists.")
     dry_run_parser.add_argument("--image-uri", help="Immutable ECR image URI to preview without writing it to config.")
-    dry_run_parser.add_argument("--environment", choices=ENVIRONMENTS, default="prod", help="Environment target for image naming checks.")
+    dry_run_parser.add_argument("--environment", choices=ENVIRONMENTS, help="Preview environment: dev for a saved demo, otherwise prod.")
     dry_run_parser.set_defaults(func=handlers.cmd_dry_run)
 
     image_parser = subparsers.add_parser("image", help=argparse.SUPPRESS)

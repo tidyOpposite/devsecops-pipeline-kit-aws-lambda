@@ -272,6 +272,8 @@ from .snapshots import (
     snapshot_rows,
 )
 from .setup import (
+    PRODUCTION_SETUP_COMMAND,
+    collect_demo_checks,
     SETUP_STATE_FILE,
     SetupStage,
     SetupStateError,
@@ -954,7 +956,11 @@ def print_gap_summary(checks: list[Check], limit: int = 3) -> None:
         print(f"    Fix: {action}")
 
 
-def collect_dashboard_checks(root: Path, cfg: dict[str, Any], mode: str = "full") -> list[Check]:
+def collect_dashboard_checks(root: Path, cfg: dict[str, Any], mode: str = "full", *, include_demo: bool = True) -> list[Check]:
+    if mode == "compact" and include_demo:
+        demo = collect_demo_checks(root, cfg)
+        if demo is not None:
+            return demo
     checks = _doctor_service.collect_dashboard_checks(
         root,
         cfg,
@@ -1189,6 +1195,19 @@ def cmd_inventory(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def print_demo_status(cfg: dict[str, Any], checks: list[Check], action: dict[str, Any]) -> None:
+    complete = all(check.status == "OK" for check in checks)
+    draw_box("Demo complete" if complete else "Local demo", [
+        f"Project: {cfg['project_name']} | Region: {cfg['aws_region']}",
+        "Local configuration and preview verified." if complete else "Complete or refresh the local setup and preview.",
+    ])
+    draw_table(["Local check", "Status", "Detail"], [[check.name, check.status, check.detail] for check in checks], title="Demo Readiness")
+    print(f"Overall: {score_status(readiness_score(checks))} (local demo)")
+    print()
+    print_next_action(action)
+    print(f"Configure production separately when ready: {PRODUCTION_SETUP_COMMAND}")
+
+
 def render_dashboard(root: Path, mode: str = "full", clear: bool = False, *,
                      cfg: dict[str, Any] | None = None, checks: list[Check] | None = None,
                      action: dict[str, Any] | None = None) -> None:
@@ -1202,6 +1221,9 @@ def render_dashboard(root: Path, mode: str = "full", clear: bool = False, *,
     action = action if action is not None else next_action(
         root, cfg, observations=checks, local_only=mode == "compact", pre_deploy=mode == "pre-deploy",
     )
+    if any(check.name == "Demo dry-run" for check in checks):
+        print_demo_status(cfg, checks, action)
+        return
     header(cfg)
     print()
     for line in menu_status(root, cfg, checks=checks):
@@ -1233,7 +1255,10 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
     root = repo_root()
     interval = max(1, int(args.interval))
     while True:
-        render_dashboard(root, mode=args.mode, clear=bool(args.watch))
+        cfg = load_config(root)
+        demo = collect_demo_checks(root, cfg) if args.mode is None else None
+        mode = args.mode or ("compact" if demo is not None else "full")
+        render_dashboard(root, mode=mode, clear=bool(args.watch), cfg=cfg, checks=demo)
         if not args.watch:
             return 0
         print()
@@ -1278,18 +1303,26 @@ def cmd_status(args: argparse.Namespace) -> int:
             scope = "deployment prerequisites" if pre_deploy else "deployment prerequisites and workload health"
             print(info(f"Checking {scope}..."), flush=True)
         cfg = load_config(root)
-        checks = collect_dashboard_checks(root, cfg, mode=mode)
+        strict = bool(getattr(args, "strict", False))
+        checks = (collect_dashboard_checks(root, cfg, mode=mode, include_demo=False)
+                  if strict and not deep else collect_dashboard_checks(root, cfg, mode=mode))
         action = next_action(root, cfg, observations=checks, local_only=not deep, pre_deploy=pre_deploy)
         if output_format == "json":
-            emit_json(status_payload(checks, action, deep, pre_deploy=pre_deploy))
+            payload = status_payload(checks, action, deep, pre_deploy=pre_deploy)
+            if any(check.name == "Demo dry-run" for check in checks):
+                payload["context"]["scope"] = "demo"
+                payload["demo_complete"] = all(check.status == "OK" for check in checks)
+            emit_json(payload)
         elif output_format == "compact":
-            print_readiness_breakdown(checks, compact=True)
-            print()
-            print_next_action(action)
+            if any(check.name == "Demo dry-run" for check in checks):
+                print_demo_status(cfg, checks, action)
+            else:
+                print_readiness_breakdown(checks, compact=True)
+                print()
+                print_next_action(action)
         else:
             render_dashboard(root, mode=mode, clear=watch, cfg=cfg, checks=checks, action=action)
 
-        strict = bool(getattr(args, "strict", False))
         result = strict_exit_code(checks, strict=strict, fail_on_warn=True)
         if strict and result == EXIT_OK:
             prerequisites = deployment_gate(checks, pre_deploy=True)[0]
@@ -1324,6 +1357,19 @@ def render_rich_tui(root: Path) -> bool:
     checks = collect_dashboard_checks(root, cfg, mode="compact")
     action = next_action(root, cfg, observations=checks, local_only=True)
     console = Console()
+    if any(check.name == "Demo dry-run" for check in checks):
+        complete = all(check.status == "OK" for check in checks)
+        console.print(Panel(f"Project: {cfg['project_name']}\nLocal configuration and preview.\nOverall: {readiness_score(checks)}% (local demo)",
+                            title="Demo complete" if complete else "Local demo"))
+        table = Table(title="Demo Readiness")
+        for name in ("Local check", "Status", "Detail"):
+            table.add_column(name)
+        for check in checks:
+            table.add_row(check.name, check.status, check.detail)
+        console.print(table)
+        console.print(Panel("\n".join(next_action_lines(action)), title="Next Action"))
+        console.print(f"Configure production separately when ready: {PRODUCTION_SETUP_COMMAND}")
+        return True
     console.print(
         Panel(
             f"Project: {cfg['project_name']}\nRegion: {cfg['aws_region']}\nOverall: {overall_breakdown_score(checks)}%",
@@ -1408,7 +1454,7 @@ def choose_setup_mode(args: argparse.Namespace, state: dict[str, Any] | None) ->
     if state is not None:
         return str(state["mode"]), str(state.get("preset") or setup_profile(str(state["mode"]))["preset"])
     if bool(getattr(args, "yes", False)):
-        return "standard", "balanced"
+        return "demo", "student-demo"
 
     draw_box(
         "Setup Mode",
@@ -1435,9 +1481,9 @@ def choose_setup_mode(args: argparse.Namespace, state: dict[str, Any] | None) ->
         "production": "production",
     }
     while True:
-        value = input("\nChoose mode [2, b/back/0 to pause]: ").strip().lower()
+        value = input("\nChoose mode [1, b/back/0 to pause]: ").strip().lower()
         if not value:
-            value = "2"
+            value = "1"
         if is_cancel_input(value):
             raise InputCancelled
         if value in choices:
@@ -1870,21 +1916,23 @@ def print_setup_summary(state: dict[str, Any], stages: list[SetupStage]) -> None
     print(f"Progress: {complete}/{required} required stages complete")
     print(f"Saved progress: {SETUP_STATE_FILE}")
     next_command = setup_next_command(pending, str(state["mode"]))
-    print(f"Next command: {next_command}")
     if pending:
         print(f"Resume point: {pending.title} - {pending.detail}")
     else:
-        print(ok("Guided setup complete. No deployment was started."))
+        print(ok("Demo complete. Local config and preview are verified." if state["mode"] == "demo"
+                 else "Guided setup complete. No deployment was started."))
     print()
     draw_box(
         "Next Action",
         [
-            pending.title if pending else "Validate the resulting project status",
-            pending.detail if pending else "Guided setup is complete; review the unified status before deployment.",
+            pending.title if pending else "Explore the local demo" if state["mode"] == "demo" else "Validate the resulting project status",
+            pending.detail if pending else "Preview the saved config without cloud access." if state["mode"] == "demo" else "Guided setup is complete; review the unified status before deployment.",
             "Rerunning setup rechecks observable state and resumes without repeating completed work.",
         ],
     )
     print(f"Next command: {next_command}")
+    if state["mode"] == "demo" and pending is None:
+        print(f"Configure production separately when ready: {PRODUCTION_SETUP_COMMAND}")
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
@@ -1902,7 +1950,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         [
             "Resumable onboarding for the first successful pipeline path.",
             f"Project context: {context['stage']}",
-            "AWS checks are read-only. GitHub changes require confirmation or --apply-github.",
+            "New setups start with a local demo. Saved modes resume unchanged.",
             f"Progress is stored locally in {SETUP_STATE_FILE}; secrets are never stored there.",
         ],
     )
@@ -2042,7 +2090,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         effective_image = None
         if mode == "demo" and not is_immutable_image(str(cfg.get("lambda_image_uri", ""))):
             effective_image = demo_image_uri(cfg)
-        dry_run_can_run = config_valid and bool(
+        dry_run_can_run = config_valid and not input_error and bool(
             effective_image or is_immutable_image(str(cfg.get("lambda_image_uri", "")))
         )
         current_fingerprint = setup_config_fingerprint(cfg, image_override=effective_image)
@@ -2052,7 +2100,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
                 argparse.Namespace(
                     preset=preset_name,
                     image_uri=effective_image,
-                    environment="prod",
+                    environment="dev" if mode == "demo" else "prod",
+                    demo=mode == "demo",
                 )
             )
             if dry_run_result == EXIT_OK:
@@ -2078,10 +2127,11 @@ def cmd_setup(args: argparse.Namespace) -> int:
         )
         save_reconciled_setup(root, state, stages)
         print()
+        if input_error:
+            print(fail("Setup inputs need attention. Correct the reported errors and rerun setup."))
+            return EXIT_VALIDATION_FAILED
         print_setup_summary(state, stages)
         pending = first_pending_stage(stages)
-        if input_error:
-            return EXIT_VALIDATION_FAILED
         if bool(getattr(args, "strict", False)) and pending is not None:
             required_tools = set(setup_profile(mode)["required_tools"])
             if any(not dependency_status.get(tool, False) for tool in required_tools):
@@ -3898,11 +3948,17 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     """Preview generated files and readiness without filesystem or cloud writes."""
 
     root = repo_root()
-    env_name = getattr(args, "environment", "prod")
+    state = load_setup_state(root)
+    requested_environment = getattr(args, "environment", None)
+    demo = (bool(getattr(args, "demo", False)) or getattr(args, "preset", None) == "student-demo"
+            or bool(state and state["mode"] == "demo" and requested_environment is None))
+    env_name = requested_environment or ("dev" if demo else "prod")
     cfg, source = dry_run_config(root, getattr(args, "preset", "balanced"), getattr(args, "image_uri", None))
+    if demo and not getattr(args, "image_uri", None) and not is_immutable_image(str(cfg.get("lambda_image_uri", ""))):
+        cfg["lambda_image_uri"] = demo_image_uri(cfg)
     outputs = render_outputs(root, cfg)
     image_checks = collect_image_preflight_checks(cfg, env_name=env_name)
-    readiness_checks = collect_checks(root, cfg, deep=False)
+    readiness_checks = [] if demo else collect_checks(root, cfg, deep=False)
 
     draw_box(
         "First Successful Pipeline Dry Run",
@@ -3910,14 +3966,21 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
             "No files changed.",
             "AWS credentials are not required for this dry run.",
             f"Config source: {source}",
-            f"Environment target: {env_name}",
+            f"Demo preview environment: {env_name}" if demo else f"Environment target: {env_name}",
         ],
     )
     print_render_plan(root, outputs, title="Files that would be generated")
     print()
     print_checks(image_checks, title="Image validation")
     print()
-    print_gap_summary(readiness_checks, limit=8)
+    if demo:
+        failures = [check for check in validate_config(cfg) if check.status == "FAIL"]
+        if failures:
+            print_checks(failures, title="Demo configuration")
+        else:
+            print(ok("Demo configuration is valid. Cloud connections are not required."))
+    else:
+        print_gap_summary(readiness_checks, limit=8)
     print()
     print(info("Next documented path: docs/first-successful-pipeline.md"))
     validation = validate_config(cfg)
@@ -4396,6 +4459,14 @@ def print_main_menu(root: Path) -> None:
     checks = collect_dashboard_checks(root, cfg, mode="compact")
     breakdown_score = overall_breakdown_score(checks)
     action = next_action(root, cfg, observations=checks, local_only=True)
+    if any(check.name == "Demo dry-run" for check in checks):
+        print_demo_status(cfg, checks, action)
+        print()
+        for key, label in MAIN_MENU_ITEMS:
+            if key == "0" and all(check.status == "OK" for check in checks):
+                print("[7] Configure production setup")
+            print(f"[{key}] {label}")
+        return
     image_state = "set" if cfg["lambda_image_uri"] else "missing"
     backend_state = "set" if not cfg["backend"]["bucket"].startswith("replace-with") else "missing"
     health_state = "on" if cfg["enable_http_validation"] else "off"
@@ -4881,6 +4952,9 @@ def cmd_menu(args: argparse.Namespace) -> int:
                 cmd_status,
                 argparse.Namespace(deep=False, strict=False, format="human", watch=False, interval=5),
             )
+        elif choice in {"7", "production"}:
+            open_menu_section("Configure Production Setup", cmd_setup,
+                              argparse.Namespace(mode="production", render=False, yes=False))
         elif choice in {"i", "info", "readiness", "?"}:
             menu_readiness_section(root)
         elif choice in {"3", "deploy"}:
@@ -4971,9 +5045,9 @@ def main(argv: list[str] | None = None) -> int:
         if should_print_next_postlude(args):
             try:
                 print_next_postlude()
-            except (ConfigValidationError, ConfigMigrationError, OSError, subprocess.SubprocessError):
+            except (ConfigValidationError, ConfigMigrationError, SetupStateError, OSError, subprocess.SubprocessError):
                 # Guidance must not undo a completed command or contact providers.
-                print(warn("Next step unavailable. Run `devsecops config validate` for details."))
+                print(warn("Next step unavailable. Run `devsecops setup` or `devsecops config validate` for details."))
         return result
     except KeyboardInterrupt:
         return emit_command_error(args, "Interrupted.", EXIT_INTERRUPTED)

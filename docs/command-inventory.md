@@ -27,9 +27,9 @@ devsecops inventory --format json
 The README quick start and `devsecops --help` use the same first-run path:
 
 ```bash
-devsecops setup --preset balanced --yes
+devsecops setup --yes --strict
 devsecops status
-devsecops dry-run --image-uri <immutable-ecr-image-uri>
+devsecops dry-run
 ```
 
 The primary help intentionally shows only eight entry points: `menu`, `setup`,
@@ -44,9 +44,16 @@ machine-readable output remains clean. Use
 `devsecops menu` when you prefer the interactive path.
 
 For the full resumable wizard, use `devsecops setup` interactively. Demo mode
-(`--mode demo`) completes the local no-credentials path in one command;
+is the default for a new setup and completes the local no-credentials path in one command;
 `--mode standard` and `--mode production` keep cloud connection stages in
 scope.
+
+Saved modes resume unchanged. After a demo, ordinary status/menu/TUI surfaces
+show local demo checks and `Demo complete`; production configuration is a
+separate `devsecops setup --mode production` action. Explicit `status --strict`,
+`--pre-deploy` and `--deep` still check production readiness. JSON demo status
+adds `context.scope=demo` and `demo_complete`, with deployment gates remaining
+unverified until the production checks are requested and pass.
 
 ## Preferred Terminology
 
