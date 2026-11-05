@@ -98,7 +98,7 @@ release notes say the artifact contract changed.
 | `dist/devsecops/backend.tf` | Stable review template | `backend.*` config values or backend template policy changes | S3 backend attributes such as bucket, key, region, lock table, or workspace prefix. |
 | `dist/devsecops/backend.hcl` | Stable backend inputs | `backend.*` values change | Partial backend assignments used with `-backend-config`. |
 | `dist/devsecops/github-variables.env` | Stable helper | Repository variable source config changes | `PIPELINE_CONFIG_JSON` and compatibility mirror values. |
-| `dist/devsecops/github-setup.sh` | Stable helper script | GitHub variable or required secret contract changes | `gh variable` commands, API auth value, Snyk token requirement, or CLI-owned header changes. |
+| `dist/devsecops/github-setup.sh` | Stable helper script | GitHub setup contract changes | Validated CLI invocation, explicit destination, setup options, or CLI-owned header changes. |
 | `dist/devsecops/setup-checklist.md` | Stable checklist | GitHub, backend, or branch-protection checklist contract changes | Checklist item values or required item additions. |
 | `dist/devsecops/readiness-report.md` | Stable report | Readiness checks, config values, or environment state changes | Generated timestamp, score/check/action rows, controls, and environment rows. |
 | `dist/devsecops/audit-report.json` | Stable JSON evidence | Audit evidence, readiness, config, or control state changes | `generated_at` timestamp and changed readiness/config/control payloads. |

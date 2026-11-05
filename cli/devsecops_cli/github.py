@@ -7,7 +7,9 @@ and never requests secret values: secret diagnostics inspect names only.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,6 +19,7 @@ from .config import PIPELINE_CONFIG_VARIABLE, PROD_APPROVAL_ENVIRONMENT, pipelin
 from .deploy import DEPLOYMENT_WORKFLOW_NAME
 from .images import is_immutable_image
 from .models import ActionsStatus, Check
+from .setup import iam_role_identity, is_iam_role_arn
 
 
 # Repository variables are non-secret deployment inputs whose values can be
@@ -31,11 +34,13 @@ REQUIRED_GH_VARIABLES = [
     "ENABLE_DAST",
     "PROD_APPROVAL_ENVIRONMENT",
 ]
-BASE_REQUIRED_GH_SECRETS = ["AWS_ROLE_TO_ASSUME_ARN", "AWS_REGION"]
+BASE_REQUIRED_GH_SECRETS = ["AWS_ROLE_TO_ASSUME_ARN"]
 PLAN_ROLE_ENV_NAME = "AWS_PLAN_ROLE_TO_ASSUME_ARN"
 DEPLOY_ROLE_ENV_NAME = "AWS_ROLE_TO_ASSUME_ARN"
 SNYK_ENV_NAME = "SNYK_TOKEN"
 DEFAULT_BRANCH = "main"
+OIDC_WORKFLOW = "verify-oidc.yml"
+SETUP_IN_PROGRESS_CONFIG = '{"setup_in_progress":true}'
 REQUIRED_BRANCH_CHECKS = ["Security and Terraform Validate", "Terraform Plan"]
 
 RUNBOOKS_DIR = "docs/runbooks"
@@ -112,7 +117,7 @@ def required_github_secrets(cfg: dict[str, Any]) -> list[str]:
 def optional_github_secrets(cfg: dict[str, Any]) -> list[str]:
     """Return recognized secret names that are optional for this posture."""
 
-    optional: list[str] = []
+    optional = ["AWS_REGION"]
     if not cfg["enable_snyk_scan"]:
         optional.append(SNYK_ENV_NAME)
     return optional
@@ -199,28 +204,124 @@ def github_variable_checks(cfg: dict[str, Any], variables: dict[str, str]) -> li
     return checks
 
 
-def github_secret_checks(cfg: dict[str, Any], secrets: dict[str, str]) -> list[Check]:
+def github_secret_checks(
+    cfg: dict[str, Any], secrets: dict[str, str], production_secrets: dict[str, str] | None = None,
+) -> list[Check]:
     """Report required and optional secrets by name without exposing values."""
 
     checks: list[Check] = []
+    production_secrets = production_secrets or {}
     for name in required_github_secrets(cfg):
+        scope = "prod environment" if name != PLAN_ROLE_ENV_NAME and name in production_secrets else "repository"
+        present = name in (production_secrets if scope == "prod environment" else secrets)
         checks.append(
             Check(
                 f"GitHub secret {name}",
-                "OK" if name in secrets else "WARN",
-                "Configured." if name in secrets else "Missing.",
+                "OK" if present else "WARN",
+                f"Present in {scope}; value and runtime access require verification." if present else f"Missing from {scope}.",
             )
         )
     for name in optional_github_secrets(cfg):
+        present = name in secrets or (name == SNYK_ENV_NAME and name in production_secrets)
         checks.append(
             Check(
                 f"GitHub secret {name}",
-                "OK" if name in secrets else "INFO",
-                "Configured." if name in secrets else "Optional.",
+                "OK" if present else "INFO",
+                "Present; optional for this configuration." if present else "Optional.",
                 scored=False,
             )
         )
     return checks
+
+
+def role_argument_checks(args: Any) -> list[Check]:
+    values = [getattr(args, "deploy_role_arn", None), getattr(args, "plan_role_arn", None)]
+    checks = []
+    for label, value in zip(("Deploy", "Plan"), values):
+        status = "FAIL" if value and not is_iam_role_arn(value) else "OK" if value else "INFO"
+        checks.append(Check(f"{label} role ARN argument", status,
+                            "Valid IAM role ARN." if status == "OK" else "Pass a valid IAM role ARN." if value
+                            else "Retain the existing secret if present.", scored=bool(value)))
+    if any(values):
+        distinct = all(value and is_iam_role_arn(value) for value in values) and iam_role_identity(values[0]) != iam_role_identity(values[1])
+        checks.append(Check("Separate IAM roles", "OK" if distinct else "FAIL",
+                            "Two different role ARNs supplied." if distinct else "Supply both role ARNs and use different plan and deploy roles."))
+    return checks
+
+
+def github_secret_inventory(
+    root: Path, repository: str, *, gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Read version metadata for the two secret scopes used by the workflow."""
+
+    inventories = []
+    for scope in ([], ["--env", PROD_APPROVAL_ENVIRONMENT]):
+        try:
+            result = gh_command_fn(root, ["secret", "list", "--repo", repository, *scope, "--json", "name,updatedAt"])
+        except (OSError, subprocess.TimeoutExpired):
+            raise ValueError("Cannot inspect GitHub secret metadata. Retry after restoring GitHub access.") from None
+        if result.returncode != 0:
+            where = "prod environment" if scope else "repository"
+            raise ValueError(f"Cannot inspect {where} secrets. Verify access and create the prod environment before setup.")
+        try:
+            entries = json.loads(result.stdout)
+        except ValueError:
+            entries = None
+        if not isinstance(entries, list) or any(not isinstance(entry, dict) or not isinstance(entry.get("name"), str) for entry in entries):
+            raise ValueError("GitHub returned invalid secret metadata.")
+        inventories.append({entry["name"]: str(entry.get("updatedAt") or "") for entry in entries})
+    return inventories[0], inventories[1]
+
+
+def oidc_verification_check(
+    root: Path, repository: str, secrets: dict[str, str], production_secrets: dict[str, str], *,
+    gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
+) -> Check:
+    name = "GitHub OIDC roles"
+    guidance = f"Run {OIDC_WORKFLOW} from main to verify plan and prod roles separately."
+    result = gh_command_fn(root, [
+        "run", "list", "--repo", repository, "--workflow", OIDC_WORKFLOW, "--branch", DEFAULT_BRANCH,
+        "--event", "workflow_dispatch", "--limit", "1", "--json", "databaseId,headSha,status,conclusion,createdAt",
+    ])
+    runs = parse_gh_runs(result.stdout) if result.returncode == 0 else []
+    if not runs:
+        return Check(name, "WARN", guidance)
+    run = runs[0]
+    ref = gh_command_fn(root, ["api", f"repos/{repository}/git/ref/heads/{DEFAULT_BRANCH}", "--jq", ".object.sha"])
+    if ref.returncode != 0 or not re.fullmatch(r"[a-f0-9]{40}", ref.stdout.strip()) or run.get("headSha") != ref.stdout.strip():
+        return Check(name, "WARN", "OIDC verification does not match current main. " + guidance)
+    try:
+        created = dt.datetime.fromisoformat(str(run["createdAt"]).replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            raise ValueError("Missing verification timestamp timezone")
+        for value in (
+            secrets.get(PLAN_ROLE_ENV_NAME, ""),
+            production_secrets.get(DEPLOY_ROLE_ENV_NAME, secrets.get(DEPLOY_ROLE_ENV_NAME, "")),
+        ):
+            if dt.datetime.fromisoformat(value.replace("Z", "+00:00")) > created:
+                return Check(name, "WARN", "Role secrets changed after OIDC verification. " + guidance)
+    except (ValueError, KeyError, TypeError):
+        return Check(name, "WARN", "Cannot verify the role secret revision. " + guidance)
+    if run.get("status") != "completed" or run.get("conclusion") != "success":
+        return Check(name, "WARN", "The latest OIDC verification is incomplete or failed. " + guidance)
+    identifier = str(run.get("databaseId") or "")
+    if not identifier.isdecimal():
+        return Check(name, "WARN", guidance)
+    result = gh_command_fn(root, ["run", "view", identifier, "--repo", repository, "--json", "jobs"])
+    jobs = parse_json_object(result.stdout).get("jobs") if result.returncode == 0 else None
+    if not isinstance(jobs, list):
+        return Check(name, "WARN", guidance)
+    for role in ("plan", "deploy"):
+        matches = [job for job in jobs if isinstance(job, dict) and job.get("name") == f"Verify {role} OIDC role"]
+        if len(matches) != 1 or matches[0].get("status") != "completed" or matches[0].get("conclusion") != "success":
+            return Check(name, "WARN", guidance)
+        observations = matches[0].get("steps")
+        if not isinstance(observations, list):
+            return Check(name, "WARN", guidance)
+        steps = {step.get("name"): step.get("conclusion") for step in observations if isinstance(step, dict)}
+        if steps.get(f"Validate {role} role settings") != "success" or steps.get(f"Verify assumed {role} identity") != "success":
+            return Check(name, "WARN", guidance)
+    return Check(name, "OK", f"Run {identifier} verified separate plan and prod roles on current main with current role secrets.")
 
 
 def parse_json_object(stdout: str) -> dict[str, Any]:
@@ -540,6 +641,7 @@ def collect_github_checks(
     root: Path,
     cfg: dict[str, Any],
     *,
+    repository: str = "",
     command_exists_fn: Callable[[str], bool] = _command_exists,
     gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
 ) -> list[Check]:
@@ -565,26 +667,35 @@ def collect_github_checks(
         return checks
     checks.append(Check("GitHub auth", "OK", "Authenticated."))
 
-    repo = gh_command_fn(root, ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    repo = gh_command_fn(root, ["repo", "view", *([repository] if repository else []), "--json", "nameWithOwner", "-q", ".nameWithOwner"])
     if repo.returncode != 0 or not repo.stdout.strip():
         checks.append(Check("GitHub repository", "WARN", compact_error(repo)))
+        return checks
     else:
-        checks.append(Check("GitHub repository", "OK", repo.stdout.strip()))
+        repository = repo.stdout.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+            return [*checks, Check("GitHub repository", "FAIL", "GitHub did not identify an owner/repository.")]
+        checks.append(Check("GitHub repository", "OK", repository))
 
-    variables_result = gh_command_fn(root, ["variable", "list", "--json", "name,value"])
+    variables_result = gh_command_fn(root, ["variable", "list", "--repo", repository, "--json", "name,value"])
     if variables_result.returncode != 0:
         checks.append(Check("GitHub variables", "WARN", compact_error(variables_result)))
     else:
         checks.extend(github_variable_checks(cfg, parse_gh_items(variables_result.stdout, value_key="value")))
 
-    secrets_result = gh_command_fn(root, ["secret", "list", "--json", "name"])
-    if secrets_result.returncode != 0:
-        checks.append(Check("GitHub secrets", "WARN", compact_error(secrets_result)))
+    try:
+        secrets, production_secrets = github_secret_inventory(root, repository, gh_command_fn=gh_command_fn)
+    except ValueError as exc:
+        checks.append(Check("GitHub secrets", "WARN", str(exc)))
     else:
-        checks.extend(github_secret_checks(cfg, parse_gh_items(secrets_result.stdout)))
+        checks.extend(github_secret_checks(cfg, secrets, production_secrets))
+        try:
+            verification = oidc_verification_check(root, repository, secrets, production_secrets, gh_command_fn=gh_command_fn)
+        except (OSError, subprocess.TimeoutExpired):
+            verification = Check("GitHub OIDC roles", "WARN", "Cannot inspect OIDC verification. Retry after restoring GitHub access.")
+        checks.append(verification)
 
     if cfg["use_prod_approval_environment"]:
-        repository = repo.stdout.strip() if repo.returncode == 0 else ""
         checks.append(production_environment_check(root, repository, gh_command_fn=gh_command_fn))
 
     return checks
@@ -840,14 +951,19 @@ def github_setup_precheck(
     secrets remains the responsibility of the explicitly authorized command.
     """
 
-    checks: list[Check] = []
+    checks = role_argument_checks(args)
+    if any(check.status == "FAIL" for check in checks):
+        return checks
+    repository = str(getattr(args, "repo", None) or "")
+    if repository and not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        return [*checks, Check("GitHub repository", "FAIL", "Use --repo OWNER/REPO.")]
     gh_available = command_exists_fn("gh")
     checks.append(Check("GitHub CLI", "OK" if gh_available else "WARN", "Installed." if gh_available else "`gh` not found on PATH."))
     if gh_available:
         auth = gh_command_fn(root, ["auth", "status"])
         checks.append(Check("GitHub auth", "OK" if auth.returncode == 0 else "WARN", "Authenticated." if auth.returncode == 0 else compact_error(auth)))
         if auth.returncode == 0:
-            repo = gh_command_fn(root, ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+            repo = gh_command_fn(root, ["repo", "view", *([repository] if repository else []), "--json", "nameWithOwner", "-q", ".nameWithOwner"])
             checks.append(
                 Check(
                     "GitHub repository",
@@ -855,26 +971,13 @@ def github_setup_precheck(
                     repo.stdout.strip() if repo.returncode == 0 and repo.stdout.strip() else compact_error(repo),
                 )
             )
-    checks.append(
-        Check(
-            "Deploy role ARN argument",
-            "OK" if bool(getattr(args, "deploy_role_arn", None)) else "WARN",
-            "Provided." if getattr(args, "deploy_role_arn", None) else "Pass --deploy-role-arn to set AWS_ROLE_TO_ASSUME_ARN.",
-        )
-    )
-    checks.append(
-        Check(
-            "Plan role ARN argument",
-            "OK" if bool(getattr(args, "plan_role_arn", None)) else "WARN",
-            "Provided." if getattr(args, "plan_role_arn", None) else "Pass --plan-role-arn to set AWS_PLAN_ROLE_TO_ASSUME_ARN.",
-        )
-    )
     if cfg["enable_snyk_scan"]:
         checks.append(
             Check(
                 "Snyk token argument",
-                "OK" if bool(getattr(args, "snyk_token", None)) else "WARN",
-                "Provided." if getattr(args, "snyk_token", None) else "SNYK_TOKEN is required because enable_snyk_scan is true.",
+                "OK" if bool(getattr(args, "snyk_token", None)) else "INFO",
+                "Provided." if getattr(args, "snyk_token", None) else "Retain the existing SNYK_TOKEN if present.",
+                scored=bool(getattr(args, "snyk_token", None)),
             )
         )
     else:

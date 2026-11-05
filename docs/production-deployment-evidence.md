@@ -112,7 +112,9 @@ successful deploy in step 5.
 ## 3. Prove GitHub Setup
 
 Capture repository variables, secrets readiness, branch protection, and recent
-workflow state:
+workflow state. After synchronization, run `verify-oidc.yml` from `main` and
+complete the `prod` approval. Confirm both identity jobs succeeded before
+capturing strict doctor output. Record the verification run ID in `notes.md`.
 
 ```bash
 devsecops github setup --write

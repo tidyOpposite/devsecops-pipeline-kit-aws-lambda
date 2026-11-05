@@ -86,6 +86,8 @@ jobs:
     # This credential-free gate must succeed before any job can request AWS access.
     name: Security and Terraform Validate
     runs-on: ubuntu-latest
+    outputs:
+      plan_role_fingerprint: ${{ steps.plan-role-settings.outputs.role_fingerprint }}
 
     steps:
       - name: Checkout repository
@@ -100,6 +102,13 @@ jobs:
       - name: Verify reviewed production intent before approval
         if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'deploy' || inputs.mode == 'rollback') && inputs.environment == 'prod' && github.ref == 'refs/heads/main'
         run: PYTHONPATH=cli python3 -m devsecops_cli.workflow --verify-intent
+
+      - name: Validate repository plan role settings
+        if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'deploy' || inputs.mode == 'rollback') && inputs.environment == 'prod' && github.ref == 'refs/heads/main'
+        id: plan-role-settings
+        env:
+          EXPECTED_ROLE_ARN: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}
+        run: PYTHONPATH=cli python3 -m devsecops_cli.oidc settings plan
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
@@ -260,6 +269,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: PYTHONPATH=cli python3 -m devsecops_cli.workflow
+
+      - name: Validate effective production role settings
+        env:
+          EXPECTED_ROLE_ARN: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
+          PLAN_ROLE_FINGERPRINT: ${{ needs.security-and-validate.outputs.plan_role_fingerprint }}
+        run: PYTHONPATH=cli python3 -m devsecops_cli.oidc settings deploy
 
       # Exchange GitHub's short-lived OIDC identity for the production role;
       # no long-lived AWS access keys are stored in repository secrets.

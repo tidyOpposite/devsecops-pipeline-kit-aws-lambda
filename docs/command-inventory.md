@@ -86,7 +86,7 @@ but they are hidden from primary help and shell completion.
 | `devsecops completion <shell>` | Stable | Distribution | Prints dependency-free shell completion for `bash`, `zsh`, or `fish`. |
 | `devsecops doctor` | Stable | Diagnostics | Primary diagnostics group for local, GitHub, AWS, branch, Actions, and all-in-one checks. |
 | `devsecops doctor local` | Stable | Diagnostics | Checks local readiness. `--deep` adds external Terraform/AWS checks and may vary by installed tools. |
-| `devsecops doctor github` | Stable | GitHub | Checks GitHub CLI, repository variables, and repository secrets. |
+| `devsecops doctor github` | Stable | GitHub | Checks repository variables, repository/prod secret metadata, and current OIDC verification; accepts `--repo OWNER/REPO`. |
 | `devsecops doctor aws` | Stable | AWS | Checks AWS identity, backend, and deployed resources. |
 | `devsecops doctor branch` | Stable | GitHub | Checks branch protection and required checks. |
 | `devsecops doctor actions` | Stable | GitHub | Shows recent GitHub Actions runs, failed jobs, failed steps, next actions, and runbook links. |
@@ -116,7 +116,7 @@ but they are hidden from primary help and shell completion.
 | `devsecops snapshots` | Alias | Recovery | Compatibility alias for snapshot listing and inspection. |
 | `devsecops rollback` | Alias | Recovery | Compatibility alias for `devsecops snapshot restore`. |
 | `devsecops github` | Stable | GitHub | Primary GitHub group for setup, status, branch, and GitHub doctor workflows. |
-| `devsecops github setup` | Stable | GitHub | Prints, writes, or applies GitHub variable/secret setup commands through `gh`. |
+| `devsecops github setup` | Stable | GitHub | Prints or writes a CLI helper, or applies settings to a pinned `--repo OWNER/REPO` with partial results and retry support. |
 | `devsecops github status` | Stable | GitHub | Shows recent GitHub Actions runs, failed jobs, failed steps, next actions, and runbook links. |
 | `devsecops github branch` | Stable | GitHub | Checks branch protection and required checks. |
 | `devsecops github doctor` | Stable | GitHub | Checks GitHub CLI, variables, and secrets. |

@@ -17,7 +17,7 @@ from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
-from devsecops_cli import aws, config, context, deploy, doctor, github, main as cli, render, workflow
+from devsecops_cli import aws, config, context, deploy, doctor, github, main as cli, oidc, render, workflow
 from devsecops_cli.models import Check, ConfigValidationError
 from devsecops_cli.readiness import PRE_DEPLOY_CHECKS, WORKLOAD_CHECKS
 
@@ -220,6 +220,189 @@ class PipelineTransportTests(unittest.TestCase):
         payload = next(c for c in checks if c.name.endswith(config.PIPELINE_CONFIG_VARIABLE))
         self.assertTrue(payload.scored)
         self.assertEqual(payload.status, "WARN")
+
+
+class GitHubSetupTests(unittest.TestCase):
+    deploy_arn = "arn:aws:iam::123456789012:role/deploy"
+    plan_arn = "arn:aws:iam::123456789012:role/plan"
+    timestamp = "2026-11-05T00:00:00Z"
+
+    def provider(self, cfg):
+        state = {
+            "variables": github.github_expected_variables(cfg),
+            "repository": {"AWS_PLAN_ROLE_TO_ASSUME_ARN": self.plan_arn},
+            "prod": {"AWS_ROLE_TO_ASSUME_ARN": self.deploy_arn, "SNYK_TOKEN": "never-log-token"},
+            "fail": None,
+            "writes": [],
+        }
+
+        def call(root, args, **kwargs):
+            output = ""
+            if args[:2] == ["auth", "status"]:
+                pass
+            elif args[:2] == ["repo", "view"]:
+                output = "owner/deployment"
+            elif args[:2] == ["variable", "list"]:
+                self.assertEqual(args[args.index("--repo") + 1], "owner/deployment")
+                output = json.dumps([{"name": name, "value": value} for name, value in state["variables"].items()])
+            elif args[:2] == ["secret", "list"]:
+                self.assertEqual(args[args.index("--repo") + 1], "owner/deployment")
+                scope = "prod" if "--env" in args else "repository"
+                output = json.dumps([{"name": name, "updatedAt": self.timestamp} for name in state[scope]])
+            elif args[0] in {"variable", "secret"} and args[1] == "set":
+                self.assertEqual(args[args.index("--repo") + 1], "owner/deployment")
+                kind, _, name = args[:3]
+                state["writes"].append(args)
+                if name == state["fail"]:
+                    state["fail"] = None
+                    return subprocess.CompletedProcess(args, 1, "", "never-log-token")
+                if kind == "variable":
+                    state["variables"][name] = args[args.index("--body") + 1]
+                else:
+                    self.assertNotIn("--body", args)
+                    scope = "prod" if "--env" in args else "repository"
+                    state[scope][name] = kwargs["input_data"]
+            else:
+                raise AssertionError(f"Unexpected provider call {args}")
+            return subprocess.CompletedProcess(args, 0, output, "")
+        return state, call
+
+    def test_partial_setup_blocks_configuration_and_retry_completes_the_same_repository(self):
+        cfg = customer_config()
+        state, provider = self.provider(cfg)
+        state["fail"] = "AWS_PLAN_ROLE_TO_ASSUME_ARN"
+        command = ["github", "setup", "--apply", "--repo", "owner/deployment",
+                   "--deploy-role-arn", self.deploy_arn, "--plan-role-arn", self.plan_arn, "--snyk-token", "never-log-token"]
+        with tempfile.TemporaryDirectory() as directory, patch.object(cli, "command_exists", return_value=True), patch.object(
+            cli, "gh_command", side_effect=provider,
+        ):
+            root = Path(directory)
+            config.write_config(root, cfg)
+            code, text = invoke(root, command)
+            self.assertEqual(code, 1, text)
+            self.assertEqual(state["variables"]["PIPELINE_CONFIG_JSON"], github.SETUP_IN_PROGRESS_CONFIG)
+            self.assertIn("Not attempted", text)
+            self.assertNotIn("never-log-token", text)
+            self.assertIn("--repo owner/deployment", text)
+            with self.assertRaises(ConfigValidationError):
+                workflow.decode_pipeline_config(state["variables"]["PIPELINE_CONFIG_JSON"], production=True)
+            code, text = invoke(root, command)
+            self.assertEqual(code, 0, text)
+            self.assertIn("Unchanged", text)
+            self.assertNotIn("never-log-token", text)
+            self.assertEqual(state["variables"], github.github_expected_variables(cfg))
+            self.assertEqual(state["prod"]["AWS_ROLE_TO_ASSUME_ARN"], self.deploy_arn)
+            deploy_write = next(args for args in state["writes"] if args[:3] == ["secret", "set", "AWS_ROLE_TO_ASSUME_ARN"])
+            self.assertIn("--env", deploy_write)
+            self.assertNotIn("never-log-token", "".join(path.read_text() for path in root.rglob("*") if path.is_file()))
+
+    def test_invalid_or_equal_role_arguments_fail_before_provider_calls(self):
+        for deploy_role, plan_role in [
+            ("not-an-arn", self.plan_arn), (self.deploy_arn, self.deploy_arn), (self.deploy_arn, None),
+            (self.deploy_arn, self.deploy_arn.replace("role/deploy", "role/team/Deploy")),
+            ("arn:aws:iam::123456789012:role/" + "r" * 65, self.plan_arn),
+        ]:
+            with self.subTest(deploy_role=deploy_role, plan_role=plan_role), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                config.write_config(root, customer_config())
+                args = argparse.Namespace(deploy_role_arn=deploy_role, plan_role_arn=plan_role, snyk_token=None)
+                with patch.object(cli, "gh_command") as provider, redirect_stdout(io.StringIO()):
+                    self.assertEqual(cli.apply_github_setup(root, customer_config(), args), 1)
+                provider.assert_not_called()
+
+    def test_guided_setup_honors_explicit_apply_even_when_settings_are_ready(self):
+        cfg = customer_config()
+        ready = [Check("GitHub repository", "OK", "owner/deployment"), Check("GitHub OIDC roles", "OK", "Verified")]
+        args = argparse.Namespace(apply_github=True, deploy_role_arn=self.deploy_arn,
+                                  plan_role_arn=self.plan_arn, snyk_token=None)
+        with patch.object(cli, "collect_github_checks", return_value=ready), patch.object(
+            cli, "github_setup_precheck", return_value=ready,
+        ), patch.object(cli, "apply_github_setup", return_value=0) as apply, redirect_stdout(io.StringIO()):
+            checks, failed = cli.setup_github_connection(ROOT, cfg, args, False, "production")
+        self.assertFalse(failed)
+        self.assertEqual(checks, ready)
+        apply.assert_called_once()
+        self.assertEqual(apply.call_args.args[2].repo, "owner/deployment")
+        self.assertEqual(apply.call_args.args[2].deploy_role_arn, self.deploy_arn)
+
+    def test_secret_write_timeout_reports_an_unconfirmed_partial_result(self):
+        cfg = customer_config()
+        state, provider = self.provider(cfg)
+        def timeout(root, args, **kwargs):
+            if args[:3] == ["secret", "set", "AWS_ROLE_TO_ASSUME_ARN"]:
+                raise subprocess.TimeoutExpired(args, 30, stderr="never-log-token")
+            return provider(root, args, **kwargs)
+        command = ["github", "setup", "--apply", "--repo", "owner/deployment",
+                   "--deploy-role-arn", self.deploy_arn, "--plan-role-arn", self.plan_arn]
+        with tempfile.TemporaryDirectory() as directory, patch.object(cli, "command_exists", return_value=True), patch.object(
+            cli, "gh_command", side_effect=timeout,
+        ):
+            root = Path(directory)
+            config.write_config(root, cfg)
+            code, text = invoke(root, command)
+        self.assertEqual(code, 1)
+        self.assertEqual(state["variables"]["PIPELINE_CONFIG_JSON"], github.SETUP_IN_PROGRESS_CONFIG)
+        self.assertIn("Unconfirmed", text)
+        self.assertNotIn("never-log-token", text)
+
+    def test_configuration_only_update_retains_scoped_secrets_and_missing_roles_block_all_writes(self):
+        cfg = customer_config()
+        for missing in (False, True):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as directory:
+                state, provider = self.provider(cfg)
+                if missing:
+                    state["repository"].clear()
+                args = argparse.Namespace(repo="owner/deployment", deploy_role_arn=None, plan_role_arn=None, snyk_token=None)
+                with patch.object(cli, "command_exists", return_value=True), patch.object(
+                    cli, "gh_command", side_effect=provider,
+                ), redirect_stdout(io.StringIO()):
+                    code = cli.apply_github_setup(Path(directory), cfg, args)
+                self.assertEqual(code, 1 if missing else 0)
+                self.assertFalse([args for args in state["writes"] if args[0] == "secret"])
+                if missing:
+                    self.assertFalse(state["writes"])
+        checks = github.github_secret_checks(cfg, {"AWS_PLAN_ROLE_TO_ASSUME_ARN": ""}, {"AWS_ROLE_TO_ASSUME_ARN": "", "SNYK_TOKEN": ""})
+        self.assertEqual(next(check for check in checks if check.name.endswith("AWS_ROLE_TO_ASSUME_ARN")).status, "OK")
+        self.assertIn("prod environment", next(check.detail for check in checks if check.name.endswith("AWS_ROLE_TO_ASSUME_ARN")))
+
+    def test_oidc_evidence_requires_both_jobs_and_current_secret_revisions(self):
+        run = {"databaseId": 42, "headSha": COMMIT_SHA, "status": "completed", "conclusion": "success",
+               "createdAt": "2026-11-05T01:00:00Z"}
+        jobs = [{"name": f"Verify {role} OIDC role", "status": "completed", "conclusion": "success",
+                 "steps": [{"name": name, "conclusion": "success"} for name in (
+                     f"Validate {role} role settings", f"Verify assumed {role} identity",
+                 )]} for role in ("plan", "deploy")]
+        def provider(root, args):
+            output = json.dumps([run]) if args[:2] == ["run", "list"] else COMMIT_SHA if args[0] == "api" else json.dumps({"jobs": jobs})
+            return subprocess.CompletedProcess(args, 0, output, "")
+        secrets = {"AWS_PLAN_ROLE_TO_ASSUME_ARN": self.timestamp}
+        production = {"AWS_ROLE_TO_ASSUME_ARN": self.timestamp}
+        inspect = lambda: github.oidc_verification_check(ROOT, "owner/deployment", secrets, production, gh_command_fn=provider)
+        self.assertEqual(inspect().status, "OK")
+        production["AWS_ROLE_TO_ASSUME_ARN"] = "2026-11-05T02:00:00Z"
+        self.assertEqual(inspect().status, "WARN")
+        production["AWS_ROLE_TO_ASSUME_ARN"] = self.timestamp
+        jobs[1]["conclusion"] = "skipped"
+        self.assertEqual(inspect().status, "WARN")
+
+    def test_oidc_verifies_the_assumed_role_and_enforces_role_separation(self):
+        environment = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main",
+                       "EXPECTED_ROLE_ARN": self.deploy_arn, "PLAN_ROLE_FINGERPRINT": oidc.role_fingerprint(self.plan_arn)}
+        self.assertEqual(oidc.validate_role_settings("deploy", environment), self.deploy_arn)
+        with self.assertRaisesRegex(ConfigValidationError, "different"):
+            oidc.validate_role_settings("deploy", environment | {"PLAN_ROLE_FINGERPRINT": oidc.role_fingerprint(self.deploy_arn)})
+        oidc.verify_identity(self.deploy_arn, {"Account": "123456789012", "Arn": "arn:aws:sts::123456789012:assumed-role/deploy/session"})
+        with self.assertRaisesRegex(ConfigValidationError, "intended OIDC"):
+            oidc.verify_identity(self.deploy_arn, {"Account": "123456789012", "Arn": "arn:aws:sts::123456789012:assumed-role/plan/session"})
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            identity = {"Account": "123456789012", "Arn": "arn:aws:sts::123456789012:assumed-role/deploy/session"}
+            with patch.dict(os.environ, environment | {"GITHUB_OUTPUT": str(output)}, clear=True), patch.object(
+                oidc.sys, "argv", ["oidc", "verify", "deploy"],
+            ), patch.object(oidc, "_aws_json", return_value=(identity, subprocess.CompletedProcess([], 0, "", ""))), redirect_stdout(io.StringIO()):
+                self.assertEqual(oidc.main(), 0)
+            self.assertIn(oidc.role_fingerprint(self.deploy_arn), output.read_text())
+            self.assertNotIn(self.deploy_arn, output.read_text())
 
 
 class AwsConstraintTests(unittest.TestCase):

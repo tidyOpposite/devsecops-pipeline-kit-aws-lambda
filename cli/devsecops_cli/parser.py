@@ -250,6 +250,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     doctor_local_parser.set_defaults(func=handlers.cmd_doctor)
 
     doctor_github_parser = doctor_subparsers.add_parser("github", help="Check GitHub CLI, repository variables, and secrets.")
+    doctor_github_parser.add_argument("--repo", help="Explicit GitHub destination as OWNER/REPO.")
     doctor_github_parser.add_argument("--strict", action="store_true", help="Exit non-zero on failed scored checks.")
     doctor_github_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     doctor_github_parser.set_defaults(func=handlers.cmd_doctor)
@@ -465,6 +466,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     github_subparsers = github_parser.add_subparsers(dest="github_command", metavar="{setup,doctor,status,branch}")
 
     github_group_setup_parser = github_subparsers.add_parser("setup", help="Print, write, or apply GitHub setup commands.")
+    github_group_setup_parser.add_argument("--repo", help="Explicit GitHub destination as OWNER/REPO.")
     github_group_setup_parser.add_argument("--write", action="store_true", help="Write dist/devsecops/github-setup.sh.")
     github_group_setup_parser.add_argument("--apply", action="store_true", help="Apply safe GitHub variables/secrets with gh.")
     github_group_setup_parser.add_argument("--deploy-role-arn", help="Value for AWS_ROLE_TO_ASSUME_ARN when using --apply.")
@@ -473,6 +475,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     github_group_setup_parser.set_defaults(func=handlers.cmd_github)
 
     github_group_doctor_parser = github_subparsers.add_parser("doctor", help="Check GitHub CLI, variables, and secrets.")
+    github_group_doctor_parser.add_argument("--repo", help="Explicit GitHub destination as OWNER/REPO.")
     github_group_doctor_parser.add_argument("--strict", action="store_true", help="Exit non-zero on failed scored checks.")
     github_group_doctor_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     github_group_doctor_parser.set_defaults(func=handlers.cmd_github)
@@ -506,6 +509,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     aws_group_doctor_parser.set_defaults(func=handlers.cmd_aws)
 
     github_setup_parser = subparsers.add_parser("github-setup", help=argparse.SUPPRESS)
+    github_setup_parser.add_argument("--repo", help="Explicit GitHub destination as OWNER/REPO.")
     github_setup_parser.add_argument("--write", action="store_true", help="Write dist/devsecops/github-setup.sh.")
     github_setup_parser.add_argument("--apply", action="store_true", help="Apply safe GitHub variables/secrets with gh.")
     github_setup_parser.add_argument("--deploy-role-arn", help="Value for AWS_ROLE_TO_ASSUME_ARN when using --apply.")
@@ -514,6 +518,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     github_setup_parser.set_defaults(func=handlers.cmd_github_setup)
 
     gh_setup_parser = subparsers.add_parser("gh-setup", help=argparse.SUPPRESS)
+    gh_setup_parser.add_argument("--repo", help="Explicit GitHub destination as OWNER/REPO.")
     gh_setup_parser.add_argument("--write", action="store_true", help="Write dist/devsecops/github-setup.sh.")
     gh_setup_parser.add_argument("--apply", action="store_true", help="Apply safe GitHub variables/secrets with gh.")
     gh_setup_parser.add_argument("--deploy-role-arn", help="Value for AWS_ROLE_TO_ASSUME_ARN when using --apply.")
@@ -522,6 +527,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     gh_setup_parser.set_defaults(func=handlers.cmd_github_setup)
 
     gh_doctor_parser = subparsers.add_parser("gh-doctor", help=argparse.SUPPRESS)
+    gh_doctor_parser.add_argument("--repo", help="Explicit GitHub destination as OWNER/REPO.")
     gh_doctor_parser.add_argument("--strict", action="store_true", help="Exit non-zero on failed scored checks.")
     gh_doctor_parser.add_argument("--format", choices=["human", "compact", "json"], default="human", help="Output mode.")
     gh_doctor_parser.set_defaults(func=handlers.cmd_gh_doctor)

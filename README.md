@@ -611,7 +611,7 @@ Terraform:
 
 ```bash
 devsecops github-setup --write
-devsecops gh-setup --apply \
+devsecops gh-setup --apply --repo <OWNER>/<REPO> \
   --deploy-role-arn arn:aws:iam::<account-id>:role/<deploy-role> \
   --plan-role-arn arn:aws:iam::<account-id>:role/<plan-role>
 devsecops gh-doctor
@@ -619,14 +619,27 @@ devsecops branch-doctor
 devsecops aws-doctor --environment prod
 ```
 
-Required repository secrets:
+Workflow secret scopes:
 
 | Secret | Purpose |
 | --- | --- |
-| `AWS_ROLE_TO_ASSUME_ARN` | Deployment role used by manual production deploy runs from `main`. |
+| `AWS_ROLE_TO_ASSUME_ARN` | Deployment role at repository or `prod` environment scope. |
 | `AWS_PLAN_ROLE_TO_ASSUME_ARN` | Required least-privilege role for Terraform plan workflows. Plans do not fall back to the deploy role. |
-| `AWS_REGION` | Legacy compatibility value written by setup. Updated workflows use the region from `PIPELINE_CONFIG_JSON`. |
-| `SNYK_TOKEN` | Required when `ENABLE_SNYK_SCAN=true`; otherwise optional. |
+| `AWS_REGION` | Optional legacy value. Updated workflows use the region from `PIPELINE_CONFIG_JSON`. |
+| `SNYK_TOKEN` | Required at repository or `prod` scope when `ENABLE_SNYK_SCAN=true`. |
+
+Create and protect the `prod` GitHub Environment before setup. The CLI shows
+the destination and pins every write to that repository. Existing production
+secret overrides are updated in `prod`; the plan role stays at repository scope.
+Supplying role arguments requires two distinct, valid IAM role ARNs.
+
+If synchronization fails, its result table shows which settings were applied.
+The complete pipeline configuration is published last, so an incomplete setup
+blocks subsequent workflows. Retry with the same `--repo` and arguments.
+An update may retain existing role secrets by omitting both role arguments.
+Run the separate [OIDC verification jobs](AWS_policy.md#verify-role-setup)
+during final acceptance. Doctor keeps OIDC readiness unverified until both
+roles pass on current `main` with current secret revisions.
 
 Repository variables:
 

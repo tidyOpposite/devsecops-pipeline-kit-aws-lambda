@@ -21,7 +21,7 @@ READINESS_CATEGORIES = ["Local", "Terraform", "GitHub", "AWS", "Security", "Depl
 PRE_DEPLOY_CHECKS = {
     "Local config", "Project files", "Config schema", "Rendered tfvars", "Terraform validate",
     "Bootstrap validate", "GitHub auth", "GitHub repository", "GitHub environment approvals",
-    "Branch `main` protection", "AWS identity", "State bucket", "Lock table", "Configured ECR image",
+    "Branch `main` protection", "GitHub OIDC roles", "AWS identity", "State bucket", "Lock table", "Configured ECR image",
 }
 WORKLOAD_CHECKS = {
     "ECR repository", "Lambda execution role", "Lambda function", "API Gateway",

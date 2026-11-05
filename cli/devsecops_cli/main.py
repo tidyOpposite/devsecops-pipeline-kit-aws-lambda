@@ -93,6 +93,7 @@ from .config import (
     ENVIRONMENTS,
     LOG_RETENTION_DAYS,
     NO_APPROVAL_ENVIRONMENT,
+    PROD_APPROVAL_ENVIRONMENT,
     PIPELINE_CONFIG_VARIABLE,
     PRESETS,
     PRESET_DESCRIPTIONS,
@@ -168,6 +169,7 @@ from .github import (
     DEFAULT_BRANCH,
     DEPLOY_ROLE_ENV_NAME,
     PLAN_ROLE_ENV_NAME,
+    OIDC_WORKFLOW,
     REQUIRED_BRANCH_CHECKS,
     RUNBOOK_FAILED_APPLY,
     RUNBOOK_FAILED_PLAN,
@@ -526,7 +528,7 @@ def command_exists(name: str) -> bool:
 
 # External-command wrappers preserve legacy patch points in tests and route
 # provider-specific behavior to the focused AWS and GitHub adapters.
-def run_command(command: list[str], root: Path, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+def run_command(command: list[str], root: Path, timeout: int = 30, *, input_data: str | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # nosec B603
         command,
         cwd=root,
@@ -535,10 +537,13 @@ def run_command(command: list[str], root: Path, timeout: int = 30) -> subprocess
         stderr=subprocess.PIPE,
         timeout=timeout,
         check=False,
+        input=input_data,
     )
 
 
-def gh_command(root: Path, args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
+def gh_command(root: Path, args: list[str], timeout: int = 30, *, input_data: str | None = None) -> subprocess.CompletedProcess[str]:
+    if input_data is not None:
+        return run_command(["gh", *args], root, timeout=timeout, input_data=input_data)
     return run_command(["gh", *args], root, timeout=timeout)
 
 
@@ -643,10 +648,11 @@ def inspect_active_lambda_image(
 
 
 
-def collect_github_checks(root: Path, cfg: dict[str, Any]) -> list[Check]:
+def collect_github_checks(root: Path, cfg: dict[str, Any], *, repository: str = "") -> list[Check]:
     return _github_adapter.collect_github_checks(
         root,
         cfg,
+        repository=repository,
         command_exists_fn=command_exists,
         gh_command_fn=gh_command,
     )
@@ -761,61 +767,97 @@ def apply_github_setup(root: Path, cfg: dict[str, Any], args: argparse.Namespace
     if failures:
         emit_check_output("GitHub settings were not changed", failures, output_format="compact")
         return EXIT_VALIDATION_FAILED
-    if not command_exists("gh"):
-        print(fail("`gh` not found on PATH."))
-        return 1
-    auth = gh_command(root, ["auth", "status"])
-    if auth.returncode != 0:
-        print(fail("GitHub CLI is not authenticated: ") + compact_error(auth))
-        return auth.returncode
-
-    expected_vars = github_expected_variables(cfg)
-    if not expected_vars["LAMBDA_IMAGE_URI"]:
-        print(warn("Skipping LAMBDA_IMAGE_URI because local config is empty."))
-        expected_vars.pop("LAMBDA_IMAGE_URI")
-
-    for name, value in expected_vars.items():
-        command = ["variable", "set", name, "--body", value]
-        print(info("$ gh " + " ".join(command[:3]) + " --body <value>"))
-        result = gh_command(root, command)
-        if result.returncode != 0:
-            print(fail(compact_error(result)))
-            return result.returncode
-
-    secrets = {"AWS_REGION": cfg["aws_region"]}
-    if args.deploy_role_arn:
-        secrets["AWS_ROLE_TO_ASSUME_ARN"] = args.deploy_role_arn
-    else:
-        print(warn("Skipping AWS_ROLE_TO_ASSUME_ARN; pass --deploy-role-arn to set it."))
-    if args.plan_role_arn:
-        secrets["AWS_PLAN_ROLE_TO_ASSUME_ARN"] = args.plan_role_arn
-    else:
-        print(warn("Skipping AWS_PLAN_ROLE_TO_ASSUME_ARN; pass --plan-role-arn because Terraform plan no longer falls back to the deploy role."))
-    if args.snyk_token:
-        secrets["SNYK_TOKEN"] = args.snyk_token
-    elif cfg["enable_snyk_scan"]:
-        print(warn("Skipping SNYK_TOKEN; pass --snyk-token because enable_snyk_scan is true."))
-
-    for name, value in secrets.items():
-        command = ["secret", "set", name, "--body", value]
-        print(info("$ gh " + " ".join(command[:3]) + " --body <value>"))
-        result = gh_command(root, command)
-        if result.returncode != 0:
-            print(fail(compact_error(result)))
-            return result.returncode
-
+    precheck = github_setup_precheck(root, cfg, args)
+    if any(check.scored and check.status != "OK" for check in precheck):
+        emit_check_output("GitHub setup blocked", precheck, output_format="compact")
+        return strict_exit_code(precheck, strict=True, fail_on_warn=True)
+    repository = next(check.detail for check in precheck if check.name == "GitHub repository")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise ConfigValidationError("GitHub did not identify an owner/repository.")
+    print(f"GitHub destination: {repository}")
+    print("Configuration stays blocked while synchronization is incomplete.")
+    try:
+        existing_secrets, production_secrets = _github_adapter.github_secret_inventory(root, repository, gh_command_fn=gh_command)
+    except ValueError as exc:
+        print(fail(str(exc)))
+        return EXIT_VALIDATION_FAILED
+    try:
+        variables = gh_command(root, ["variable", "list", "--repo", repository, "--json", "name,value"])
+    except (OSError, subprocess.TimeoutExpired):
+        print(fail("Cannot inspect the destination repository variables. Retry after restoring GitHub access."))
+        return EXIT_VALIDATION_FAILED
+    if variables.returncode != 0:
+        print(fail("Cannot inspect the destination repository variables."))
+        return EXIT_VALIDATION_FAILED
+    existing_variables = _github_adapter.parse_gh_items(variables.stdout, value_key="value")
+    supplied = {
+        DEPLOY_ROLE_ENV_NAME: getattr(args, "deploy_role_arn", None),
+        PLAN_ROLE_ENV_NAME: getattr(args, "plan_role_arn", None),
+        SNYK_ENV_NAME: getattr(args, "snyk_token", None),
+    }
+    scopes = {
+        name: PROD_APPROVAL_ENVIRONMENT if name != PLAN_ROLE_ENV_NAME and name in production_secrets else "repository"
+        for name in supplied
+    }
+    for name in required_github_secrets(cfg):
+        current = production_secrets if scopes[name] == PROD_APPROVAL_ENVIRONMENT else existing_secrets
+        if not supplied[name] and name not in current:
+            print(fail(f"Missing {name} for {scopes[name]}. Supply its setup argument before writing settings."))
+            return EXIT_VALIDATION_FAILED
+    expected = github_expected_variables(cfg)
+    if not expected["LAMBDA_IMAGE_URI"]:
+        expected.pop("LAMBDA_IMAGE_URI")
+    operations = [("variable", PIPELINE_CONFIG_VARIABLE, _github_adapter.SETUP_IN_PROGRESS_CONFIG, "repository")]
+    operations.extend(("variable", name, value, "repository") for name, value in expected.items() if name != PIPELINE_CONFIG_VARIABLE)
+    operations.extend(("secret", name, value.strip() if value else None, scopes[name]) for name, value in supplied.items())
+    operations.append(("variable", PIPELINE_CONFIG_VARIABLE, expected[PIPELINE_CONFIG_VARIABLE], "repository"))
+    rows = []
+    failed = False
+    for kind, name, value, scope in operations:
+        if failed:
+            rows.append([scope, kind, name, "Not attempted"])
+            continue
+        if value is None:
+            rows.append([scope, kind, name, "Retained" if name in (production_secrets if scope == PROD_APPROVAL_ENVIRONMENT else existing_secrets) else "Optional"])
+            continue
+        if kind == "variable" and existing_variables.get(name) == value:
+            rows.append([scope, kind, name, "Unchanged"])
+            continue
+        command = [kind, "set", name, "--repo", repository]
+        if scope == PROD_APPROVAL_ENVIRONMENT:
+            command.extend(["--env", scope])
+        try:
+            result = gh_command(root, command, input_data=value) if kind == "secret" else gh_command(root, [*command, "--body", value])
+        except subprocess.TimeoutExpired:
+            status = "Unconfirmed (timeout)"
+            failed = True
+        except OSError:
+            status = "Failed (cannot execute gh)"
+            failed = True
+        else:
+            failed = result.returncode != 0
+            status = "Failed" if failed else "Applied"
+        rows.append([scope, kind, name, status])
+        if not failed and kind == "variable":
+            existing_variables[name] = value
+    draw_table(["Scope", "Kind", "Setting", "Result"], rows, title=f"GitHub setup result for {repository}")
+    if failed:
+        print(fail("GitHub setup is incomplete. Retry with the same arguments to finish synchronization."))
+        print(f"Pinned destination for retry: --repo {repository}")
+        return EXIT_VALIDATION_FAILED
     print(ok("Applied GitHub repository variables/secrets available from config and arguments."))
-    return 0
+    print(f"Before production, verify OIDC roles with {OIDC_WORKFLOW} in {repository}.")
+    return EXIT_OK
+
 
 
 def github_setup_precheck(root: Path, cfg: dict[str, Any], args: argparse.Namespace) -> list[Check]:
-    return _github_adapter.github_setup_precheck(
-        root,
-        cfg,
-        args,
-        command_exists_fn=command_exists,
-        gh_command_fn=gh_command,
-    )
+    try:
+        return _github_adapter.github_setup_precheck(
+            root, cfg, args, command_exists_fn=command_exists, gh_command_fn=gh_command,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return [Check("GitHub setup inspection", "FAIL", "Cannot inspect GitHub. Restore access before retrying setup.")]
 
 
 
@@ -1752,12 +1794,15 @@ def setup_github_connection(
         return [], False
 
     checks = collect_github_checks(root, cfg)
-    if github_setup_ready(checks):
+    apply_requested = bool(getattr(args, "apply_github", False))
+    if github_setup_ready(checks) and not apply_requested:
         print(ok("Step 7/9 - GitHub repository variables and OIDC role secrets are ready."))
+        return checks, False
+    if not apply_requested and all(check.status == "OK" for check in checks if check.scored and check.name != "GitHub OIDC roles"):
+        print(info("GitHub settings are present. Separate OIDC role verification is still required."))
         return checks, False
 
     emit_check_output("Step 7/9 - GitHub Repository / OIDC", checks, output_format="compact")
-    apply_requested = bool(getattr(args, "apply_github", False))
     if interactive and not apply_requested:
         print()
         draw_box(
@@ -1783,24 +1828,13 @@ def setup_github_connection(
         plan_role_arn = plan_role_arn or prompt_text("AWS plan role ARN", allow_cancel=True)
         if cfg["enable_snyk_scan"] and not snyk_token:
             snyk_token = prompt_secret("Snyk token")
-    invalid_roles = [
-        label
-        for label, value in (("deploy", deploy_role_arn), ("plan", plan_role_arn))
-        if not value or not is_iam_role_arn(value)
-    ]
-    if invalid_roles:
-        print(fail("Valid IAM role ARNs are required for: ") + ", ".join(invalid_roles))
-        return checks, True
-    if cfg["enable_snyk_scan"] and not snyk_token:
-        print(fail("SNYK_TOKEN is required because this setup mode enables Snyk scanning."))
-        return checks, True
-
     apply_args = argparse.Namespace(
         deploy_role_arn=deploy_role_arn,
         plan_role_arn=plan_role_arn,
         snyk_token=snyk_token,
     )
     precheck = github_setup_precheck(root, cfg, apply_args)
+    apply_args.repo = next((check.detail for check in precheck if check.name == "GitHub repository" and check.status == "OK"), None)
     emit_check_output("GitHub Setup Precheck", precheck)
     print()
     result = apply_github_setup(root, cfg, apply_args)
@@ -2672,6 +2706,7 @@ def cmd_github_setup(args: argparse.Namespace) -> int:
     cfg = load_config(root)
     if args.apply:
         precheck = github_setup_precheck(root, cfg, args)
+        args.repo = next((check.detail for check in precheck if check.name == "GitHub repository" and check.status == "OK"), getattr(args, "repo", None))
         emit_check_output("GitHub Setup Precheck", precheck)
         print()
         return apply_github_setup(root, cfg, args)
@@ -2745,12 +2780,12 @@ def cmd_gh_doctor(args: argparse.Namespace) -> int:
 
     root = repo_root()
     cfg = load_config(root)
-    checks = collect_github_checks(root, cfg)
+    checks = collect_github_checks(root, cfg, **({"repository": args.repo} if getattr(args, "repo", None) else {}))
     emit_check_output(
         "GitHub",
         checks,
         output_format=getattr(args, "format", "human"),
-        context={"scope": "repository readiness checks through GitHub CLI"},
+        context={"scope": "repository, prod secret metadata, and OIDC verification through GitHub CLI"},
     )
     return strict_exit_code(checks, strict=getattr(args, "strict", False), fail_on_warn=True)
 

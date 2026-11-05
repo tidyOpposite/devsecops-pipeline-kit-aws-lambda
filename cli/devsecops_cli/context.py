@@ -254,6 +254,15 @@ def next_action(
     # explicitly included in readiness scoring become actionable gaps.
     github_gaps = [check for check in github_checks if check.scored and check.status != "OK"]
     if github_gaps:
+        if all(check.name == "GitHub OIDC roles" for check in github_gaps):
+            repository = github_by_name.get("GitHub repository")
+            target = repository.detail if repository is not None and repository.status == "OK" else "<owner/repo>"
+            return _next_action(
+                action_id="missing_oidc_verification", title="OIDC roles need verification",
+                why=github_gaps[0].detail, changes="Runs separate plan and prod identity checks with environment approval.",
+                command=f"gh workflow run verify-oidc.yml --ref main --repo {target}",
+                docs="AWS_policy.md#verify-role-setup", context=context,
+            )
         approval_gap = next((check for check in github_gaps if check.name == "GitHub environment approvals"), None)
         if approval_gap:
             return _next_action(

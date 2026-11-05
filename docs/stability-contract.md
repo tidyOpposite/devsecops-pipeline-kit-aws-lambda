@@ -31,7 +31,7 @@ devsecops inventory --status stable --format markdown
 | Troubleshooting | `devsecops doctor local --deep --strict --format`, `devsecops doctor github --strict --format`, `devsecops doctor aws --environment --strict --format`, `devsecops doctor branch --branch --strict --format`, `devsecops doctor actions --limit --strict --format`, `devsecops doctor all --deep --branch --environment --strict --format` |
 | Configuration and generation | `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops generate --dry-run`, `devsecops report --deep --format --output --print` |
 | Advanced release maintenance | `devsecops inventory --format --status`, `devsecops evidence collect --rc --output`, `devsecops criteria --format --evidence-dir --strict` |
-| GitHub setup | `devsecops github setup --write --apply --deploy-role-arn --plan-role-arn --snyk-token`, `devsecops github status --limit --strict --format`, `devsecops github branch --branch --strict --format`, `devsecops github doctor --strict --format` |
+| GitHub setup | `devsecops github setup --write --apply --repo --deploy-role-arn --plan-role-arn --snyk-token`, `devsecops github status --limit --strict --format`, `devsecops github branch --branch --strict --format`, `devsecops github doctor --repo --strict --format` |
 | Terraform helpers | `devsecops terraform plan <environment> --no-init --create-workspace`, `devsecops terraform bootstrap --apply` |
 | Snapshots | `devsecops snapshot list --format`, `devsecops snapshot show <selection> --format`, `devsecops snapshot restore --to --last --dry-run --yes` |
 | Completion and inventory | `devsecops completion <shell> --program`, `devsecops inventory --format --status` |
@@ -161,7 +161,7 @@ release note that explicitly changes the artifact contract.
 | `dist/devsecops/backend.tf` | Stable review template | `backend.*` values or backend template policy changes | S3 backend attribute values |
 | `dist/devsecops/backend.hcl` | Stable backend inputs | `backend.*` values change | Partial backend assignments for `terraform init -backend-config` |
 | `dist/devsecops/github-variables.env` | Stable helper | Repository variable source config changes | `PROJECT_NAME`, `LAMBDA_IMAGE_URI`, `ENABLE_*`, or `PROD_APPROVAL_ENVIRONMENT` values |
-| `dist/devsecops/github-setup.sh` | Stable helper script | GitHub variable or required secret contract changes | `gh variable` commands, Snyk token requirement, header changes |
+| `dist/devsecops/github-setup.sh` | Stable helper script | GitHub setup contract changes | Validated CLI invocation, explicit destination, setup options, header changes |
 | `dist/devsecops/setup-checklist.md` | Stable checklist | GitHub, backend, or branch-protection checklist contract changes | Checklist item values or required item additions |
 | `dist/devsecops/readiness-report.md` | Stable report | Readiness checks, config values, or environment state changes | Generated timestamp, score/check/action rows |
 | `dist/devsecops/audit-report.json` | Stable JSON evidence | Audit evidence, readiness, config, or control state changes | `generated_at` timestamp and changed readiness/config/control payloads |

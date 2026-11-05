@@ -158,6 +158,12 @@ subject. The plan role trusts the PR subject and the exact branches you allow
 for manual plans. The workflow limits AWS-backed PR plans to branches within
 the same repository.
 
+In repository Settings > Environments > `prod`, configure at least one
+required reviewer, enable **Prevent self-review**, disable administrator
+bypass, and allow the exact branch `main` with no tags. Both the CLI and the
+production runner verify these settings. Diagnostics fail when the account
+plan or token permissions prevent inspecting the rules.
+
 The guided equivalent is explicit about the repository mutation boundary:
 
 ```bash
@@ -181,7 +187,7 @@ devsecops github setup --write
 Apply safe repository variables and provided secrets:
 
 ```bash
-devsecops github setup --apply \
+devsecops github setup --apply --repo <OWNER>/<REPO> \
   --deploy-role-arn arn:aws:iam::123456789012:role/devsecops-pipeline-deploy \
   --plan-role-arn arn:aws:iam::123456789012:role/devsecops-pipeline-plan
 ```
@@ -189,6 +195,8 @@ devsecops github setup --apply \
 Expected output includes:
 
 ```text
+GitHub destination: OWNER/REPO
+GitHub setup result for OWNER/REPO
 Applied GitHub repository variables/secrets available from config and arguments.
 ```
 
@@ -198,11 +206,18 @@ retention, and backend names. The cloud workflow requires this variable and
 does not silently fall back to template defaults. Run the setup command again
 after changing local settings. Never put credentials or tokens in this variable.
 
-In repository Settings > Environments > `prod`, configure at least one
-required reviewer, enable **Prevent self-review**, disable administrator
-bypass, and allow the exact branch `main` with no tags. Both the CLI and the
-production runner verify these settings. Diagnostics fail when the account
-plan or token permissions prevent inspecting the rules.
+If a write fails, the summary lists applied, failed, and unattempted settings.
+`PIPELINE_CONFIG_JSON` stays blocked until synchronization completes. Retry
+with the same destination and arguments. Configuration-only updates may omit
+roles and tokens that are already present in their effective scopes. To change
+a role, supply both distinct role ARNs.
+
+The generated helper uses the same CLI behavior. Pass the destination and
+setup options when running it from the checkout, for example
+`bash dist/devsecops/github-setup.sh OWNER/REPO --deploy-role-arn <arn> --plan-role-arn <arn>`.
+Run [OIDC role verification](../AWS_policy.md#verify-role-setup) during final
+acceptance. Secret names alone leave OIDC readiness unverified.
+
 
 ```bash
 devsecops doctor github --strict

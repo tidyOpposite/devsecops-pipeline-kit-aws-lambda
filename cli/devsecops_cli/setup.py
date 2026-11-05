@@ -69,7 +69,7 @@ _S3_BUCKET_RE = re.compile(
     r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
 )
 _IAM_ROLE_ARN_RE = re.compile(
-    r"^arn:(aws|aws-us-gov|aws-cn):iam::\d{12}:role\/[A-Za-z0-9+=,.@_\/-]{1,512}$"
+    r"^arn:(aws|aws-us-gov|aws-cn):iam::[0-9]{12}:role/(?P<path>(?:[\x21-\x7E]+/)?)(?P<name>[A-Za-z0-9+=,.@_-]{1,64})$"
 )
 
 
@@ -258,7 +258,15 @@ def is_backend_bucket_configured(value: str) -> bool:
 def is_iam_role_arn(value: str) -> bool:
     """Validate IAM role ARN shape without contacting AWS."""
 
-    return bool(_IAM_ROLE_ARN_RE.fullmatch(value.strip()))
+    match = _IAM_ROLE_ARN_RE.fullmatch(value.strip())
+    return match is not None and len(match["path"]) + 1 <= 512
+
+
+def iam_role_identity(value: str) -> tuple[str, str, str]:
+    """Normalize the account and case-insensitive IAM role name."""
+
+    parts = value.strip().split(":")
+    return parts[1], parts[4], value.strip().rsplit("/", 1)[1].lower()
 
 
 def github_setup_ready(checks: list[Check]) -> bool:

@@ -152,9 +152,9 @@ def checklist(cfg: dict[str, Any]) -> str:
 
         ## GitHub Secrets
 
-        - [ ] `AWS_ROLE_TO_ASSUME_ARN`
-        - [ ] `AWS_PLAN_ROLE_TO_ASSUME_ARN`
-        - [ ] `AWS_REGION` = `{cfg["aws_region"]}`
+        - [ ] `AWS_ROLE_TO_ASSUME_ARN` at repository or `prod` scope
+        - [ ] `AWS_PLAN_ROLE_TO_ASSUME_ARN` at repository scope
+        - [ ] Separate OIDC role verification passed on current `main`
         - [ ] {snyk_label}
 
         ## GitHub Variables
@@ -167,6 +167,7 @@ def checklist(cfg: dict[str, Any]) -> str:
         - [ ] `ENABLE_DAST` = `{str(cfg["enable_dast"]).lower()}`
         - [ ] `PROD_APPROVAL_ENVIRONMENT` = `{prod_approval_environment(cfg)}`
         - [ ] `{PIPELINE_CONFIG_VARIABLE}` synchronized with local config using `devsecops github setup --apply`
+        - [ ] AWS region in pipeline configuration = `{cfg["aws_region"]}`
         - [ ] GitHub Environment `prod` has at least one required reviewer
 
         ## Terraform Backend
@@ -187,37 +188,27 @@ def checklist(cfg: dict[str, Any]) -> str:
 def github_setup_script(cfg: dict[str, Any]) -> str:
     """Render a strict-shell helper for applying GitHub variables and secrets.
 
-    Secret commands contain placeholders rather than local secret values; the
-    generated script must be reviewed and completed before execution.
+    The caller supplies an explicit destination and optional secret arguments.
+    Shared CLI validation and retry behavior apply to the generated helper.
     """
 
-    snyk_token_command = (
-        'gh secret set SNYK_TOKEN --body "<snyk-token>"'
-        if cfg["enable_snyk_scan"]
-        else '# Optional: gh secret set SNYK_TOKEN --body "<snyk-token>"'
-    )
     lines = [
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "",
         *cli_owned_comment("devsecops render").splitlines(),
-        "# Review placeholder values before running.",
-        "",
-        f'gh variable set PROJECT_NAME --body {shell_quote(cfg["project_name"])}',
-        f'gh variable set LAMBDA_IMAGE_URI --body {shell_quote(cfg["lambda_image_uri"] or "<immutable-image-uri>")}',
-        f'gh variable set API_AUTHORIZATION_TYPE --body {shell_quote(cfg["api_authorization_type"])}',
-        f'gh variable set ENABLE_SNYK_SCAN --body {shell_quote(str(cfg["enable_snyk_scan"]).lower())}',
-        f'gh variable set ENABLE_HTTP_VALIDATION --body {shell_quote(str(cfg["enable_http_validation"]).lower())}',
-        f'gh variable set ENABLE_DAST --body {shell_quote(str(cfg["enable_dast"]).lower())}',
-        f"gh variable set PROD_APPROVAL_ENVIRONMENT --body {shell_quote(prod_approval_environment(cfg))}",
-        f"gh variable set {PIPELINE_CONFIG_VARIABLE} --body {shell_quote(pipeline_config_json(cfg))}",
-        "",
-        f'gh secret set AWS_REGION --body {shell_quote(cfg["aws_region"])}',
-        'gh secret set AWS_ROLE_TO_ASSUME_ARN --body "<deploy-role-arn>"',
-        'gh secret set AWS_PLAN_ROLE_TO_ASSUME_ARN --body "<plan-role-arn>"',
-        snyk_token_command,
-        "",
+        "# Run from the project checkout with OWNER/REPO and setup options.",
+        "# Example options: --deploy-role-arn <deploy-role-arn> --plan-role-arn <plan-role-arn>",
     ]
+    if cfg["enable_snyk_scan"]:
+        lines.append("# Include --snyk-token <snyk-token> when SNYK_TOKEN is not configured.")
+    lines.extend([
+        "",
+        'repository="${1:?Usage: github-setup.sh OWNER/REPO [setup options]}"',
+        "shift",
+        'exec devsecops github setup --apply --repo "$repository" "$@"',
+        "",
+    ])
     return "\n".join(lines)
 
 

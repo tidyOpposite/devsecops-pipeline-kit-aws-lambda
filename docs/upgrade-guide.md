@@ -30,9 +30,7 @@ deployment repository, review the local configuration, then run:
 ```bash
 devsecops config validate
 devsecops generate
-devsecops github setup --apply
-devsecops doctor github --strict
-devsecops status --deep --strict
+devsecops github setup --apply --repo OWNER/REPO
 ```
 
 The `--apply` command updates that repository's settings; it is not a deploy.
@@ -45,6 +43,29 @@ Configure required reviewers in Settings > Environments > `prod`. Production
 jobs always select `prod`; disabling a local demo approval flag cannot redirect
 the production workflow to an unprotected environment. Inspection failures
 remain blockers until the protection can be verified.
+
+Create `prod` before applying setup. Setup inspects both repository and `prod`
+secrets and preserves the effective scope of existing deploy-role and Snyk
+secrets. The plan-role secret must be repository-scoped. To replace role secrets,
+supply both `--deploy-role-arn` and `--plan-role-arn`; valid, distinct IAM roles
+are required. If a write fails, setup reports each operation and leaves
+`PIPELINE_CONFIG_JSON` blocked until synchronization completes. Retry with the
+same arguments and pinned `--repo OWNER/REPO`.
+
+Regenerate `dist/devsecops/github-setup.sh`: it now delegates to the installed
+CLI and requires `OWNER/REPO` as its first argument. After updating `main`, run
+`verify-oidc.yml` manually from `main` during final cloud acceptance. It checks
+the plan and production roles in separate jobs, including their STS identities.
+`doctor github --strict` requires a successful verification on current `main`
+that is newer than both effective role secrets. Repeat verification after a
+role-secret or `main` change, then run:
+
+```bash
+devsecops doctor github --repo OWNER/REPO --strict
+devsecops status --pre-deploy --strict
+# After deployment, verify the workload as well:
+devsecops status --deep --strict
+```
 
 Compact status explicitly leaves cloud readiness unverified, so production
 scripts must use `status --deep --strict`. Invalid image dry-runs and setup

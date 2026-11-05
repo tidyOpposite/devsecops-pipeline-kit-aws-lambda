@@ -139,17 +139,33 @@ After creating the roles, run:
 
 ```bash
 devsecops github setup --apply \
+  --repo <OWNER>/<REPO> \
   --deploy-role-arn arn:aws:iam::<ACCOUNT_ID>:role/<DEPLOY_ROLE> \
   --plan-role-arn arn:aws:iam::<ACCOUNT_ID>:role/<PLAN_ROLE>
 devsecops doctor github --strict
 devsecops doctor branch --branch main --strict
 ```
 
-In the target repository, confirm that `Configure AWS credentials` assumes the
-plan role in both a same-repository PR and a manual `mode=plan` run from `main`.
-During the approved production walkthrough, confirm that the deploy job waits
-for `prod` approval and then assumes the deploy role. Record the run IDs and
-role names in the [deployment evidence](docs/production-deployment-evidence.md).
+Create and protect the `prod` GitHub Environment before applying setup. Setup
+inspects repository and `prod` secret metadata. When a deployment role or Snyk
+token already exists in `prod`, setup updates that effective scope. The plan
+role belongs at repository scope because plan jobs run outside `prod`.
+
+During final acceptance, run the dedicated verification workflow:
+
+```bash
+gh workflow run verify-oidc.yml --ref main --repo <OWNER>/<REPO>
+devsecops doctor github --repo <OWNER>/<REPO> --strict
+```
+
+The plan job assumes the repository plan role. After `prod` approval, the
+deploy job assumes the effective production role and verifies that it differs
+from the verified plan role. Both jobs compare the STS identity with the
+intended role and account. The workflow performs identity checks only.
+Doctor requires both jobs to succeed on current `main` and checks that role
+secret timestamps precede the verification. A secret update or a new commit
+requires verification again. Record the run ID in the
+[deployment evidence](docs/production-deployment-evidence.md).
 
 `AWS_PLAN_ROLE_TO_ASSUME_ARN` is required even if older local config or presets
 have `use_separate_aws_plan_role=false`. That config value is retained for

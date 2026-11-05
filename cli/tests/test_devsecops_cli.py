@@ -1743,14 +1743,11 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         cfg["enable_snyk_scan"] = True
         cfg["use_separate_aws_plan_role"] = False
         script = cli.github_setup_script(cfg)
-        self.assertIn("gh variable set PROJECT_NAME", script)
-        self.assertIn("gh variable set ENABLE_SNYK_SCAN", script)
-        self.assertIn("gh variable set PROD_APPROVAL_ENVIRONMENT", script)
-        self.assertIn("gh secret set AWS_ROLE_TO_ASSUME_ARN", script)
-        self.assertIn("gh secret set AWS_PLAN_ROLE_TO_ASSUME_ARN", script)
-        self.assertNotIn("Optional: gh secret set AWS_PLAN_ROLE_TO_ASSUME_ARN", script)
-        self.assertIn("gh secret set SNYK_TOKEN", script)
-        self.assertIn("sha-abc123", script)
+        self.assertIn('devsecops github setup --apply --repo "$repository" "$@"', script)
+        self.assertIn("--deploy-role-arn <deploy-role-arn>", script)
+        self.assertIn("--plan-role-arn <plan-role-arn>", script)
+        self.assertIn("--snyk-token <snyk-token>", script)
+        self.assertIn("OWNER/REPO [setup options]", script)
 
     def test_control_catalog_and_explain_map_generated_behavior(self) -> None:
         cfg = cli.default_config()

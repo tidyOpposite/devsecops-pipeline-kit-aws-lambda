@@ -1,0 +1,67 @@
+name: Verify AWS OIDC Roles
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PIPELINE_CONFIG_JSON: ${{ vars.PIPELINE_CONFIG_JSON }}
+
+jobs:
+  verify-plan-role:
+    name: Verify plan OIDC role
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_ROLE_ARN: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}
+    outputs:
+      role_fingerprint: ${{ steps.identity.outputs.role_fingerprint }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate plan role settings
+        run: PYTHONPATH=cli python3 -m devsecops_cli.oidc prepare plan
+      - name: Assume plan role using OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Verify assumed plan identity
+        id: identity
+        run: PYTHONPATH=cli python3 -m devsecops_cli.oidc verify plan
+
+  verify-deploy-role:
+    name: Verify deploy OIDC role
+    needs: verify-plan-role
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      EXPECTED_ROLE_ARN: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
+      PLAN_ROLE_FINGERPRINT: ${{ needs.verify-plan-role.outputs.role_fingerprint }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate deploy role settings
+        run: PYTHONPATH=cli python3 -m devsecops_cli.oidc prepare deploy
+      - name: Assume deploy role using OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Verify assumed deploy identity
+        run: PYTHONPATH=cli python3 -m devsecops_cli.oidc verify deploy
