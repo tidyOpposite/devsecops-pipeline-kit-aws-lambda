@@ -222,6 +222,49 @@ class PipelineTransportTests(unittest.TestCase):
         self.assertEqual(payload.status, "WARN")
 
 
+class AwsConstraintTests(unittest.TestCase):
+    def test_retention_schema_validation_and_presets_use_supported_values(self):
+        schema = config.config_schema()["fields"]["environments"]["fields"]["prod"]["log_retention_days"]
+        self.assertEqual(schema["type"], "integer")
+        self.assertIn(1096, schema["enum"])
+        self.assertNotIn(1095, schema["enum"])
+        for days in [*schema["enum"], 0, 2, 1095, 3654]:
+            with self.subTest(days=days):
+                cfg = customer_config()
+                cfg["environments"]["prod"]["log_retention_days"] = days
+                check = next(check for check in config.validate_config(cfg) if check.name == "prod.log_retention_days")
+                expected = "OK" if type(days) is int and days in schema["enum"] else "FAIL"
+                self.assertEqual(check.status, expected)
+        for preset in config.PRESET_ORDER:
+            with self.subTest(preset=preset):
+                self.assertFalse([check for check in config.validate_config(config.clean_config(preset)) if check.status == "FAIL"])
+
+    def test_invalid_retention_write_is_rejected_and_legacy_enterprise_value_can_be_corrected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cfg = project(root)
+            original = config.config_path(root).read_text()
+            code, text = invoke(root, ["config", "set", "environments.prod.log_retention_days", "2"])
+            self.assertEqual(code, 1, text)
+            self.assertEqual(config.config_path(root).read_text(), original)
+
+            cfg["environments"]["prod"]["log_retention_days"] = 1095
+            config.write_config(root, cfg)
+            code, text = invoke(root, ["config", "validate", "--format", "json"])
+            self.assertEqual(code, 1, text)
+            self.assertEqual(config.load_config(root)["environments"]["prod"]["log_retention_days"], 1095)
+            code, text = invoke(root, ["config", "set", "environments.prod.log_retention_days", "1096", "--render"])
+            self.assertEqual(code, 0, text)
+            self.assertEqual(config.load_config(root)["environments"]["prod"]["log_retention_days"], 1096)
+            self.assertIn("log_retention_days         = 1096", (root / cli.GENERATED_TFVARS).read_text())
+
+    def test_retention_prompt_retries_until_the_value_is_supported(self):
+        with patch("builtins.input", side_effect=["2", "1095", "1096"]), redirect_stdout(io.StringIO()) as output:
+            days = cli.prompt_int("Log retention days", 1095, choices=config.LOG_RETENTION_DAYS)
+        self.assertEqual(days, 1096)
+        self.assertEqual(output.getvalue().count("Choose one of"), 2)
+
+
 class WorkflowRequestTests(unittest.TestCase):
     def test_runner_rejects_unsupported_manual_requests_before_configuration(self):
         cases = [

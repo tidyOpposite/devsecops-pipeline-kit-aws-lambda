@@ -131,3 +131,6 @@ jobs:
 
       - name: Terraform validate
         run: terraform -chdir="${TF_WORKING_DIR}" validate -no-color
+
+      - name: Test AWS constraints with mocked provider
+        run: terraform -chdir="${TF_WORKING_DIR}" test -no-color

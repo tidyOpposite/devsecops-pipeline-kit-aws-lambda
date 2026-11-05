@@ -1649,7 +1649,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
         self.assertTrue(enterprise["enable_snyk_scan"])
         self.assertTrue(enterprise["enable_http_validation"])
         self.assertTrue(enterprise["enable_dast"])
-        self.assertEqual(enterprise["environments"]["prod"]["log_retention_days"], 1095)
+        self.assertEqual(enterprise["environments"]["prod"]["log_retention_days"], 1096)
         self.assertNotIn("*", enterprise["environments"]["prod"]["cors_allowed_origins"])
 
         demo = cli.preset_config("student-demo")
@@ -1685,7 +1685,7 @@ devsecops dry-run --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devse
                     self.assertEqual(cli.cmd_preset(argparse.Namespace(command="apply", name="enterprise", render=True)), 0)
                 applied = cli.load_config(root)
                 self.assertEqual(applied["project_name"], "kept-project")
-                self.assertEqual(applied["environments"]["prod"]["log_retention_days"], 1095)
+                self.assertEqual(applied["environments"]["prod"]["log_retention_days"], 1096)
                 run_render.assert_called_once()
 
                 with redirect_stdout(io.StringIO()):

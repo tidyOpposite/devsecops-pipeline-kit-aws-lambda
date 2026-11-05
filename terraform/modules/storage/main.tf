@@ -1,6 +1,13 @@
+module "bucket_names" {
+  source = "../bucket-names"
+
+  account_id  = var.account_id
+  name_prefix = var.name_prefix
+}
+
 locals {
-  log_bucket_name    = "${var.name_prefix}-access-logs-${var.account_id}"
-  output_bucket_name = "${var.name_prefix}-workload-data-${var.account_id}"
+  log_bucket_name    = module.bucket_names.names["access-logs"]
+  output_bucket_name = module.bucket_names.names["workload-data"]
 }
 
 resource "aws_s3_bucket" "log_bucket" {

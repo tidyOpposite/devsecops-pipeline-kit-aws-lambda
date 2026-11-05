@@ -1,11 +1,18 @@
+module "bucket_names" {
+  source = "../bucket-names"
+
+  account_id  = var.account_id
+  name_prefix = var.name_prefix
+}
+
 locals {
   terraform_admin_role_arn = var.terraform_admin_role_name == "" ? null : "arn:aws:iam::${var.account_id}:role/${var.terraform_admin_role_name}"
   key_admin_principals = compact([
     "arn:aws:iam::${var.account_id}:root",
     local.terraform_admin_role_arn,
   ])
-  log_bucket_arn    = "arn:aws:s3:::${var.name_prefix}-access-logs-${var.account_id}"
-  output_bucket_arn = "arn:aws:s3:::${var.name_prefix}-workload-data-${var.account_id}"
+  log_bucket_arn    = "arn:aws:s3:::${module.bucket_names.names["access-logs"]}"
+  output_bucket_arn = "arn:aws:s3:::${module.bucket_names.names["workload-data"]}"
   ecr_repo_arn      = "arn:aws:ecr:${var.aws_region}:${var.account_id}:repository/${var.name_prefix}-lambda-repo"
   lambda_dlq_arn    = "arn:aws:sqs:${var.aws_region}:${var.account_id}:${var.name_prefix}-lambda-dlq"
 }

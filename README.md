@@ -544,6 +544,16 @@ Each preset has a documented security posture and can be compared with
 control catalog, preset comparison, strict validation rules, and audit evidence
 format.
 
+Log retention uses the discrete periods listed by `devsecops config schema`.
+The enterprise production setting is 1096 days. CLI and Terraform reject
+unsupported periods such as 2 or 1095 days. See the
+[CloudWatch retention API](https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutRetentionPolicy.html).
+
+Project names can contain 3–32 characters. Terraform keeps valid generated
+bucket names and shortens names that exceed the S3 limit or use a reserved
+prefix. The deterministic suffix includes the original name's hash. See the
+[upgrade guide](docs/upgrade-guide.md#aws-constraints-and-bucket-names).
+
 Under `Advanced`, use the compatibility composer when you want the CLI to ask
 for individual controls and then update all generated outputs in one pass:
 

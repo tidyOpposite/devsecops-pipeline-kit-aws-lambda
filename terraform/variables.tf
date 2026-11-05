@@ -74,7 +74,6 @@ variable "environment_config" {
       for _, settings in var.environment_config : [
         settings.lambda_memory_size >= 128 && settings.lambda_memory_size <= 10240,
         settings.lambda_timeout >= 1 && settings.lambda_timeout <= 900,
-        settings.log_retention_days >= 1 && settings.log_retention_days <= 3653,
         settings.api_throttling_burst_limit >= 1 && settings.api_throttling_burst_limit <= 5000,
         settings.api_throttling_rate_limit >= 1 && settings.api_throttling_rate_limit <= 10000,
         length(settings.cors_allowed_origins) > 0,
@@ -82,6 +81,11 @@ variable "environment_config" {
       ]
     ]))
     error_message = "environment_config values must stay within Lambda/API limits and define at least one non-empty CORS origin per environment."
+  }
+
+  validation {
+    condition     = alltrue([for settings in values(var.environment_config) : contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], settings.log_retention_days)])
+    error_message = "log_retention_days must be one of the CloudWatch Logs supported retention periods."
   }
 
   validation {

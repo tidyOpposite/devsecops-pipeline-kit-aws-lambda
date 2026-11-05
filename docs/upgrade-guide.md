@@ -54,6 +54,29 @@ Generated output drift now requires regeneration. Informational checks no longer
 reduce category scores. The menu resumes saved setup and supports confirmed
 production deployment and rollback directly.
 
+## AWS Constraints And Bucket Names
+
+CloudWatch retention now uses the AWS-supported discrete values shown by
+`devsecops config schema`. The `enterprise` preset uses 1096 days for
+production. If an older config contains 1095, correct it explicitly and
+regenerate the deployment inputs:
+
+```bash
+devsecops config set environments.prod.log_retention_days 1096 --render
+devsecops config validate
+```
+
+Existing source files keep their saved value until edited. Synchronize the
+reviewed configuration with GitHub before the next deployment.
+
+Project names still support 3–32 characters. Valid existing access-log and
+workload bucket names keep their physical names. A generated name exceeding
+63 characters or using a reserved S3 prefix becomes `kit-<first-42-characters>-<16-character-SHA256>`.
+The hash includes the full original name, including environment, purpose,
+and account ID. Storage and its KMS encryption context use the same naming
+module. Run `terraform init` after updating the checkout so Terraform loads
+the new local module, then review the plan in the existing workspace.
+
 ## Standard Upgrade Flow
 
 Before upgrading:

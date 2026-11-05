@@ -91,6 +91,7 @@ from .config import (
     CONFIG_SCHEMA_VERSION,
     CONFIG_SET_PATHS,
     ENVIRONMENTS,
+    LOG_RETENTION_DAYS,
     NO_APPROVAL_ENVIRONMENT,
     PIPELINE_CONFIG_VARIABLE,
     PRESETS,
@@ -486,17 +487,22 @@ def prompt_bool(label: str, default: bool = False, allow_cancel: bool = False) -
         print(warn("Use y or n."))
 
 
-def prompt_int(label: str, default: int, allow_cancel: bool = False) -> int:
+def prompt_int(
+    label: str, default: int, allow_cancel: bool = False, *, choices: tuple[int, ...] | None = None,
+) -> int:
     while True:
         value = input(f"{label} [{default}{cancel_hint(allow_cancel)}]: ").strip()
         if allow_cancel and is_cancel_input(value):
             raise InputCancelled
-        if not value:
-            return default
         try:
-            return int(value)
+            parsed = int(value) if value else default
         except ValueError:
             print(warn("Use a number."))
+            continue
+        if choices is None or parsed in choices:
+            return parsed
+        guidance = "Choose one of " + ", ".join(map(str, choices)) + "."
+        print(warn(textwrap.fill(guidance, width=shutil.get_terminal_size((80, 24)).columns)))
 
 
 def header(cfg: dict[str, Any] | None = None) -> None:
@@ -3786,6 +3792,7 @@ def run_init(root: Path, force: bool = False, defaults: bool = False, allow_canc
                     f"{env_name} log retention days",
                     int(current_env["log_retention_days"]),
                     allow_cancel=allow_cancel,
+                    choices=LOG_RETENTION_DAYS,
                 )
                 env_cfg["api_throttling_burst_limit"] = prompt_int(
                     f"{env_name} API burst limit",

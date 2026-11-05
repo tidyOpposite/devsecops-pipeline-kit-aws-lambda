@@ -94,6 +94,10 @@ STRICT_CORS_ORIGINS = {
     "prod": ["https://app.example.com"],
 }
 API_AUTHORIZATION_TYPES = {"AWS_IAM", "NONE"}
+LOG_RETENTION_DAYS = (
+    1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731,
+    1096, 1827, 2192, 2557, 2922, 3288, 3653,
+)
 
 # This machine-readable contract keeps migrations, generated artifacts, and
 # rollback expectations visible to both users and release tooling.
@@ -245,7 +249,7 @@ def preset_config(name: str) -> dict[str, Any]:
             "prod": {
                 "lambda_memory_size": 3072,
                 "lambda_timeout": 300,
-                "log_retention_days": 1095,
+                "log_retention_days": 1096,
                 "api_throttling_burst_limit": 50,
                 "api_throttling_rate_limit": 100,
                 "cors_allowed_origins": ["https://app.example.com"],
@@ -752,7 +756,7 @@ def config_schema() -> dict[str, Any]:
     environment_fields = {
         "lambda_memory_size": {"type": "integer", "minimum": 128, "maximum": 10240},
         "lambda_timeout": {"type": "integer", "minimum": 1, "maximum": 900},
-        "log_retention_days": {"type": "integer", "minimum": 1, "maximum": 3653},
+        "log_retention_days": {"type": "integer", "enum": list(LOG_RETENTION_DAYS)},
         "api_throttling_burst_limit": {"type": "integer", "minimum": 1, "maximum": 5000},
         "api_throttling_rate_limit": {"type": "integer", "minimum": 1, "maximum": 10000},
         "cors_allowed_origins": {"type": "array", "items": "string"},
@@ -811,6 +815,7 @@ def config_schema_markdown() -> str:
         ["terraform_admin_role_name", "string", "Optional role name; not a secret."],
         ["backend.*", "object", "S3 backend names and region."],
         ["environments.<env>.*", "object", "dev, staging, and prod settings."],
+        ["environments.<env>.log_retention_days", "integer", ", ".join(map(str, LOG_RETENTION_DAYS))],
     ]
     return "\n\n".join(
         [
@@ -980,7 +985,6 @@ def validate_config(cfg: dict[str, Any]) -> list[Check]:
         numeric_rules = {
             "lambda_memory_size": (128, 10240),
             "lambda_timeout": (1, 900),
-            "log_retention_days": (1, 3653),
             "api_throttling_burst_limit": (1, 5000),
             "api_throttling_rate_limit": (1, 10000),
         }
@@ -995,6 +999,16 @@ def validate_config(cfg: dict[str, Any]) -> list[Check]:
                     str(value) if status == "OK" else f"{value} outside {lower}-{upper}.",
                 )
             )
+        retention = env_cfg["log_retention_days"]
+        valid_retention = type(retention) is int and retention in LOG_RETENTION_DAYS
+        checks.append(Check(
+            f"{env_name}.log_retention_days",
+            "OK" if valid_retention else "FAIL",
+            str(retention) if valid_retention else (
+                f"{retention} is not supported by CloudWatch Logs. Choose one of "
+                + ", ".join(map(str, LOG_RETENTION_DAYS)) + " days."
+            ),
+        ))
         origins = env_cfg["cors_allowed_origins"]
         def valid_origin(item: Any) -> bool:
             if not isinstance(item, str) or item != item.strip() or any(char.isspace() for char in item):
@@ -1108,6 +1122,7 @@ __all__ = [
     "PRESET_POSTURE_LABELS",
     "PROD_APPROVAL_ENVIRONMENT",
     "PROJECT_NAME_RE",
+    "LOG_RETENTION_DAYS",
     "STRICT_CORS_ORIGINS",
     "apply_cors_policy",
     "canonical_config_text",
