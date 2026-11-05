@@ -6,16 +6,26 @@ updates:
       interval: "weekly"
 
   - package-ecosystem: "pip"
-    directory: "/lambda_function"
+    directory: "/"
     schedule:
       interval: "weekly"
 
   - package-ecosystem: "docker"
-    directory: "/"
+    directory: "/tools/snyk"
     schedule:
       interval: "weekly"
 
   - package-ecosystem: "terraform"
     directory: "/terraform"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "terraform"
+    directory: "/terraform/bootstrap"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "terraform"
+    directory: "/terraform/acceptance"
     schedule:
       interval: "weekly"

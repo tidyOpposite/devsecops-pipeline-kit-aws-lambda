@@ -183,6 +183,11 @@ bundle must include:
 * CloudWatch log group/tail evidence;
 * active Lambda image and rollback-readiness notes.
 
+Include the isolated AWS runtime acceptance run/attempt ID and cleanup result
+from [Security gate acceptance](security-gate-acceptance.md). This real-service
+test belongs to final acceptance in a dedicated sandbox account; CI runs only
+its mock rehearsal and scanner-isolation probe.
+
 If the walkthrough exposes a failure mode not covered by
 [Operational runbooks](runbooks/README.md), update the runbook set before
 publishing the release.

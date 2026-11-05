@@ -333,6 +333,18 @@ The local deployment reviewer also needs these two ECR read actions and
 
 ## Plan Role Guidance
 
+Snyk does not receive an AWS role. The trusted production runner exports the
+reviewed ECR digest, then starts an unprivileged scanner container with only
+`SNYK_TOKEN` and that archive. No AWS credentials, OIDC variables, GitHub token
+or Docker socket are forwarded. Scanner image/version checks run before AWS
+credentials are assumed. See [Security gate acceptance](docs/security-gate-acceptance.md).
+
+The optional `AWS_ACCEPTANCE_ROLE_ARN` is a separate role in a dedicated sandbox
+account. It is used only by `cloud-acceptance.yml`, with the protected
+`acceptance` environment subject, and never by PRs or normal deploys. Configure
+its exact trust/protections and permissions as described in that guide. It
+does not need access to the production Terraform backend.
+
 The plan role needs access to its isolated backend and enough read permissions
 for sandbox Terraform refresh. Start with read-only permissions scoped to
 sandbox resources, then add

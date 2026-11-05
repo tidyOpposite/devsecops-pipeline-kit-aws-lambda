@@ -1,0 +1,87 @@
+name: Isolated AWS Runtime Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: isolated-cloud-acceptance
+  cancel-in-progress: false
+  queue: max
+
+env:
+  ENABLE_CLOUD_ACCEPTANCE: ${{ vars.ENABLE_CLOUD_ACCEPTANCE || 'false' }}
+  ACCEPTANCE_AWS_ACCOUNT_ID: ${{ vars.ACCEPTANCE_AWS_ACCOUNT_ID }}
+  PRODUCTION_AWS_ACCOUNT_ID: ${{ vars.PRODUCTION_AWS_ACCOUNT_ID }}
+  ACCEPTANCE_AWS_REGION: ${{ vars.ACCEPTANCE_AWS_REGION }}
+  ACCEPTANCE_IMAGE_URI: ${{ vars.ACCEPTANCE_IMAGE_URI }}
+  TF_IN_AUTOMATION: 'true'
+
+jobs:
+  request-guard:
+    name: Verify acceptance request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require explicit main-only final acceptance
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ] || [ "$ENABLE_CLOUD_ACCEPTANCE" != true ]; then
+            echo "Enable final sandbox acceptance explicitly and dispatch from main." >&2
+            exit 1
+          fi
+  runtime-acceptance:
+    name: Sandbox AWS Constraints
+    if: github.ref == 'refs/heads/main'
+    needs: request-guard
+    environment: acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      AWS_ACCEPTANCE_ROLE_ARN: ${{ secrets.AWS_ACCEPTANCE_ROLE_ARN }}
+    steps:
+      - name: Checkout reviewed main commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify opt-in, account isolation and environment protection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: PYTHONPATH=cli python3 -m devsecops_cli.acceptance preflight
+      - name: Assume isolated acceptance role
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ACCEPTANCE_ROLE_ARN }}
+          aws-region: ${{ env.ACCEPTANCE_AWS_REGION }}
+          unset-current-credentials: true
+      - name: Verify actual account, image and prepare isolated fixture
+        run: PYTHONPATH=cli python3 -m devsecops_cli.acceptance prepare
+      - name: Set up locked Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: '1.10.5'
+          terraform_wrapper: false
+      - name: Initialize fixture without deployment state
+        run: |
+          cp terraform/.terraform.lock.hcl terraform/acceptance/.terraform.lock.hcl
+          terraform -chdir=terraform/acceptance init -backend=false -input=false -lockfile=readonly -no-color
+      - name: Apply, assert AWS runtime constraints and tear down fixture
+        run: |
+          set -o pipefail
+          terraform -chdir=terraform/acceptance test -test-directory=cloud-tests -no-color 2>&1 | tee terraform/acceptance/runtime-acceptance.txt
+      - name: Preserve acceptance and cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: isolated-aws-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            terraform/acceptance/runtime-acceptance.txt
+            terraform/acceptance/acceptance.auto.tfvars.json
+            terraform/acceptance/*.tfstate*
+          if-no-files-found: warn
+          retention-days: 14

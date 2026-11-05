@@ -7,6 +7,13 @@ semantic versioning.
 
 ### Fixed
 
+* Pin Snyk by CLI version and image digest, prepare it before AWS access, and
+  scan a read-only archive in an unprivileged container without AWS/OIDC/GitHub
+  credentials. Add a real Docker credential-boundary probe to CI.
+* Use the pinned Trivy engine's embedded checks, pin the CI Rich version and
+  point Dependabot at existing Python, scanner and Terraform manifests.
+* Add an opt-in, protected AWS runtime acceptance workflow for a separate
+  sandbox account, with a mocked apply/teardown rehearsal in ordinary CI.
 * Stage installer upgrades in separate environments, verify CLI/launcher startup
   and release version, then atomically publish the launcher. Preserve working
   environments on failure, refuse unrelated launchers, and serialize installers

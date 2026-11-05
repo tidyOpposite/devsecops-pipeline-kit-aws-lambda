@@ -44,6 +44,12 @@ The final bundle should contain:
 
 ## Prerequisites
 
+During final acceptance, also complete the separate
+[AWS runtime constraint test](security-gate-acceptance.md) in a dedicated sandbox
+account. Record its run/attempt ID, artifact and cleanup result in `notes.md`.
+It supplements this production health/rollback walkthrough; it must not run
+against the production account.
+
 Complete these before dispatching production:
 
 * Select the successful `CLI and Terraform CI` run for the candidate commit on

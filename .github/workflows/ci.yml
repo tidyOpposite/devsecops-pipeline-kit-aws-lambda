@@ -51,7 +51,7 @@ jobs:
 
       - name: Verify optional terminal renderer
         run: |
-          python -m pip install 'rich>=13.7'
+          python -m pip install 'rich==14.2.0'
           PYTHONPATH=cli:cli/tests python -m unittest test_product_audit.ValidationAndUiTests.test_real_rich_renderer_with_readiness_gaps
 
       - name: Build root package artifacts
@@ -134,3 +134,25 @@ jobs:
 
       - name: Test AWS constraints with mocked provider
         run: terraform -chdir="${TF_WORKING_DIR}" test -no-color
+
+      - name: Rehearse isolated acceptance without AWS credentials
+        run: |
+          cp terraform/.terraform.lock.hcl terraform/acceptance/.terraform.lock.hcl
+          terraform -chdir=terraform/acceptance init -backend=false -input=false -lockfile=readonly -no-color
+          terraform -chdir=terraform/acceptance test -test-directory=tests -no-color
+
+  scanner-boundary:
+    name: Locked Scanner Isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Build and verify locked Snyk binary
+        run: PYTHONPATH=cli python3 -m devsecops_cli.scanner prepare
+      - name: Prove scanner isolation with sentinel credentials
+        run: PYTHONPATH=cli python3 -m devsecops_cli.scanner probe

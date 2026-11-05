@@ -967,7 +967,9 @@ class DeploymentWorkflowContractTests(unittest.TestCase):
         self.assertLess(image_gate, workflow.index("workspace select -or-create"))
         self.assertLess(image_gate, workflow.index("apply -input=false -no-color workload.tfplan"))
         self.assertNotIn("-target=module.ecr", workflow)
-        self.assertIn("registries: ${{ steps.verify-image.outputs.registry_id }}", workflow)
+        self.assertIn("python3 -m devsecops_cli.scanner scan", workflow)
+        self.assertLess(workflow.index("python3 -m devsecops_cli.scanner prepare"),
+                        workflow.index("role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}"))
         self.assertIn("id: apply-workload\n        if: env.DEPLOY_MODE == 'deploy'", workflow)
         self.assertIn("name: Restore requested Lambda image\n        if: env.DEPLOY_MODE == 'rollback'", workflow)
         self.assertIn("failure() && env.DEPLOY_MODE == 'deploy' && (steps.apply-workload.outcome", workflow)

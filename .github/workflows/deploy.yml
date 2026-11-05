@@ -127,10 +127,15 @@ jobs:
 
       - name: Run IaC scan with Trivy
         uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
+        env:
+          # Use checks embedded in the pinned binary, not a moving policy bundle.
+          TRIVY_SKIP_CHECK_UPDATE: 'true'
+          TRIVY_SKIP_VERSION_CHECK: 'true'
         with:
           scan-type: config
           scan-ref: ${{ env.TF_WORKING_DIR }}
           version: v0.71.0
+          cache: 'false'
           format: table
           exit-code: "1"
           ignore-unfixed: false
@@ -214,7 +219,6 @@ jobs:
       id-token: write
     env:
       DEPLOY_ENVIRONMENT: prod
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
     steps:
       - name: Checkout repository
@@ -233,6 +237,21 @@ jobs:
           EXPECTED_ROLE_ARN: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
           PLAN_ROLE_FINGERPRINT: ${{ needs.security-and-validate.outputs.plan_role_fingerprint }}
         run: PYTHONPATH=cli python3 -m devsecops_cli.oidc settings deploy
+
+      - name: Require Snyk token when scan is enabled
+        if: env.ENABLE_SNYK_SCAN == 'true'
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          if [ -z "${SNYK_TOKEN:-}" ]; then
+            echo "ENABLE_SNYK_SCAN is true, but SNYK_TOKEN is not configured." >&2
+            exit 1
+          fi
+
+      - name: Prepare locked Snyk scanner before AWS access
+        if: env.ENABLE_SNYK_SCAN == 'true'
+        timeout-minutes: 10
+        run: PYTHONPATH=cli python3 -m devsecops_cli.scanner prepare
 
       # Exchange GitHub's short-lived OIDC identity for the production role;
       # no long-lived AWS access keys are stored in repository secrets.
@@ -254,32 +273,12 @@ jobs:
           ROLLBACK_FUNCTION_ARN: ${{ inputs.rollback_function_arn }}
         run: PYTHONPATH=cli python3 -m devsecops_cli.recovery capture
 
-      # Enabling the optional image scan makes its credentials and result blocking.
-      - name: Require Snyk token when scan is enabled
-        if: env.ENABLE_SNYK_SCAN == 'true' && env.SNYK_TOKEN == ''
-        run: |
-          echo "ENABLE_SNYK_SCAN is true, but SNYK_TOKEN is not configured." >&2
-          exit 1
-
-      - name: Set up Node.js for Snyk
-        if: env.ENABLE_SNYK_SCAN == 'true' && env.SNYK_TOKEN != ''
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "20"
-
-      - name: Install Snyk CLI
-        if: env.ENABLE_SNYK_SCAN == 'true' && env.SNYK_TOKEN != ''
-        run: npm install -g snyk
-
-      - name: Login to Amazon ECR for image scan
-        if: env.ENABLE_SNYK_SCAN == 'true' && env.SNYK_TOKEN != ''
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
-        with:
-          registries: ${{ steps.verify-image.outputs.registry_id }}
-
       - name: Scan configured Lambda image with Snyk
-        if: env.ENABLE_SNYK_SCAN == 'true' && env.SNYK_TOKEN != ''
-        run: snyk container test "${LAMBDA_IMAGE_URI}" --severity-threshold=high
+        if: env.ENABLE_SNYK_SCAN == 'true'
+        timeout-minutes: 20
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: PYTHONPATH=cli python3 -m devsecops_cli.scanner scan
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3

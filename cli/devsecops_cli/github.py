@@ -709,12 +709,21 @@ def production_environment_check(
 ) -> Check:
     """Verify the GitHub protections that back the production OIDC trust."""
 
+    return protected_environment_check(root, repository, PROD_APPROVAL_ENVIRONMENT, gh_command_fn=gh_command_fn)
+
+
+def protected_environment_check(
+    root: Path, repository: str, environment_name: str, *,
+    gh_command_fn: Callable[..., subprocess.CompletedProcess[str]] = _gh_command,
+) -> Check:
+    """Require an independent reviewer and exact main-only environment policy."""
+
     name = "GitHub environment approvals"
-    settings = f"Settings > Environments > {PROD_APPROVAL_ENVIRONMENT}"
+    settings = f"Settings > Environments > {environment_name}"
     if not repository:
         return Check(name, "FAIL", "Cannot verify production environment protection without repository access.")
 
-    endpoint = f"repos/{repository}/environments/{PROD_APPROVAL_ENVIRONMENT}"
+    endpoint = f"repos/{repository}/environments/{environment_name}"
     result = gh_command_fn(root, ["api", endpoint])
     if result.returncode != 0:
         return Check(name, "FAIL", f"Cannot read {settings}: {compact_error(result)}")

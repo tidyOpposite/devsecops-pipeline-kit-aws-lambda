@@ -286,6 +286,9 @@ retained. See
 manual wheel installation, upgrades, shell completion, checksum verification,
 and supported tool versions.
 
+Security scanner pins, container isolation, and the optional final AWS sandbox
+test are documented in [Security gate acceptance](docs/security-gate-acceptance.md).
+
 `devsecops status` is the single public status surface behind the default
 screen, interactive menu, and command postludes. Every blocker is
 shown with what is missing, why it matters, what the recommended command will
@@ -652,7 +655,7 @@ Repository variables:
 | `PROJECT_NAME` | `devsecops-pipeline` | Compatibility mirror of the resource prefix in pipeline configuration. |
 | `LAMBDA_IMAGE_URI` | none | Compatibility mirror of the configured image. Production dispatch supplies a reviewed ECR digest. |
 | `API_AUTHORIZATION_TYPE` | `AWS_IAM` | API Gateway route authorization. Use `NONE` only for demo or intentionally public non-sensitive APIs. |
-| `ENABLE_SNYK_SCAN` | `false` | When `true` and `SNYK_TOKEN` is present, CI scans the configured image with Snyk. |
+| `ENABLE_SNYK_SCAN` | `false` | Production scans the reviewed image archive with digest/version-pinned Snyk in a restricted container; `SNYK_TOKEN` is required. AWS/OIDC credentials remain outside the scanner. |
 | `ENABLE_HTTP_VALIDATION` | `false` | Compatibility mirror of `enable_http_validation` in `PIPELINE_CONFIG_JSON`. Production requires `true` and checks `/health` after apply. |
 | `ENABLE_DAST` | `false` | When `true`, CI runs OWASP ZAP baseline scan only when `API_AUTHORIZATION_TYPE=NONE`. |
 | `PROD_APPROVAL_ENVIRONMENT` | `prod` | Compatibility posture value. Production jobs and CLI preflight verify `prod` reviewer and branch protections. |

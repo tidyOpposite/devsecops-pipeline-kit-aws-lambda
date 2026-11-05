@@ -129,6 +129,26 @@ and account ID. Storage and its KMS encryption context use the same naming
 module. Run `terraform init` after updating the checkout so Terraform loads
 the new local module, then review the plan in the existing workspace.
 
+## Security Scanner And Runtime Acceptance
+
+Update the workflow and CLI together: the production job now builds the
+digest/version-pinned scanner in `tools/snyk/Dockerfile` before AWS access and
+scans an exported image archive in an unprivileged container. Remove older
+`npm install -g snyk` and ECR-login steps when updating a customized workflow.
+The trusted runner needs Docker and disk for the image plus archive; Snyk
+receives only the scan token and read-only archive. No new scan role is needed.
+
+Trivy uses the pinned engine's embedded checks instead of a moving downloaded
+policy bundle; CI pins its optional Rich version. Dependabot targets the root
+Python project, the scanner Dockerfile and actual Terraform directories.
+
+The new AWS runtime acceptance workflow is disabled by default and requires
+a dedicated account, separate role, protected `acceptance` environment and
+explicit final-stage opt-in. CI rehearses its fixture using a mock provider;
+it never runs real AWS tests. Follow [Security gate acceptance](security-gate-acceptance.md)
+for permissions, variables, evidence and cleanup. The fixture requires
+Terraform 1.10.5 or newer; the manual workflow pins 1.10.5.
+
 ## Installer Upgrade Safety
 
 The updated installer keeps the active environment while preparing a replacement
