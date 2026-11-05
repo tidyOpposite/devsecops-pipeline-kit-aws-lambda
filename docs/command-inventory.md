@@ -143,6 +143,9 @@ but they are hidden from primary help and shell completion.
 | `devsecops terraform` | Stable | Terraform | Primary Terraform group for plan and backend bootstrap helpers. |
 | `devsecops terraform plan <env>` | Stable | Terraform | Convenience wrapper for Terraform plan against an environment workspace. Delegates to Terraform without hiding Terraform output. |
 | `devsecops terraform bootstrap` | Stable | Terraform | Plans or applies the Terraform backend bootstrap stack. Mutates AWS only with `--apply`. |
+| `devsecops terraform teardown` | Stable | Terraform | Local decommission guide, also available from Deploy/Advanced menu. No AWS requests. |
+| `devsecops terraform teardown bucket-plan` | Stable | Terraform | Read-only inventory of one exact versioned S3 bucket; writes a new private manifest with SHA-256. |
+| `devsecops terraform teardown bucket-purge` | Stable | Terraform | Permanently removes reviewed versions/uploads after exact scope, backup acknowledgment and fresh inventory; backend purposes require separate permission. Never deletes buckets. |
 | `devsecops plan <env>` | Alias | Terraform | Compatibility alias for `devsecops terraform plan <env>`. |
 | `devsecops bootstrap` | Alias | Terraform | Compatibility alias for `devsecops terraform bootstrap`. |
 | `devsecops envs` | Support | Inspection | Prints environment settings. |

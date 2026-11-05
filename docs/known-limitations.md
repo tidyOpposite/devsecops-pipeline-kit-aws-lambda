@@ -34,6 +34,7 @@ compares the publication wheel with the reviewed CI candidate.
 | Full AWS/GitHub production walkthrough execution evidence is missing. | Completed [Production deployment evidence](production-deployment-evidence.md) bundle attached to the release record. |
 | GitHub CLI and AWS CLI compatibility have not been verified in the target repository and AWS account for the release candidate. | `gh --version`, `aws --version`, `devsecops doctor github --strict --format json`, `devsecops doctor aws --environment prod --strict --format json`, and Actions status evidence. |
 | WSL2 Ubuntu compatibility does not yet have an attached release-candidate transcript. | WSL2 install, `devsecops --version`, first-success dry-run, completion generation, and unit-test transcript. |
+| Final teardown/retention acceptance has not been executed in the approved AWS test account. | [Finish-demo acceptance](runbooks/finish-demo.md#final-acceptance-record), data restore proof, per-workspace cleanup, backend retention/retirement, KMS schedule and later billing verification. |
 
 ## Review Rule
 

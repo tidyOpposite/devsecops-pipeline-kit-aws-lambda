@@ -1,4 +1,5 @@
 resource "aws_ecr_repository" "lambda_repo" {
+  force_delete         = false
   name                 = "${var.name_prefix}-lambda-repo"
   image_tag_mutability = "IMMUTABLE"
 

@@ -1,3 +1,13 @@
+variable "expected_account_id" {
+  description = "Optional account guard for reviewed backend bootstrap and decommission operations."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.expected_account_id == "" || can(regex("^[0-9]{12}$", var.expected_account_id))
+    error_message = "expected_account_id must be empty or an independently confirmed 12-digit AWS account ID."
+  }
+}
+
 variable "aws_region" {
   description = "AWS region for the Terraform state backend."
   type        = string

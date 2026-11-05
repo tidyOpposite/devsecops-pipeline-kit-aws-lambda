@@ -549,6 +549,14 @@ production workflow. It does not reuse the local snapshot mechanism.
 
 ## Operational Diagnostics
 
+To finish a demonstration, run `devsecops terraform teardown` or choose
+**Deploy → Finish demo / cleanup guide**. The guide is local and changes
+nothing. The [decommission runbook](docs/runbooks/finish-demo.md) separates
+data/image retention, per-workspace workload removal and optional backend
+retirement. S3 helpers inventory exact versions/uploads first; permanent purge
+requires a reviewed SHA-256, repeated bucket/account/region and backup decision.
+Real teardown acceptance is deferred until the final AWS stage.
+
 After a deploy, inspect the live AWS surface without mutating resources:
 
 ```bash

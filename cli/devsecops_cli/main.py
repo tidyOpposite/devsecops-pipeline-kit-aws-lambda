@@ -33,6 +33,7 @@ from . import github as _github_adapter
 from . import parser as _parser_builder
 from . import context as _project_context_service
 from . import snapshots as _snapshot_store
+from . import teardown as _teardown
 from .context import PRODUCTION_DEPLOY_COMMAND, missing_project_files, project_context
 from .aws import (
     aws_sigv4_headers,
@@ -4266,8 +4267,56 @@ def cmd_terraform(args: argparse.Namespace) -> int:
         return cmd_plan(args)
     if command == "bootstrap":
         return cmd_bootstrap(args)
+    if command == "teardown":
+        return cmd_teardown(args)
     print(fail("Usage: devsecops terraform plan <env> | bootstrap [--apply]"))
     return EXIT_VALIDATION_FAILED
+
+
+def cmd_teardown(args: argparse.Namespace) -> int:
+    """Guide decommissioning; S3 mutations require a separately reviewed plan."""
+
+    action = getattr(args, "teardown_command", None)
+    if action is None:
+        payload = dict(kind="teardown-guide", schema_version=1, docs="docs/runbooks/finish-demo.md",
+                       phases=["Freeze deployments and stop workload writers", "Review scope and export restorable backups",
+                               "Review and empty workload S3/ECR data", "Apply a reviewed workload destroy plan per workspace",
+                               "Keep shared state backend; retire it last only if exclusively unused", "Verify resources, KMS schedule and delayed billing"],
+                       message="Local demo setup creates no AWS resources. For cloud resources follow the runbook; this guide changes nothing.")
+    else:
+        if not command_exists("aws"):
+            return emit_command_error(args, "AWS CLI is required for a bucket inventory or approved cleanup.", EXIT_MISSING_EXTERNAL_TOOL)
+        try:
+            root = repo_root()
+            if config_path(root).is_file():
+                cfg = load_config(root)
+                backend_bucket = str(cfg["backend"]["bucket"])
+                protected = {backend_bucket: "backend-state", backend_bucket + "-logs": "backend-logs"}
+                if args.bucket in protected:
+                    if action == "bucket-plan" and args.purpose != protected[args.bucket]:
+                        raise _teardown.TeardownError("Configured backend buckets must use their backend purpose; workload cleanup cannot select them.")
+                    if action == "bucket-purge" and not args.allow_backend_cleanup:
+                        raise _teardown.TeardownError("Configured backend cleanup additionally requires --allow-backend-cleanup.")
+            if action == "bucket-plan":
+                path = args.output if args.output.is_absolute() else root / args.output
+                payload = _teardown.bucket_plan(args.bucket, args.expected_account_id, args.region, args.purpose, path)
+            else:
+                path = args.manifest if args.manifest.is_absolute() else root / args.manifest
+                payload = _teardown.bucket_purge(path, args.sha256, args.bucket, args.expected_account_id, args.region,
+                                                 args.acknowledge_backup, args.allow_backend_cleanup)
+        except (OSError, _teardown.TeardownError) as error:
+            return emit_command_error(args, str(error), EXIT_VALIDATION_FAILED)
+    if getattr(args, "format", "human") == "json":
+        emit_json(payload)
+    else:
+        draw_box("Finish Demo / Decommission", [payload["message"]])
+        if action is None:
+            for index, phase in enumerate(payload["phases"], 1):
+                print_text(f"{index}. {phase}")
+            print_text("Runbook: " + payload["docs"])
+        else:
+            draw_table(["Field", "Value"], [[key, str(value)] for key, value in payload.items() if key not in {"kind", "schema_version", "message"}])
+    return EXIT_OK
 
 
 def cmd_snapshot(args: argparse.Namespace) -> int:
@@ -4650,6 +4699,7 @@ def menu_deploy_hub() -> None:
     print_text("[7] Preview production deployment")
     print_text("[8] Preview production rollback")
     print_text("[9] Check production prerequisites")
+    print_text("[10] Finish demo / cleanup guide")
     print_text("[0] Back")
     choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
@@ -4682,6 +4732,8 @@ def menu_deploy_hub() -> None:
         cmd_deploy_rollback(argparse.Namespace(dry_run=True, yes=False, watch=False, interval=5, run_id=None, image_uri=None))
     elif choice == "9":
         cmd_status(argparse.Namespace(pre_deploy=True, strict=True, format="human"))
+    elif choice == "10":
+        cmd_teardown(argparse.Namespace(teardown_command=None, format="human"))
     else:
         print(warn("Unknown option."))
     pause_for_menu()
@@ -4805,6 +4857,7 @@ def menu_terraform_hub(root: Path) -> None:
     print_text("[3] Plan staging")
     print_text("[4] Plan prod")
     print_text("[5] Custom plan")
+    print_text("[6] Finish demo / cleanup guide")
     print_text("[0] Back")
     choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
@@ -4821,6 +4874,8 @@ def menu_terraform_hub(root: Path) -> None:
             clear_screen()
             return
         run_plan(root, env_name)
+    elif choice == "6":
+        cmd_teardown(argparse.Namespace(teardown_command=None, format="human"))
     else:
         print(warn("Unknown option."))
     pause_for_menu()
@@ -5109,6 +5164,8 @@ def should_print_next_postlude(args: argparse.Namespace) -> bool:
 
     command = getattr(args, "command", None)
     if command is None or command in {"menu", "setup", "status", "deploy", "next", "start", "dashboard", "tui", "completion"}:
+        return False
+    if command == "terraform" and getattr(args, "terraform_command", None) == "teardown":
         return False
     if getattr(args, "format", None) in {"json", "markdown", "toml"}:
         return False

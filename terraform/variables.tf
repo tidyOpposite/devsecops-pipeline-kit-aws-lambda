@@ -1,3 +1,13 @@
+variable "expected_account_id" {
+  description = "Optional account guard for reviewed manual operations, including decommissioning."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.expected_account_id == "" || can(regex("^[0-9]{12}$", var.expected_account_id))
+    error_message = "expected_account_id must be empty or an independently confirmed 12-digit AWS account ID."
+  }
+}
+
 variable "project_name" {
   description = "Назва проекту (використовується для іменування ресурсів)."
   type        = string

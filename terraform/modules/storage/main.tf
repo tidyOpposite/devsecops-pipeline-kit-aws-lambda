@@ -11,6 +11,7 @@ locals {
 }
 
 resource "aws_s3_bucket" "log_bucket" {
+  force_destroy = false
   #checkov:skip=CKV_AWS_144:Cross-region replication is an operator DR choice outside the default single-region kit.
   #checkov:skip=CKV2_AWS_62:Access logging and lifecycle are enabled; event notifications are workload-specific.
   #checkov:skip=CKV_AWS_145:S3 server access logging destination buckets must use SSE-S3 instead of default SSE-KMS for reliable log delivery.
@@ -117,6 +118,7 @@ resource "aws_s3_bucket_policy" "s3_log_bucket_policy" {
 }
 
 resource "aws_s3_bucket" "output_bucket" {
+  force_destroy = false
   #checkov:skip=CKV_AWS_144:Cross-region replication is an operator DR choice outside the default single-region kit.
   #checkov:skip=CKV2_AWS_62:Event notifications are application-specific and not required for the generic workload output bucket.
   bucket = local.output_bucket_name

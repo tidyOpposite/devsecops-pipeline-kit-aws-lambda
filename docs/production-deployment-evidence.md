@@ -11,6 +11,12 @@ hardening candidate. After all audit fixes, select a new publishable version,
 synchronize metadata/notes, then collect this bundle from one reviewed commit
 and its CI wheel. Do not use the old published wheel to prove current fixes.
 
+Complete the [finish-demo/decommission acceptance](runbooks/finish-demo.md#final-acceptance-record)
+after deployment/recovery proof. Preserve its retention decisions, restore test,
+per-workspace destroy results, retained/retired backend inventory and later
+KMS/billing checks outside retiring resources. These are pending final AWS
+acceptance; local mocked teardown is preparation, not live-service proof.
+
 Do not mark a release or roadmap item as production-proven until this workflow
 has been run against the intended AWS account, GitHub repository, immutable
 Lambda image, and protected `main` branch.

@@ -149,7 +149,18 @@ it never runs real AWS tests. Follow [Security gate acceptance](security-gate-ac
 for permissions, variables, evidence and cleanup. The fixture requires
 Terraform 1.10.5 or newer; the manual workflow pins 1.10.5.
 
+## Decommissioning
+
+The new `terraform teardown` guide changes nothing and makes no provider calls.
+Its bucket-plan/purge helpers use separately reviewed, expiring version/upload
+manifests; permanent S3 deletion is never implied by opening the guide or menu.
+Follow [Finish demo](runbooks/finish-demo.md) for backup decisions, ECR, workload
+workspaces and the separately approved backend phase. Both Terraform roots add
+an optional `expected_account_id` provider guard for manual operations; existing
+deployment defaults stay compatible. Live teardown acceptance remains pending.
+
 ## Terminal Layout And Closed Input
+
 
 Ordinary status, dry-run and TUI reports no longer advertise menu keys. The
 menu lists its working `[i] Readiness details` action explicitly and keeps

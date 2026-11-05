@@ -6,7 +6,9 @@ production acceptance record. The published baseline is `v0.15.0`.
 The hardening work addresses deployment policies and pinned intent, isolated
 PR and scanner execution, resumable GitHub/OIDC setup, safe installer upgrades,
 project discovery, a complete local demo, reviewed preset changes and terminal
-input/output handling. See [Changelog](../CHANGELOG.md) and the
+input/output handling. It also adds a decommission runbook and separately
+reviewed S3 version/multipart cleanup; live teardown acceptance remains pending.
+See [Changelog](../CHANGELOG.md) and the
 [product audit](product-audit-v0.15.0.md) for individual fixes and local evidence.
 
 Install this checkout as documented in the [Quick Start](../README.md#quick-start).

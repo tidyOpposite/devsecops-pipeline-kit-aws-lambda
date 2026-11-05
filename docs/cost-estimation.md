@@ -48,7 +48,7 @@ Terraform configuration.
 | Lambda duration | ~$0.08 | ~$33.33 | Before free tier; actual cost depends heavily on workload duration and memory. |
 | API Gateway HTTP API | ~$0.01 | ~$1.00 | HTTP API request pricing is lower than REST API for many simple use cases. |
 | S3 storage | ~$0.12 | ~$2.30 | Private workload data and access logs; request charges vary by workload. |
-| ECR storage | ~$0.30 | ~$1.00 | Lifecycle policy keeps the latest 30 SHA-tagged images. |
+| ECR storage | ~$0.30 | ~$1.00 | Images remain until explicitly pruned; the kit does not automatically expire rollback images. |
 | DynamoDB lock table | ~$0.00 | ~$0.01 | Terraform locking traffic is tiny with on-demand billing. |
 | KMS key | ~$1.00 | ~$1.00+ | One customer-managed key per environment; request usage may add small charges. |
 | CloudWatch Logs | ~$0.53 | ~$13.25 | Ingestion dominates; retention varies by environment. |
@@ -84,7 +84,36 @@ Additional controls:
 * Tune Lambda memory with real duration metrics; higher memory can reduce
   duration enough to lower total cost.
 * Add S3 lifecycle rules for workload data that does not need long retention.
-* Keep ECR lifecycle policy enabled for immutable image tags.
+* Review ECR retention explicitly; preserve digests needed by deployments and
+  rollback before deleting old images or adding a lifecycle policy.
 * Keep CloudWatch retention low in `dev` and `staging`.
 * Consider ARM64 Lambda only after verifying the workload image and native
   dependencies support it.
+
+## Costs After A Demo
+
+Use `devsecops terraform teardown` and the
+[finish-demo runbook](runbooks/finish-demo.md). Pausing traffic or setting Lambda
+concurrency to zero is not equivalent to removing retained infrastructure.
+
+| Retained item | What can continue to incur cost / required check |
+| --- | --- |
+| S3 workload/state/log/archive buckets | Current and noncurrent versions, incomplete uploads, retained exports and requests. Inspect each bucket explicitly. |
+| ECR | Stored images, replicas or archives retained for recovery; external/BYO repositories are independently owned. |
+| CloudWatch | Retained logs, ingestion from other writers and optional subscriptions/exports. |
+| DynamoDB backend | Retained table/PITR and separately retained on-demand/AWS Backup copies; review each backup's own policy. |
+| KMS | Retained customer-managed keys and requests; do not delete a key required by retained ciphertext. |
+| Other services | App resources, custom DNS/domains, replicas, data transfer and services outside this Terraform stack. |
+
+KMS keys scheduled for deletion have no key-storage charge while pending;
+cancelling deletion reinstates the corresponding charges. Retained enabled or
+disabled keys still need a retention/cost decision. See
+[KMS pricing](https://aws.amazon.com/kms/pricing/).
+Retained on-demand backups have their own storage billing; DynamoDB's automatic
+system backup after deletion with PITR is retained up to 35 days without an
+additional charge. See [DynamoDB pricing](https://aws.amazon.com/dynamodb/pricing/)
+and [backup billing](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/backup-restore-billing.html).
+
+Record retained resources and owners rather than claiming a zero-cost result.
+Recheck [Cost Explorer after its data refresh](https://docs.aws.amazon.com/cost-management/latest/userguide/ce-enable.html);
+cost visibility is delayed, and previous usage can appear after cleanup.

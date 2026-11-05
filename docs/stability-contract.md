@@ -34,6 +34,7 @@ devsecops inventory --status stable --format markdown
 | Advanced release maintenance | `devsecops inventory --format --status`, `devsecops evidence collect --rc --output`, `devsecops criteria --format --evidence-dir --strict` |
 | GitHub setup | `devsecops github setup --write --apply --repo --deploy-role-arn --plan-role-arn --snyk-token`, `devsecops github status --limit --strict --format`, `devsecops github branch --branch --strict --format`, `devsecops github doctor --repo --strict --format` |
 | Terraform helpers | `devsecops terraform plan <environment> --no-init --create-workspace`, `devsecops terraform bootstrap --apply` |
+| Decommission | `devsecops terraform teardown --format`, `devsecops terraform teardown bucket-plan --bucket --expected-account-id --region --purpose --output --format`, `devsecops terraform teardown bucket-purge --bucket --expected-account-id --region --manifest --sha256 --acknowledge-backup --allow-backend-cleanup --format` |
 | Snapshots | `devsecops snapshot list --format`, `devsecops snapshot show <selection> --format`, `devsecops snapshot restore --to --last --dry-run --yes` |
 | Completion and inventory | `devsecops completion <shell> --program`, `devsecops inventory --format --status` |
 
@@ -105,6 +106,14 @@ destination. The installed package directory is never used as a fallback root.
 
 ## JSON Output Contract
 
+Teardown manifests use their own `schema_version=1`: exact bucket/account/region,
+purpose, creation time, versioning status and version/upload metadata. They are
+owner-only, bounded, never overwritten and expire for execution after one hour.
+Purge verifies SHA-256, repeated scope, backup acknowledgment, live identity and
+fresh inventory before mutations; partial errors or remaining data return `1`.
+Backend purposes require the extra `--allow-backend-cleanup` decision. No helper
+deletes buckets, ECR, keys or Terraform state infrastructure automatically.
+
 JSON output is stable by `kind`. Fields may be added within the same
 `schema_version`, but existing documented keys will not be renamed or removed
 without a deprecation window.
@@ -126,6 +135,9 @@ without a deprecation window.
 | `next-action` | `devsecops next --format json` (compatibility alias) | `kind`, `schema_version`, `context`, `action`, `command`, `detail`, `why`, `changes`, `blocked`, `docs` |
 | `release-candidate-evidence` | `devsecops evidence collect --rc` | `kind`, `schema_version`, `generated_at`, `output_dir`, `files`, `terraform_validate` |
 | `v1-criteria` | `devsecops criteria --format json` | `kind`, `schema_version`, `cli_version`, `stable_ready`, `criteria`, `stable_release_gates`, `next_actions` |
+| `teardown-guide` | `devsecops terraform teardown --format json` | `kind`, `schema_version`, `docs`, `phases`, `message` |
+| `teardown-bucket-plan` | `devsecops terraform teardown bucket-plan --format json` | `kind`, `schema_version`, `manifest`, `sha256`, `bucket`, `purpose`, `object_versions`, `multipart_uploads`, `message` |
+| `teardown-bucket-purge` | `devsecops terraform teardown bucket-purge --format json` | `kind`, `schema_version`, `bucket`, `status`, `deleted_versions`, `aborted_uploads`, `message` |
 | `control-catalog` | `devsecops controls --format json` | `kind`, `schema_version`, `controls` |
 | `command-inventory` | `devsecops inventory --format json` | `kind`, `schema_version`, `commands`, `deprecation_policy`, `json_outputs`, `generated_artifacts` |
 

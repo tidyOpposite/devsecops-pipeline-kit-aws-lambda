@@ -99,6 +99,7 @@ resource "aws_kms_alias" "terraform_state" {
 }
 
 resource "aws_s3_bucket" "terraform_state" {
+  force_destroy = false
   #checkov:skip=CKV_AWS_144:Cross-region replication is an operator DR choice outside the default single-region backend bootstrap.
   #checkov:skip=CKV2_AWS_62:Backend access logging and lifecycle are enabled; event notifications are not required for state storage.
   bucket = var.state_bucket_name
@@ -106,6 +107,7 @@ resource "aws_s3_bucket" "terraform_state" {
 }
 
 resource "aws_s3_bucket" "terraform_state_logs" {
+  force_destroy = false
   #checkov:skip=CKV_AWS_144:Cross-region replication is an operator DR choice outside the default single-region backend bootstrap.
   #checkov:skip=CKV2_AWS_62:Access log buckets do not need event notifications in the default backend bootstrap.
   #checkov:skip=CKV_AWS_145:S3 server access logging destination buckets must use SSE-S3 instead of default SSE-KMS for reliable log delivery.

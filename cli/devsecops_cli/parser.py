@@ -16,6 +16,7 @@ from .config import ENVIRONMENTS, PRESET_ORDER
 from .github import DEFAULT_BRANCH
 from .paths import PRODUCTION_EVIDENCE_DIR, RC_EVIDENCE_DIR
 from .setup import SETUP_MODES
+from .teardown import configure_parser as configure_teardown_parser
 
 COMPLETION_SHELLS = ("bash", "zsh", "fish")
 
@@ -584,7 +585,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
 
     terraform_parser = subparsers.add_parser("terraform", help=argparse.SUPPRESS)
     terraform_parser.set_defaults(func=handlers.cmd_terraform)
-    terraform_subparsers = terraform_parser.add_subparsers(dest="terraform_command", metavar="{plan,bootstrap}")
+    terraform_subparsers = terraform_parser.add_subparsers(dest="terraform_command", metavar="{plan,bootstrap,teardown}")
 
     terraform_plan_parser = terraform_subparsers.add_parser("plan", help="Run Terraform plan for an environment.")
     terraform_plan_parser.add_argument("environment", choices=ENVIRONMENTS)
@@ -595,6 +596,10 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     terraform_bootstrap_parser = terraform_subparsers.add_parser("bootstrap", help="Plan or apply backend bootstrap.")
     terraform_bootstrap_parser.add_argument("--apply", action="store_true", help="Apply backend bootstrap with auto-approve.")
     terraform_bootstrap_parser.set_defaults(func=handlers.cmd_terraform)
+
+    teardown_parser = terraform_subparsers.add_parser("teardown", help="Show the decommission runbook or review cleanup of one versioned S3 bucket.")
+    configure_teardown_parser(teardown_parser)
+    teardown_parser.set_defaults(func=handlers.cmd_teardown)
 
     snapshot_parser = subparsers.add_parser("snapshot", help=argparse.SUPPRESS)
     snapshot_parser.add_argument("--format", choices=["human", "json"], default="human", help="Output mode for default list.")

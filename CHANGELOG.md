@@ -7,6 +7,11 @@ semantic versioning.
 
 ### Fixed
 
+* Add an accessible decommission runbook with data/image preservation, workload
+  removal, backend retirement last and retained-cost verification. Add scoped,
+  reviewed S3 version/multipart plan/purge helpers and optional Terraform account
+  guards, with local mocks; live cleanup remains a final acceptance step.
+
 * Distinguish unpublished `0.16.0.dev0` beta hardening from the published
   `v0.15.0` baseline, document a verified pinned baseline install, derive release
   notes from the current version, and require matching tag/package/notes before

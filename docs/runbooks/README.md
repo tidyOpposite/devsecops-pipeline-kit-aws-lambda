@@ -11,9 +11,11 @@ path.
 | Validation failed | [Failed validation](failed-validation.md) |
 | Lambda image missing or unusable | [Missing Lambda image](missing-image.md) |
 | Deployment rollback failed | [Failed deployment rollback](failed-rollback.md) |
+| Finish demo, retain data or decommission resources | [Finish demo / decommission](finish-demo.md) |
 
 All commands are read-only unless a command explicitly includes `--apply`,
-`--yes`, or a GitHub/AWS mutating command shown for manual recovery.
+`--yes`, a separately approved `teardown bucket-purge --acknowledge-backup`,
+or a GitHub/AWS mutating command shown for manual recovery.
 
 During a production proof walkthrough, attach the relevant runbook link to the
 evidence bundle. If a failure does not fit one of these runbooks, add or update
