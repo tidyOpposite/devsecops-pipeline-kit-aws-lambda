@@ -128,7 +128,8 @@ bucket and DynamoDB lock table exist in the active AWS account.
 
 ## 3. Bring Your Own Lambda Image
 
-Build a single-platform Linux `amd64` Lambda image outside this repository.
+Build a single-platform Linux `amd64` Lambda image, using the optional
+[Text Stats example](../examples/text-stats/README.md) or your own workload.
 Publish it with an immutable tag or digest to an existing ECR repository,
 or publish it after provisioning the built-in repository in step 4.
 

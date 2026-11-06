@@ -19,7 +19,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from devsecops_cli.release_evidence import PRODUCTION_EVIDENCE_REQUIRED_FILES, WSL2_EVIDENCE_REQUIRED_FILES
+from devsecops_cli.release_evidence import PRODUCTION_EVIDENCE_REQUIRED_FILES, PLATFORM_EVIDENCE_REQUIRED_FILES
 
 package = importlib.import_module("devsecops_cli")
 cli = importlib.import_module("devsecops_cli.main")
@@ -1283,14 +1283,14 @@ devsecops dry-run
         self.assertFalse(payload["stable_ready"])
         self.assertTrue(all(item["status"] == "OK" for item in payload["criteria"]))
         self.assertEqual(gate_statuses["production-evidence-bundle-attached"], "BLOCKED")
-        self.assertEqual(gate_statuses["wsl2-compatibility-transcript-attached"], "BLOCKED")
+        self.assertEqual(gate_statuses["supported-platform-transcript-attached"], "BLOCKED")
         self.assertTrue(any("production-deployment-evidence" in action for action in payload["next_actions"]))
 
     def test_criteria_strict_rejects_placeholder_external_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             evidence_dir = Path(tmpdir) / "evidence"
             (evidence_dir / "workflow-artifacts").mkdir(parents=True)
-            for relative in [*PRODUCTION_EVIDENCE_REQUIRED_FILES, *WSL2_EVIDENCE_REQUIRED_FILES]:
+            for relative in [*PRODUCTION_EVIDENCE_REQUIRED_FILES, *PLATFORM_EVIDENCE_REQUIRED_FILES]:
                 path = evidence_dir / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("{}\n" if path.suffix == ".json" else "test evidence\n", encoding="utf-8")

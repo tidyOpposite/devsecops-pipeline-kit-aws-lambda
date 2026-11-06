@@ -1,7 +1,9 @@
 # Separate Example Workload Template
 
-The pipeline kit intentionally does not bundle Lambda application source. Use
-this document as the template contract for a separate workload repository.
+The optional [Text Stats Lambda](../examples/text-stats/README.md) lives in
+this checkout for the diploma demonstration. A separate repository is optional.
+Use this document when an independent workload repository is appropriate;
+the kit deployment workflow always consumes an already published image.
 
 ## Recommended Separate Repository Shape
 
@@ -43,6 +45,6 @@ devsecops image validate --image-uri "$LAMBDA_IMAGE_URI"
 devsecops config set lambda_image_uri "$LAMBDA_IMAGE_URI" --generate
 ```
 
-This keeps the product boundary clean: workload code lives in the workload
+For this optional layout, workload code lives in the workload
 repository, while this repository owns pipeline configuration, Terraform,
 GitHub Actions, readiness diagnostics, and deployment orchestration.

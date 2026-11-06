@@ -52,7 +52,7 @@ The final bundle should contain:
 | Health and API verification | `health.json`, `health-response.txt`, `health-status.txt` |
 | CloudWatch log proof | `cloudwatch-log-groups.json`, `cloudwatch-tail.txt` |
 | Rollback readiness proof | `active-lambda-image.txt`, `automatic-rollback-run.json`, `manual-rollback-run.json` |
-| WSL2 compatibility proof | `wsl2-transcript.txt` |
+| Supported-platform compatibility proof | `platform-transcript.txt` |
 
 ## Prerequisites
 
@@ -87,7 +87,7 @@ Complete these before dispatching production:
 ## 1. Prove Release Install
 
 Download the CI candidate and use the same wheel for the cloud walkthrough and
-WSL2 acceptance. The artifact is retained for 30 days.
+supported-platform acceptance. The artifact is retained for 30 days.
 
 ```bash
 export CANDIDATE_DIR="$(mktemp -d)"
@@ -370,9 +370,9 @@ jq -n --arg tag "${RELEASE_TAG}" --arg commit "${RELEASE_SHA}" --arg repo "${REL
   > "${EVIDENCE_DIR}/release-proof.json"
 ```
 
-## 8. Prove WSL2 Compatibility
+## 8. Prove Supported Platform Compatibility
 
-In a clean Ubuntu WSL2 checkout at the same commit, download and verify the
+On a clean supported macOS or Ubuntu host at the same commit, download and verify the
 CI candidate as in step 1. Activate a fresh virtual environment and capture
 the install and the rest of the walkthrough:
 
@@ -381,15 +381,18 @@ the install and the rest of the walkthrough:
   set -e
   printf 'Release commit: %s\n' "$(git rev-parse HEAD)"
   uname -a
+  if [ "$(uname -s)" = Darwin ]; then sw_vers; else cat /etc/os-release; fi
   python -m pip install --no-deps "${CANDIDATE_DIR}/${WHEEL}"
   devsecops --version
   devsecops setup --mode demo --yes --strict
   devsecops completion bash
   PYTHONPATH=cli python -m unittest discover -s cli/tests
-) > wsl2-transcript.txt 2>&1
+) > platform-transcript.txt 2>&1
 ```
 
-Copy `wsl2-transcript.txt` into the evidence directory.
+Copy `platform-transcript.txt` into the evidence directory. Windows/WSL2 are
+unverified and outside this release target. This transcript proves the recorded
+host; attach the exact CI run for the rest of the supported matrix.
 
 ## Post-Deploy Checklist
 
@@ -456,11 +459,11 @@ PYTHONPATH=cli python3 - <<'PY'
 import os
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
-from devsecops_cli.release_evidence import PRODUCTION_EVIDENCE_REQUIRED_FILES, WSL2_EVIDENCE_REQUIRED_FILES
+from devsecops_cli.release_evidence import PRODUCTION_EVIDENCE_REQUIRED_FILES, PLATFORM_EVIDENCE_REQUIRED_FILES
 
 source = Path(os.environ["EVIDENCE_DIR"])
 with ZipFile(os.environ["EVIDENCE_ARCHIVE"], "w", ZIP_DEFLATED) as archive:
-    for name in PRODUCTION_EVIDENCE_REQUIRED_FILES + WSL2_EVIDENCE_REQUIRED_FILES:
+    for name in PRODUCTION_EVIDENCE_REQUIRED_FILES + PLATFORM_EVIDENCE_REQUIRED_FILES:
         archive.write(source / name, name)
 PY
 gh release create "evidence-${RELEASE_TAG}" "${EVIDENCE_ARCHIVE}" --repo "${RELEASE_REPOSITORY}" \

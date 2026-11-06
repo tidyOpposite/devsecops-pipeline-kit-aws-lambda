@@ -27,7 +27,7 @@ PRODUCTION_EVIDENCE_REQUIRED_FILES = [
     "terraform-output.json", "terraform-context.json", "aws-outputs.json", "aws-doctor.json", "health.json", "health-response.txt", "health-status.txt",
     "cloudwatch-log-groups.json", "cloudwatch-tail.txt", "active-lambda-image.txt", "notes.md",
 ]
-WSL2_EVIDENCE_REQUIRED_FILES = ["wsl2-transcript.txt"]
+PLATFORM_EVIDENCE_REQUIRED_FILES = ["platform-transcript.txt"]
 MAX_EVIDENCE_FILE_BYTES = 8 * 1024 * 1024
 RECOVERY_STEP = "Roll back Lambda image on failed deployment validation"
 HEALTH_STEP = "Smoke test Lambda health endpoint"
@@ -247,23 +247,32 @@ def production_evidence_checks(root: Path, directory: Path, *, repository: str |
     return [*checks, evidence_check("Release evidence contents", True, "Release identity, deployment, recovery and package evidence match.")]
 
 
-def wsl_evidence_checks(directory: Path, root: Path) -> list[dict[str, str]]:
-    documents, checks = read_evidence(directory, WSL2_EVIDENCE_REQUIRED_FILES)
+def platform_evidence_checks(directory: Path, root: Path) -> list[dict[str, str]]:
+    documents, checks = read_evidence(directory, PLATFORM_EVIDENCE_REQUIRED_FILES)
     if not documents:
         return checks
-    text = documents["wsl2-transcript.txt"]
+    text = documents["platform-transcript.txt"]
     try:
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=10, check=False)
         commit = head.stdout.strip()
+        macos_version = re.search(r"^ProductVersion:\s+(\d{1,3})\.", text, re.MULTILINE)
+        macos = (re.search(r"^Darwin .* (?:arm64|x86_64)(?:\s|$)", text, re.MULTILINE) is not None
+                 and re.search(r"^ProductName:\s+macOS\s*$", text, re.MULTILINE) is not None
+                 and macos_version is not None and int(macos_version[1]) >= 13)
+        ubuntu = (re.search(r"^Linux .* (?:aarch64|arm64|x86_64)(?:\s|$)", text, re.MULTILINE) is not None
+                  and re.search(r'^ID="?ubuntu"?$', text, re.MULTILINE) is not None
+                  and re.search(r'^VERSION_ID="?(?:22\.04|24\.04)"?$', text, re.MULTILINE) is not None
+                  and re.search(r"^Linux .*?(?:microsoft|wsl)", text, re.MULTILINE | re.IGNORECASE) is None)
         valid = (head.returncode == 0 and is_commit_sha(commit)
                  and f"Release commit: {commit}" in text.splitlines() and f"devsecops {VERSION}" in text.splitlines()
-                 and re.search(r"^Linux .*microsoft.*WSL2", text, flags=re.MULTILINE | re.IGNORECASE) is not None
+                 and (macos or ubuntu)
                  and f"Successfully installed devsecops-pipeline-cli-{VERSION}" in text
                  and any(marker in text for marker in ("Demo complete", "Guided setup complete")) and "# bash completion for devsecops" in text
                  and re.search(r"^Ran [1-9]\d* tests? in .*\n(?:\s*\n)?OK(?:\s|$)", text, flags=re.MULTILINE) is not None)
     except (OSError, subprocess.TimeoutExpired):
         valid = False
-    return [*checks, evidence_check("WSL2 transcript contents", valid, "Transcript must show the release commit, WSL2 kernel, installed version, demo, completion and passing tests.")]
+    return [*checks, evidence_check("Supported platform transcript contents", valid,
+        "Transcript must show the release commit, macOS or supported Ubuntu identity, installed version, demo, completion and passing tests. Windows/WSL2 are outside this release target.")]
 
 
 def unpack_evidence(archive: Path, directory: Path) -> None:
@@ -271,7 +280,7 @@ def unpack_evidence(archive: Path, directory: Path) -> None:
 
     directory.mkdir(parents=True, exist_ok=False)
     with zipfile.ZipFile(archive) as bundle:
-        for name in [*PRODUCTION_EVIDENCE_REQUIRED_FILES, *WSL2_EVIDENCE_REQUIRED_FILES]:
+        for name in [*PRODUCTION_EVIDENCE_REQUIRED_FILES, *PLATFORM_EVIDENCE_REQUIRED_FILES]:
             matches = [entry for entry in bundle.infolist() if entry.filename == name]
             if not matches:
                 continue

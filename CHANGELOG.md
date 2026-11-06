@@ -5,7 +5,19 @@ semantic versioning.
 
 ## Unreleased
 
+### Added
+
+* Include an optional stateless text-statistics Lambda for diploma acceptance,
+  with input validation, healthy/failing release images, local tests and a
+  separate Ukrainian report/screenshot register. A second workload repository
+  is optional; image publication remains separate from the deploy workflow.
+
 ### Fixed
+
+* Remove unverified Windows/WSL2 support claims from the current release target.
+  Require a same-commit macOS or supported Ubuntu platform transcript instead;
+  production evidence, independent approval and isolated-account checks remain
+  enforced. Record the one-account/one-operator acceptance limitations.
 
 * Add an accessible decommission runbook with data/image preservation, workload
   removal, backend retirement last and retained-cost verification. Add scoped,

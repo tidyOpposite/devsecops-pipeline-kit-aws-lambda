@@ -93,7 +93,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "health.json": checks("health", **{"Health endpoint URL": f"{HEALTH} (argument)", "Health response": "HTTP 200: ok"}),
             "health-response.txt": "ok", "health-status.txt": "200", "cloudwatch-log-groups.json": {"logGroups": [{"logGroupName": LOG_GROUP}]},
             "cloudwatch-tail.txt": "request completed", "active-lambda-image.txt": IMAGE, "notes.md": "Protected prod walkthrough",
-            "wsl2-transcript.txt": f"Release commit: {self.commit}\nLinux host 6.6-microsoft-standard-WSL2 x86_64\n"
+            "platform-transcript.txt": f"Release commit: {self.commit}\nLinux host 6.8.0-generic x86_64 GNU/Linux\nID=ubuntu\nVERSION_ID=24.04\n"
                 f"Successfully installed devsecops-pipeline-cli-{VERSION}\ndevsecops {VERSION}\n"
                 "Demo complete\n# bash completion for devsecops\nRan 200 tests in 2s\n\nOK\n",
         }
@@ -120,7 +120,31 @@ class ReleaseEvidenceTests(unittest.TestCase):
         payload = v1_criteria_payload(ROOT, self.directory)
         self.assertTrue(payload["stable_ready"], payload["stable_release_gates"])
 
-    def test_blocks_wrong_commit_skipped_apply_digest_mismatch_and_unproven_wsl(self):
+    def test_platform_gate_accepts_macos_and_refuses_wsl_or_missing_identity(self):
+        original = self.documents["platform-transcript.txt"]
+        ubuntu = 'Linux host 6.8.0-generic x86_64 GNU/Linux\nID=ubuntu\nVERSION_ID=24.04\n'
+        for platform, accepted in (
+            ("Darwin host 25.5.0 arm64\nProductName:\tmacOS\nProductVersion:\t26.5.1\n", True),
+            ("Darwin host 21.5.0 arm64\nProductName:\tmacOS\nProductVersion:\t12.5.1\n", False),
+            ("Linux host 6.6-microsoft-standard-WSL2 x86_64\nID=ubuntu\nVERSION_ID=24.04\n", False),
+            ("Linux host 6.8.0-generic x86_64 GNU/Linux\nID=debian\nVERSION_ID=12\n", False),
+            ("Linux host 6.8.0-generic x86_64 GNU/Linux\n", False),
+        ):
+            with self.subTest(platform=platform):
+                self.write("platform-transcript.txt", original.replace(ubuntu, platform))
+                self.assertEqual(v1_criteria_payload(ROOT, self.directory)["stable_ready"], accepted)
+        self.write("platform-transcript.txt", original)
+
+    def test_archive_includes_required_supported_platform_transcript(self):
+        archive = self.directory / "platform-bundle.zip"
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("platform-transcript.txt", self.documents["platform-transcript.txt"])
+            bundle.writestr("wsl2-transcript.txt", "Historical unsupported platform")
+        output = self.directory / "platform-unpacked"
+        evidence.unpack_evidence(archive, output)
+        self.assertEqual([path.name for path in output.iterdir()], ["platform-transcript.txt"])
+
+    def test_blocks_wrong_commit_skipped_apply_digest_mismatch_and_unproven_platform(self):
         proof = self.documents["release-proof.json"]
         for name, content in [
             ("release-proof.json", proof | {"commit_sha": "f" * 40}),
@@ -132,7 +156,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             ("terraform-context.json", self.documents["terraform-context.json"] | {"workspace": "staging"}),
             ("terraform-context.json", self.documents["terraform-context.json"] | {"expected_account_id": "999999999999"}),
             ("terraform-context.json", self.documents["terraform-context.json"] | {"backend": {"type": "local"}}),
-            ("wsl2-transcript.txt", f"devsecops {VERSION}"),
+            ("platform-transcript.txt", f"devsecops {VERSION}"),
         ]:
             with self.subTest(name=name):
                 self.write(name, content)

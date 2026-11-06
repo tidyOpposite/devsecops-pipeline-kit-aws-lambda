@@ -12,7 +12,7 @@ what still blocks a deployment.
 
 Current source version: **`0.16.0.dev0`**, unpublished beta hardening.
 Published baseline: [v0.15.0](https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/tag/v0.15.0).
-The current fixes require the source install below. Final AWS/GitHub and WSL2
+The current fixes require the source install below. Final AWS/GitHub and supported-platform
 acceptance is pending; a production-ready release has not been declared.
 
 ## What This Product Does
@@ -38,7 +38,7 @@ security controls rather than an opaque deployment service.
 
 For the no-credentials quick start below, you need:
 
-- Linux, macOS, or WSL2 with Git and Python 3.11, 3.12, 3.13, or 3.14.
+- Ubuntu Linux or macOS with Git and Python 3.11, 3.12, 3.13, or 3.14.
 - venv/pip support and Internet access to clone and install pinned build tools.
 
 The commands below create the checkout and enter it before installing the CLI.
@@ -51,7 +51,8 @@ backend, and a real immutable Lambda image in ECR.
 
 ## What This Product Does Not Do
 
-- It does not contain, generate, compile, or package your Lambda application.
+- It does not generate, compile, or package your Lambda application. An optional
+  [text statistics example](examples/text-stats/README.md) is included for diploma testing.
 - It does not build or push the Lambda container image. Bring a prebuilt image
   identified by an immutable tag or digest; `latest` and `bootstrap` are
   rejected for production.
@@ -229,7 +230,7 @@ tests are tracked in the [product audit](docs/product-audit-v0.15.0.md);
 their presence in source does not update an existing release asset.
 
 Complete the remaining fixes, then run the AWS/GitHub deployment and recovery
-walkthrough, sandbox acceptance and WSL2 checks against one reviewed commit
+walkthrough, sandbox acceptance and supported-platform checks against one reviewed commit
 and wheel. Publish a new version only after those results are attached. Keep
 `v0.15.0` and its assets unchanged. The [RC checklist](docs/v1.0.0-release-candidate-checklist.md)
 and `devsecops criteria --strict` define the stable-release evidence gate.
@@ -823,8 +824,9 @@ devsecops image validate --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.co
 ```
 
 The bring-your-own-image path is documented in
-[Bring your own Lambda image](docs/bring-your-own-image.md). Keep example or
-real workload source in a separate repository; use
+[Bring your own Lambda image](docs/bring-your-own-image.md). The optional
+[text statistics Lambda](examples/text-stats/README.md) provides a small diploma
+workload in this checkout. Production applications can use a separate repository; see
 [Separate example workload template](docs/example-workload-template.md) as the
 repository contract.
 
@@ -911,5 +913,5 @@ The full accepted-limitations and stable-release blocker register is tracked in
 * Optional DAST is a passive baseline scan only. Authenticated flows and
   business-logic checks need workload-specific tests.
 * Before `v1.0.0`, the release record still needs a real AWS/GitHub production
-  walkthrough evidence bundle plus final GitHub CLI, AWS CLI, and WSL2
-  compatibility transcripts.
+  walkthrough evidence bundle plus final GitHub CLI, AWS CLI, and supported-platform
+  compatibility transcripts. Windows and WSL2 are outside this release target.

@@ -44,9 +44,11 @@ Snyk container scanning is controlled by `enable_snyk_scan`, generated as the
 
 ## Source SAST And SCA
 
-No sample Lambda application source code is included in this repository, so the
-CLI-managed pipeline does not run language-specific SAST or package SCA here.
-Add those checks in the repository that builds the Lambda image.
+The optional `examples/text-stats/` Lambda uses only Python's standard library;
+its behavioral tests run in CI. It has no application package dependencies.
+The kit deployment workflow does not add language-specific SAST or package SCA;
+add those checks to the workload build process, including when extending this
+example. Test results alone do not prove an image is vulnerability-free.
 
 Recommended workload gates:
 

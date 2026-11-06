@@ -49,6 +49,9 @@ jobs:
       - name: Run CLI test suite
         run: PYTHONPATH=cli python -m unittest discover -s cli/tests
 
+      - name: Test optional diploma Lambda workload
+        run: python -m unittest discover -s examples/text-stats/tests
+
       - name: Verify optional terminal renderer
         run: |
           python -m pip install 'rich==14.2.0'

@@ -139,9 +139,9 @@ from .config import (
 )
 from .workflow import decode_pipeline_config
 from .release_evidence import (
-    WSL2_EVIDENCE_REQUIRED_FILES,
+    PLATFORM_EVIDENCE_REQUIRED_FILES,
     production_evidence_checks,
-    wsl_evidence_checks,
+    platform_evidence_checks,
 )
 from .completion import (
     COMPLETION_COMMANDS,
@@ -2523,11 +2523,11 @@ def v1_criteria_payload(root: Path, evidence_dir: Path | None = None, *, reposit
             f"Run docs/production-deployment-evidence.md and store the required files under {evidence_dir_display}.",
         ),
         make_criterion(
-            "wsl2-compatibility-transcript-attached",
-            "WSL2 compatibility transcript is attached.",
-            [str(evidence_dir / WSL2_EVIDENCE_REQUIRED_FILES[0]), "docs/distribution.md"],
-            wsl_evidence_checks(evidence_dir, root),
-            f"Capture WSL2 install, dry-run, completion, and test transcript in {evidence_dir_display}/{WSL2_EVIDENCE_REQUIRED_FILES[0]}.",
+            "supported-platform-transcript-attached",
+            "Supported platform compatibility transcript is attached.",
+            [str(evidence_dir / PLATFORM_EVIDENCE_REQUIRED_FILES[0]), "docs/distribution.md"],
+            platform_evidence_checks(evidence_dir, root),
+            f"Capture macOS or supported Ubuntu install, dry-run, completion, and test transcript in {evidence_dir_display}/{PLATFORM_EVIDENCE_REQUIRED_FILES[0]}. Windows/WSL2 are not release targets.",
         ),
     ]
 

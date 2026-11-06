@@ -1,7 +1,10 @@
 # Bring Your Own Lambda Image
 
-This project does not build or bundle workload source. The production workflow
-deploys the immutable image URI you provide through `LAMBDA_IMAGE_URI`.
+The production workflow deploys the immutable image URI you provide through
+`LAMBDA_IMAGE_URI`; it does not build the image. An optional small
+[text statistics Lambda](../examples/text-stats/README.md) is included for the
+diploma demonstration. You can keep it in this repository; a separate workload
+repository is optional.
 
 ## Image Contract
 
@@ -118,6 +121,7 @@ scanning.
 
 ## External Repository Boundary
 
-Keep application source, Dockerfile, dependency scanning, and image publishing
-in a workload repository or image release pipeline outside this repository. The
-pipeline kit consumes the published image; it does not own the workload build.
+Build, test, scan, and publish the workload separately from the kit deploy
+workflow. Use `examples/text-stats/` for the diploma or a separate workload
+repository for an independent application. The kit still consumes a published
+image and does not build or push it during deployment.

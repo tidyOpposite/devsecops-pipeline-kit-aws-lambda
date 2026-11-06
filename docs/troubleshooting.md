@@ -41,7 +41,7 @@ information. Percent-encode spaces and non-ASCII path/query characters; use an
 ASCII/IDNA hostname. A malformed URL is reported as an endpoint input problem.
 
 Use `devsecops criteria --strict` when preparing a stable release. It checks
-every Version 1.0 criterion plus the external production and WSL2 evidence
+every Version 1.0 criterion plus the external production and supported-platform evidence
 gates, then prints the next missing artifact or command.
 
 `devsecops tui` uses optional Rich/Textual dependencies. Without them, it falls

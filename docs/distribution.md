@@ -233,7 +233,7 @@ devsecops completion bash --program devsecops-dev
 | --- | --- | --- |
 | Ubuntu Linux | Ubuntu 22.04 LTS and 24.04 LTS on x86_64 or arm64 | GitHub Actions runs package, unit, golden, install, Terraform fmt, init, and validate checks on Ubuntu. |
 | macOS | macOS 13 or newer on Intel or Apple Silicon | Supported for local CLI usage with Python, Terraform, AWS CLI, GitHub CLI, and shell completion installed by the operator. |
-| Windows | WSL2 Ubuntu is supported. Native Windows is not a `v0.15.0` release target. | Native PowerShell/CMD completion and path behavior are not release-gated. |
+| Windows and WSL2 | Not supported or verified for the current source/release target. | No Windows/WSL2 acceptance claim is made. Use a supported Ubuntu or macOS host. |
 | Python | 3.11, 3.12, 3.13, and 3.14 | CLI tests, packaging, and install smoke run in CI for all supported Python versions. Package metadata uses `requires-python = ">=3.11,<3.15"` so unsupported Python releases are not advertised as supported. |
 | Terraform CLI | 1.5.0 or newer | Terraform `required_version` is `>= 1.5.0`; CI validates with the pinned workflow version. |
 | GitHub CLI | 2.45.0 or newer | Required for `gh variable`, `gh secret`, `gh api`, and `gh run` workflows. Missing-tool behavior is tested; run `devsecops doctor github` in real repositories. |
