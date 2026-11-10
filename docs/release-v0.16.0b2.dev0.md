@@ -13,6 +13,10 @@ development version as a GitHub Release tag or assume beta.1 assets include it.
 * Keep production approval and separate-account acceptance unchanged. Lab proof
   is explicitly separate and never substitutes for production evidence.
 
-The account concurrency prerequisite must be resolved before a low-quota AWS
-workload deployment. Real deploy/update/recovery/cleanup acceptance is pending.
+* Add Lambda capacity diagnostics using account limits and existing function
+  reservations; recheck in the protected runner before planning and apply.
+* Add explicit `lab concurrency --mode unreserved` for low-quota dev accounts,
+  with live/state readback. Production retains its positive reservation policy.
+
+Real deploy/update/recovery/cleanup acceptance is pending.
 See [the reusable lab guide](single-operator-lab.md).

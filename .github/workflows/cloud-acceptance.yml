@@ -59,7 +59,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ACCEPTANCE_ROLE_ARN }}
           aws-region: ${{ env.ACCEPTANCE_AWS_REGION }}
           unset-current-credentials: true
-      - name: Verify actual account, image and prepare isolated fixture
+      - name: Verify actual account, Lambda capacity, image and prepare isolated fixture
         run: PYTHONPATH=cli python3 -m devsecops_cli.acceptance prepare
       - name: Set up locked Terraform
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
@@ -80,6 +80,7 @@ jobs:
         with:
           name: isolated-aws-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            dist/devsecops/acceptance/capacity.json
             terraform/acceptance/runtime-acceptance.txt
             terraform/acceptance/acceptance.auto.tfvars.json
             terraform/acceptance/*.tfstate*

@@ -14,6 +14,7 @@ from typing import Any
 
 from .config import PIPELINE_CONFIG_VARIABLE, pipeline_config_json, prod_approval_environment
 from .paths import CONFIG_FILE, DIST_DIR, GENERATED_ARTIFACT_DOC, GENERATED_TFVARS
+from .lambda_capacity import DEFAULT_RESERVED_EXECUTIONS
 
 
 def hcl_value(value: Any) -> str:
@@ -64,6 +65,7 @@ def terraform_tfvars(cfg: dict[str, Any]) -> str:
         ("lambda_image_uri", cfg["lambda_image_uri"]),
         ("api_authorization_type", cfg["api_authorization_type"]),
         ("terraform_admin_role_name", cfg["terraform_admin_role_name"]),
+        ("lambda_reserved_concurrent_executions", DEFAULT_RESERVED_EXECUTIONS),
     ]
     top_level_width = max(len(key) for key, _ in top_level)
     environment_width = max(len(key) for env_cfg in cfg["environments"].values() for key in env_cfg)

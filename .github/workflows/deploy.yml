@@ -179,6 +179,9 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
 
+      - name: Check sandbox Lambda capacity
+        run: PYTHONPATH=cli python3 -m devsecops_cli.recovery capacity
+
       - name: Terraform init
         run: terraform -chdir="${TF_WORKING_DIR}" init -input=false -no-color -backend-config=../dist/devsecops/backend.hcl
 
@@ -194,7 +197,8 @@ jobs:
             -input=false \
             -no-color \
             -var="api_authorization_type=${API_AUTHORIZATION_TYPE}" \
-            -var="project_name=${PROJECT_NAME}"
+            -var="project_name=${PROJECT_NAME}" \
+            -var="lambda_reserved_concurrent_executions=10"
           terraform -chdir="${TF_WORKING_DIR}" show -no-color tfplan > "${TF_WORKING_DIR}/tfplan.txt"
 
       - name: Upload Terraform plan artifact
@@ -265,6 +269,10 @@ jobs:
         id: verify-image
         run: PYTHONPATH=cli python3 -m devsecops_cli.recovery verify-image
 
+      - name: Check production Lambda capacity
+        if: env.DEPLOY_MODE == 'deploy'
+        run: PYTHONPATH=cli python3 -m devsecops_cli.recovery capacity
+
       - name: Capture currently deployed Lambda image
         id: capture-current-image
         env:
@@ -323,7 +331,12 @@ jobs:
             -no-color \
             -var="api_authorization_type=${API_AUTHORIZATION_TYPE}" \
             -var="project_name=${PROJECT_NAME}" \
+            -var="lambda_reserved_concurrent_executions=10" \
             -var="lambda_image_uri=${LAMBDA_IMAGE_URI}"
+
+      - name: Recheck Lambda capacity before saved-plan apply
+        if: env.DEPLOY_MODE == 'deploy'
+        run: PYTHONPATH=cli python3 -m devsecops_cli.recovery capacity
 
       - name: Terraform apply workload with configured Lambda image
         id: apply-workload

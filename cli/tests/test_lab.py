@@ -28,6 +28,7 @@ class FakeLab(lab.Lab):
         super().__init__(root, name)
         self.calls = []
         self.live_image = None
+        self.live_reserved = 0
         self.apply_error = False
         self.interrupt = False
         self.recovery_error = False
@@ -40,7 +41,9 @@ class FakeLab(lab.Lab):
         if args[:2] == ["sts", "get-caller-identity"]:
             return {"Account": self.account, "Arn": f"arn:aws:iam::{self.account}:root"}
         if args[:2] == ["lambda", "get-account-settings"]:
-            return {"AccountLimit": {"ConcurrentExecutions": 1000, "UnreservedConcurrentExecutions": 1000}}
+            return {"AccountLimit": {"ConcurrentExecutions": 1000, "UnreservedConcurrentExecutions": 1000 - self.live_reserved}}
+        if args[:2] == ["lambda", "get-function-concurrency"]:
+            return {"ReservedConcurrentExecutions": self.live_reserved} if self.live_reserved else {}
         if args[:2] == ["lambda", "get-function"]:
             return {"Configuration": {"FunctionArn": ARN}, "Code": {"ResolvedImageUri": self.live_image}}
         if args[:2] == ["lambda", "update-function-code"]:
@@ -88,7 +91,10 @@ class FakeLab(lab.Lab):
                     return subprocess.CompletedProcess(args, 0, "destroyed", "")
                 if image:
                     self.live_image = image
+                    self.live_reserved = max(0, variables["reserved_concurrency"])
             context = self.context(image) if image else {}
+            if context:
+                context["reserved_concurrency"] = self.live_reserved or -1
             lab.write_json(self.state, {"resources": [], "outputs": {"lab_context": {"value": context}}})
             if self.interrupt:
                 self.interrupt = False
@@ -101,7 +107,7 @@ class FakeLab(lab.Lab):
     def context(image):
         return {"purpose": "SingleOperatorLab", "environment": "dev", "account_id": ACCOUNT,
                 "region": REGION, "project_name": PROJECT, "lambda_function_arn": ARN,
-                "image_uri": image, "api_endpoint": f"https://abcdef.execute-api.{REGION}.amazonaws.com"}
+                "image_uri": image, "api_endpoint": f"https://abcdef.execute-api.{REGION}.amazonaws.com", "reserved_concurrency": 10}
 
 
 class LabTests(unittest.TestCase):
@@ -121,6 +127,7 @@ class LabTests(unittest.TestCase):
 
     def seed(self, image=IMAGE_A):
         self.lab.live_image = image
+        self.lab.live_reserved = max(0, self.lab.settings["reserved_concurrency"])
         lab.write_json(self.lab.state, {"resources": [], "outputs": {"lab_context": {"value": self.lab.context(image)}}})
 
     def planned(self, image=IMAGE_B, stage="workload"):
@@ -147,6 +154,44 @@ class LabTests(unittest.TestCase):
             self.lab.initialize(ACCOUNT, REGION, "signed-in")
         with self.assertRaises(lab.LabError):
             lab.Lab(self.root, "../prod")
+
+    def test_local_shared_pool_selection_invalidates_old_plan_without_aws_writes(self):
+        plan = self.lab.plan("registry")
+        self.lab.calls.clear()
+        outcome = self.lab.concurrency("unreserved", None)
+        self.assertEqual(outcome["reserved_concurrency"], -1)
+        self.assertFalse(self.lab.calls)
+        self.lab.load()
+        with self.assertRaisesRegex(lab.LabError, "stale, changed"):
+            self.apply(plan)
+        for mode, value in (("reserved", None), ("reserved", 0), ("reserved", True), ("unreserved", 10)):
+            with self.subTest(mode=mode, value=value), self.assertRaises(lab.LabError):
+                self.lab.concurrency(mode, value)
+
+    def test_shared_pool_survives_plan_apply_readback_and_rollback(self):
+        self.lab.concurrency("unreserved", None)
+        first = self.planned(IMAGE_A)
+        self.assertEqual(self.apply(first)["status"], "healthy")
+        self.assertEqual(self.lab.outputs()["reserved_concurrency"], -1)
+        second = self.planned(IMAGE_B)
+        self.assertEqual(self.apply(second)["status"], "healthy")
+        rollback = self.planned(IMAGE_A, "rollback")
+        self.assertEqual(self.apply(rollback)["status"], "healthy")
+        self.assertEqual(self.lab.live_reserved, 0)
+
+    def test_capacity_drift_after_plan_blocks_before_terraform_apply(self):
+        plan = self.planned()
+        self.lab.calls.clear()
+        with patch.object(self.lab, "capacity", side_effect=lab.LabError("Shared capacity exhausted")):
+            with self.assertRaisesRegex(lab.LabError, "exhausted"):
+                self.apply(plan)
+        self.assertFalse(any(kind == "tf" for kind, _ in self.lab.calls))
+
+    def test_live_reservation_mismatch_is_not_a_healthy_result(self):
+        self.seed()
+        self.lab.live_reserved = 5
+        with self.assertRaisesRegex(lab.LabError, "concurrency differ"):
+            self.lab.verify_capacity(self.lab.outputs())
 
     def test_state_and_settings_scope_cannot_be_silently_changed(self):
         self.seed()
@@ -239,8 +284,10 @@ class LabTests(unittest.TestCase):
     def test_registry_is_separate_and_low_quota_blocks_workload(self):
         result = self.lab.plan("registry")
         self.assertEqual(self.apply(result)["status"], "registry-ready")
-        with patch.object(self.lab, "aws", return_value={"AccountLimit": {"UnreservedConcurrentExecutions": 10}}):
-            with self.assertRaisesRegex(lab.LabError, "unreserved pool"):
+        def low_quota(args, **kwargs):
+            return {"AccountLimit": {"ConcurrentExecutions": 10, "UnreservedConcurrentExecutions": 10}} if args[1] == "get-account-settings" else {}
+        with patch.object(self.lab, "aws", side_effect=low_quota):
+            with self.assertRaisesRegex(lab.LabError, "maximum allocatable=0"):
                 self.lab.capacity()
 
     def test_failed_health_restores_previous_digest_and_state_but_remains_failure(self):

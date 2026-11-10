@@ -433,7 +433,7 @@ devsecops dry-run
     def test_tfvars_contains_environment_config(self) -> None:
         rendered = cli.terraform_tfvars(cli.default_config())
         self.assertIn("CLI-owned generated file", rendered)
-        self.assertIn('project_name              = "devsecops-pipeline"', rendered)
+        self.assertIn('project_name                          = "devsecops-pipeline"', rendered)
         self.assertIn("environment_config = {", rendered)
         self.assertIn("prod = {", rendered)
 

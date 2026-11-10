@@ -62,3 +62,30 @@ run "registry_can_be_prepared_before_image_publication" {
     lambda_image_uri = ""
   }
 }
+
+run "explicit_shared_pool_mode_retains_the_account_bound_dev_scope" {
+  command = apply
+  variables {
+    reserved_concurrency = -1
+  }
+  assert {
+    condition     = output.lab_context.reserved_concurrency == -1 && output.lab_context.environment == "dev"
+    error_message = "Unreserved mode must reach the actual Lambda resource and remain dev-only."
+  }
+}
+
+run "reject_disabled_function" {
+  command = plan
+  variables {
+    reserved_concurrency = 0
+  }
+  expect_failures = [var.reserved_concurrency]
+}
+
+run "reject_fractional_reservation" {
+  command = plan
+  variables {
+    reserved_concurrency = 1.5
+  }
+  expect_failures = [var.reserved_concurrency]
+}

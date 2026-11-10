@@ -26,6 +26,7 @@ from typing import Any, Callable
 from . import VERSION
 from .images import is_immutable_image, parse_ecr_image_uri
 from .models import Check, ConfigValidationError, EcrImageRef
+from .lambda_capacity import DEFAULT_RESERVED_EXECUTIONS, evaluate_capacity
 
 
 # Keep process execution behind small adapters so collectors can be exercised
@@ -282,6 +283,25 @@ def lambda_readiness_status(configuration: dict[str, Any]) -> str:
 LAMBDA_NOT_DEPLOYED = "Lambda function not deployed yet."
 
 
+def get_lambda_capacity(root: Path, function: str, region: str,
+                        requested: int = DEFAULT_RESERVED_EXECUTIONS, *, allow_unreserved: bool = False,
+                        aws_json_fn: Callable[..., tuple[Any, subprocess.CompletedProcess[str]]] = _aws_json) -> dict[str, Any]:
+    """Read account limits and the selected function's current reservation."""
+    account, result = aws_json_fn(root, ["lambda", "get-account-settings", "--region", region])
+    if result.returncode:
+        raise ConfigValidationError("Cannot inspect Lambda account capacity (lambda:GetAccountSettings): " + compact_error(result))
+    current, result = aws_json_fn(root, ["lambda", "get-function-concurrency", "--function-name", function, "--region", region])
+    if result.returncode:
+        if "ResourceNotFoundException" not in (result.stderr or ""):
+            raise ConfigValidationError("Cannot inspect function reservation (lambda:GetFunctionConcurrency): " + compact_error(result))
+        current = {}
+    if not isinstance(current, dict):
+        raise ConfigValidationError("AWS returned invalid function concurrency data.")
+    report = evaluate_capacity(account.get("AccountLimit") if isinstance(account, dict) else None,
+                               requested, current.get("ReservedConcurrentExecutions", 0), allow_unreserved=allow_unreserved)
+    return {**report, "function_name": function, "region": region}
+
+
 def collect_aws_checks(
     root: Path,
     cfg: dict[str, Any],
@@ -296,8 +316,8 @@ def collect_aws_checks(
 
     The checks follow deployment dependencies: tooling and identity first,
     followed by backend and the configured image. Workload inspection is
-    optional for pre-deployment checks. Provider failures are reported as
-    warnings so ``doctor`` can still show all locally available information.
+    optional for pre-deployment checks. Capacity failures block deployment;
+    other provider diagnostics degrade to warnings so doctor remains complete.
     """
 
     checks: list[Check] = []
@@ -334,6 +354,7 @@ def collect_aws_checks(
                 Check("State bucket", "WARN", "Cannot inspect backend bucket without valid AWS credentials."),
                 Check("Lock table", "WARN", "Cannot inspect DynamoDB lock table without valid AWS credentials."),
                 Check("Configured ECR image", "WARN", "Cannot inspect configured image without valid AWS credentials."),
+                Check("Lambda concurrency", "WARN", "Cannot inspect account capacity without valid AWS credentials."),
             ]
         )
         if include_workload:
@@ -347,6 +368,11 @@ def collect_aws_checks(
         return checks
     identity_detail = str(identity_payload.get("Arn") or identity_payload.get("Account") or "AWS credentials are usable.")
     checks.append(Check("AWS identity", "OK", identity_detail))
+    try:
+        capacity = get_lambda_capacity(root, lambda_function, region, aws_json_fn=aws_json_fn)
+        checks.append(Check("Lambda concurrency", "OK", capacity["message"]))
+    except (ConfigValidationError, OSError, subprocess.TimeoutExpired) as error:
+        checks.append(Check("Lambda concurrency", "FAIL", str(error)))
 
     if not backend_bucket or backend_bucket.startswith("replace-with"):
         checks.append(Check("State bucket", "WARN", "Set backend.bucket before checking remote state."))

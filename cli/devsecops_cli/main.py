@@ -4771,12 +4771,13 @@ def menu_lab_hub(root: Path) -> None:
     draw_box("Single-operator AWS lab", ["DEV only; no production approval or production state.",
               "Commands and private proof: docs/single-operator-lab.md"])
     for line in ("[1] Initialize local lab scope", "[2] Check live status", "[3] Create a plan",
-                 "[4] Review/apply a saved plan", "[5] Send a signed API request", "[6] Read Lambda logs", "[0] Back"):
+                 "[4] Review/apply a saved plan", "[5] Send a signed API request", "[6] Read Lambda logs",
+                 "[7] Configure Lambda concurrency (local)", "[0] Back"):
         print_text(line)
     choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
         return
-    if choice not in {"1", "2", "3", "4", "5", "6"}:
+    if choice not in {"1", "2", "3", "4", "5", "6", "7"}:
         print(warn("Unknown option."))
         pause_for_menu()
         return
@@ -4816,8 +4817,18 @@ def menu_lab_hub(root: Path) -> None:
         method = prompt_text("Method: GET or POST", "GET")
         values.update(lab_command="request", method=method, path=prompt_text("Path", "/version"),
                       body=prompt_text("JSON body", '{"text":"Привіт, диплом!"}') if method == "POST" else None)
-    else:
+    elif choice == "6":
         values.update(lab_command="logs")
+    else:
+        print_text("Unreserved uses the shared account quota; no dedicated function cap or guarantee. Old plans become invalid.")
+        mode = prompt_text("Mode: reserved or unreserved", "reserved")
+        try:
+            reserved = int(prompt_text("Reserved executions (1..1000)", "10")) if mode == "reserved" else None
+        except ValueError:
+            print(fail("Reserved executions must be an integer."))
+            pause_for_menu()
+            return
+        values.update(lab_command="concurrency", mode=mode, reserved_executions=reserved)
     cmd_lab(argparse.Namespace(**values))
     pause_for_menu()
 

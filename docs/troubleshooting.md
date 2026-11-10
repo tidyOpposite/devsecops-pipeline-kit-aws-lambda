@@ -696,3 +696,24 @@ in code or `SECURITY.md`.
 Review the generated `zap-baseline-prod` artifact. Warnings are reported but do
 not fail the job by default. Fail-level findings should be triaged before
 rerunning the deployment.
+
+## Lambda concurrency is insufficient
+
+`doctor aws` and `status --pre-deploy --strict` report **Lambda concurrency**
+with account quota, unreserved capacity and the selected function's current
+reservation. AWS requires 100 executions to remain unreserved when allocating
+reservations. Thus a fresh account with a quota of 10 cannot simply reserve
+10, or even 1. Missing `GetAccountSettings`/`GetFunctionConcurrency` permissions,
+expired sessions or inconsistent responses fail the check rather than assuming
+capacity is available. Recheck with the intended AWS profile and region.
+
+For production, arrange adequate quota and keep the positive reservation;
+the protected runner repeats the check under its actual AWS role. Local profile
+success does not prove that role's permissions/account. Do not disable approval
+or use the lab as production acceptance.
+
+For the separate single-operator dev lab, explicitly choose
+`devsecops lab concurrency NAME --mode unreserved`, then run `lab status NAME`
+and create a new plan. This uses the finite shared account quota, without a
+dedicated function cap or guaranteed capacity. No AWS change occurs until a
+new saved plan is reviewed and applied. See [lab guide](single-operator-lab.md).

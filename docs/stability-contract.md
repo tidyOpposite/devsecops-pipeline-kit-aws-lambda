@@ -7,6 +7,9 @@ Current source: `0.16.0b2.dev0` (unpublished). Published prerelease:
 `single-operator-lab`, with `production_acceptance=false`. Saved plans expire
 after one hour and require an exact review hash and explicit `--yes` for apply.
 Private state/evidence are documented in [the lab guide](single-operator-lab.md).
+`lab concurrency` changes only local dev policy and invalidates saved reviews.
+Shared-pool `-1` is accepted only in the lab; primary Terraform and the protected
+workflow continue to require a positive integer reservation (CLI default 10).
 Previous published baseline: `v0.15.0`. Final acceptance is pending.
 
 This contract explains which `devsecops` surfaces are stable enough to script

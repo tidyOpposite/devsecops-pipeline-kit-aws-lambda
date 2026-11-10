@@ -35,7 +35,7 @@ COMPLETION_COMMANDS = [
     "completion",
 ]
 COMPLETION_SUBCOMMANDS = {
-    "lab": ["init", "plan", "apply", "status", "request", "logs"],
+    "lab": ["init", "plan", "apply", "status", "request", "logs", "concurrency"],
     "deploy": ["prod", "status", "logs", "rollback"],
     "config": ["show", "validate", "diff", "reset", "set", "schema"],
     "doctor": ["local", "github", "aws", "branch", "actions", "all"],
@@ -57,6 +57,7 @@ COMPLETION_OPTIONS = {
     "lab status": ["--help", "--format"],
     "lab request": ["--help", "--method", "--path", "--body", "--format"],
     "lab logs": ["--help", "--format"],
+    "lab concurrency": ["--help", "--mode", "--reserved-executions", "--format"],
     "devsecops": ["--help", "--version"],
     "setup": [
         "--help",

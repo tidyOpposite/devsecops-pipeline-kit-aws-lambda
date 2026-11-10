@@ -68,6 +68,12 @@ or by CLI setup.
    needed to create/remove the fixture. It needs no deployment-backend access.
    Ensure the sandbox has enough Lambda concurrency quota to reserve one
    execution while preserving AWS's required unreserved capacity.
+   Preparation now reads account/function capacity under the assumed role
+   before writing the fixture. It fails closed if capacity or read permissions
+   are missing and records successful readback in
+   `dist/devsecops/acceptance/capacity.json`, included in the run artifact.
+   This workflow retains its reservation and separate-account requirements;
+   the dev lab's shared-pool option does not alter acceptance policy.
 3. Create GitHub Environment `acceptance`: require an independent reviewer,
    prevent self-review, disable admin bypass, and allow only the exact branch
    `main`, without tags. The workflow verifies these protections before AWS.

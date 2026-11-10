@@ -10,11 +10,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .aws import _aws_json, verify_ecr_lambda_image
+from .aws import _aws_json, get_lambda_capacity, verify_ecr_lambda_image
 from .config import AWS_REGION_RE
 from .github import protected_environment_check
 from .images import parse_ecr_image_uri
 from .setup import is_iam_role_arn
+from .models import ConfigValidationError
 
 
 def settings(environment: dict[str, str]) -> dict:
@@ -47,7 +48,12 @@ def prepare(root: Path, environment: dict[str, str], *, verify_identity: bool) -
         identity, result = _aws_json(root, ["sts", "get-caller-identity"])
         if result.returncode or not isinstance(identity, dict) or identity.get("Account") != values["expected_account_id"]:
             raise ValueError("The active AWS session is not the confirmed sandbox account.")
+        capacity = get_lambda_capacity(root, values["project_name"] + "-staging-lambda", values["aws_region"], 1,
+                                       aws_json_fn=_aws_json)
         verify_ecr_lambda_image(root, values["lambda_image_uri"], values["aws_region"])
+        proof = root / "dist/devsecops/acceptance/capacity.json"
+        proof.parent.mkdir(parents=True, exist_ok=True)
+        proof.write_text(json.dumps(capacity, indent=2) + "\n")
         destination = root / "terraform/acceptance/acceptance.auto.tfvars.json"
         destination.write_text(json.dumps(values, indent=2) + "\n")
     else:
@@ -63,7 +69,7 @@ def main() -> int:
         if operation not in {"preflight", "prepare"}:
             raise ValueError("Use acceptance preflight or prepare.")
         prepare(Path.cwd(), os.environ, verify_identity=operation == "prepare")
-    except (OSError, ValueError, KeyError, TypeError, IndexError, subprocess.SubprocessError) as exc:
+    except (ConfigValidationError, OSError, ValueError, KeyError, TypeError, IndexError, subprocess.SubprocessError) as exc:
         print(f"Cloud acceptance blocked: {exc}", file=sys.stderr)
         return 1
     return 0

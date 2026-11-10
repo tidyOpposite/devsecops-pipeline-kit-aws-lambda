@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from devsecops_cli import acceptance, scanner
-from devsecops_cli.models import Check
+from devsecops_cli.models import Check, ConfigValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
 IMAGE = "123456789012.dkr.ecr.us-east-1.amazonaws.com/workload@sha256:" + "a" * 64
@@ -113,10 +113,27 @@ class SecurityGateTests(unittest.TestCase):
                 image.assert_not_called()
                 self.assertFalse(destination.exists())
             with patch.object(acceptance, "_aws_json", return_value=({"Account": "123456789012"}, subprocess.CompletedProcess([], 0, "", ""))), \
+                 patch.object(acceptance, "get_lambda_capacity", return_value={"requested_reserved": 1}) as capacity, \
                  patch.object(acceptance, "verify_ecr_lambda_image", return_value=IMAGE) as image:
                 acceptance.prepare(root, target(), verify_identity=True)
+                capacity.assert_called_once()
+                self.assertEqual(capacity.call_args.args[3], 1)
                 image.assert_called_once_with(root, IMAGE, "us-east-1")
                 self.assertTrue(destination.exists())
+
+    def test_cloud_acceptance_rejects_low_quota_before_fixture_or_image_work(self):
+        def aws(root, args):
+            value = ({"Account": "123456789012"} if args[0] == "sts" else
+                     {"AccountLimit": {"ConcurrentExecutions": 10, "UnreservedConcurrentExecutions": 10}}
+                     if args[1] == "get-account-settings" else {})
+            return value, subprocess.CompletedProcess(args, 0, "", "")
+        with tempfile.TemporaryDirectory() as directory, patch.object(acceptance, "_aws_json", side_effect=aws), \
+             patch.object(acceptance, "verify_ecr_lambda_image") as image:
+            root = Path(directory)
+            with self.assertRaisesRegex(ConfigValidationError, "maximum allocatable=0"):
+                acceptance.prepare(root, target(), verify_identity=True)
+            image.assert_not_called()
+            self.assertFalse((root / "terraform/acceptance/acceptance.auto.tfvars.json").exists())
 
     def test_dependabot_targets_have_real_manifests(self):
         source = (ROOT / ".github/dependabot.yml").read_text()

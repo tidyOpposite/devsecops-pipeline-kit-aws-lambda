@@ -32,3 +32,8 @@ output "role_arn" {
   description = "ARN of the Lambda execution role."
   value       = aws_iam_role.lambda_exec_role.arn
 }
+
+output "reserved_concurrency" {
+  description = "Actual function reservation; -1 uses the shared account pool."
+  value       = aws_lambda_function.workload.reserved_concurrent_executions
+}

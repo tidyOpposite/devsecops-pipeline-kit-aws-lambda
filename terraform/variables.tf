@@ -133,8 +133,8 @@ variable "lambda_reserved_concurrent_executions" {
   default     = 10
 
   validation {
-    condition     = var.lambda_reserved_concurrent_executions >= 1 && var.lambda_reserved_concurrent_executions <= 1000
-    error_message = "lambda_reserved_concurrent_executions must be between 1 and 1000."
+    condition     = var.lambda_reserved_concurrent_executions >= 1 && var.lambda_reserved_concurrent_executions <= 1000 && floor(var.lambda_reserved_concurrent_executions) == var.lambda_reserved_concurrent_executions
+    error_message = "lambda_reserved_concurrent_executions must be an integer between 1 and 1000. Shared-pool mode is restricted to the separate dev lab."
   }
 }
 

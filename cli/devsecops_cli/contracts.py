@@ -29,6 +29,7 @@ COMMAND_CONTRACTS: list[dict[str, Any]] = [
         ("plan", ["--stage", "--image-uri"]),
         ("apply", ["--plan-id", "--sha256", "--yes"]),
         ("status", []), ("request", ["--method", "--path", "--body"]), ("logs", []),
+        ("concurrency", ["--mode", "--reserved-executions"]),
     )],
     {
         "command": "devsecops",
@@ -701,7 +702,7 @@ DEPRECATION_POLICY = {
 JSON_OUTPUT_CONTRACTS = [
     {
         "kind": "single-operator-lab",
-        "commands": ["devsecops lab init/plan/apply/status/request/logs --format json"],
+        "commands": ["devsecops lab init/plan/apply/status/request/logs/concurrency --format json"],
         "stable_keys": ["kind", "schema_version", "status", "name", "account_id", "region", "production_acceptance", "evidence"],
     },
     {

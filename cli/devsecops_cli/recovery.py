@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .aws import (
     _aws_command, _aws_json, compact_error, fetch_health_url, resolve_ecr_image_digest,
-    resolved_lambda_image_uri, verify_ecr_lambda_image,
+    resolved_lambda_image_uri, verify_ecr_lambda_image, get_lambda_capacity,
 )
 from .images import parse_ecr_image_uri
 from .models import ConfigValidationError
@@ -128,7 +128,11 @@ def main() -> int:
     env = os.environ
     try:
         command = sys.argv[1]
-        if command == "verify-image":
+        if command == "capacity":
+            function = f"{env['PROJECT_NAME']}-{env['DEPLOY_ENVIRONMENT']}-lambda"
+            report = get_lambda_capacity(root, function, env["AWS_REGION"])
+            print(json.dumps(report, indent=2))
+        elif command == "verify-image":
             image = env["LAMBDA_IMAGE_URI"]
             ref = parse_ecr_image_uri(image)
             if ref is None or not ref.digest:

@@ -30,12 +30,27 @@ Git. Keep this directory private and backed up: losing local state is not a
 cleanup mechanism. Avoid concurrent external Terraform changes while a plan is
 under review. A local operator lock prevents simultaneous CLI operations.
 
-**Concurrency prerequisite:** this source currently reserves 10 Lambda
-executions. Planning/apply refuses to consume the entire available unreserved
-pool. New accounts with a quota of 10 must resolve the separately tracked
-low-quota configuration first. Do not edit lab settings or disable that check.
-This conservative check does not promise AWS will accept every quota level;
-provider errors remain failures with evidence.
+**Concurrency:** the default remains a reservation of 10. Before workload
+plan/apply the CLI reads the account quota, unreserved pool and this function's
+existing reservation. Allocating reserved capacity must leave the AWS-required
+100 units unreserved; simply changing 10 to 1 does not solve a new account quota
+of 10. See [AWS reserved concurrency](https://docs.aws.amazon.com/lambda/latest/dg/configuration-concurrency.html).
+
+For this separate dev lab, explicitly select shared-pool mode with
+`lab concurrency NAME --mode unreserved`. Terraform then uses `-1`, supported
+by the [pinned provider](https://github.com/hashicorp/terraform-provider-aws/blob/v5.100.0/internal/service/lambda/function.go).
+This removes a function reservation: the function shares the account's finite
+quota with other unreserved functions. It has no dedicated cap or capacity
+guarantee. A quota of 10 still limits the account to 10 concurrent executions;
+this setting does not increase that quota. Keep IAM authorization, send a few
+sequential demonstration requests and avoid load testing in a shared account.
+
+Inspect policy with `lab concurrency NAME`. Return to reservations using
+`--mode reserved --reserved-executions 10` when the actual quota allows it.
+Zero (disabled invocations), fractional and invalid values are rejected.
+Policy changes are local, invalidate existing saved plans and require a new
+review before any AWS mutation. They can also be selected in Deploy →
+Single-operator AWS lab → Configure Lambda concurrency.
 
 ## Registry, then workload
 
@@ -45,6 +60,9 @@ and signed-in profile; these are identifiers, not keys:
 ```bash
 devsecops lab init diploma --expected-account-id 123456789012 \
   --region eu-north-1 --profile diploma
+# For a low-quota dev account, explicitly choose the shared account pool:
+devsecops lab concurrency diploma --mode unreserved
+devsecops lab status diploma
 devsecops lab plan diploma --stage registry
 ```
 
@@ -94,7 +112,10 @@ devsecops lab logs diploma
 ```
 
 Each successful workload apply requires the actual Lambda resolved digest,
-Terraform state image and signed `/health` HTTP 2xx to agree. Requests are
+Terraform state image and signed `/health` HTTP 2xx to agree. Configured,
+state and live concurrency policy must also match. Capacity is checked again
+at apply because other functions can consume it after plan review. A preflight
+pass does not lock the shared pool or prevent later throttling. Requests are
 limited to this lab's verified regional API and supported example routes;
 redirects are not followed. No signing credentials or authorization headers
 are saved in evidence. Response bodies and application logs are private and

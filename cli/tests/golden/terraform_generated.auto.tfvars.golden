@@ -2,11 +2,12 @@
 # Update .devsecops-pipeline.toml and rerun `devsecops render`.
 # See docs/generated-artifacts.md for ownership rules.
 
-project_name              = "golden-pipeline"
-aws_region                = "eu-central-1"
-lambda_image_uri          = "123456789012.dkr.ecr.eu-central-1.amazonaws.com/golden-pipeline:sha-abc123"
-api_authorization_type    = "AWS_IAM"
-terraform_admin_role_name = "golden-terraform-admin"
+project_name                          = "golden-pipeline"
+aws_region                            = "eu-central-1"
+lambda_image_uri                      = "123456789012.dkr.ecr.eu-central-1.amazonaws.com/golden-pipeline:sha-abc123"
+api_authorization_type                = "AWS_IAM"
+terraform_admin_role_name             = "golden-terraform-admin"
+lambda_reserved_concurrent_executions = 10
 
 environment_config = {
   dev = {

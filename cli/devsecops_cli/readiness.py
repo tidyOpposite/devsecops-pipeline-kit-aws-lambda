@@ -22,6 +22,7 @@ PRE_DEPLOY_CHECKS = {
     "Local config", "Project files", "Config schema", "Rendered tfvars", "Terraform validate",
     "Bootstrap validate", "GitHub auth", "GitHub repository", "GitHub environment approvals",
     "Branch `main` protection", "GitHub OIDC roles", "AWS identity", "State bucket", "Lock table", "Configured ECR image",
+    "Lambda concurrency",
 }
 WORKLOAD_CHECKS = {
     "ECR repository", "Lambda execution role", "Lambda function", "API Gateway",
@@ -69,6 +70,8 @@ def readiness_action_detail_for_check(check: Check) -> str:
         return "Install AWS CLI before cloud bootstrap or AWS identity checks."
     if check.name == "AWS CLI":
         return "Install AWS CLI and make sure `aws` is available on PATH."
+    if check.name == "Lambda concurrency":
+        return "Inspect account/function concurrency in the selected region. Request quota for production reservations; select explicit shared-pool mode only in the separate dev lab."
     if check.name == "State bucket":
         return "Set `backend.bucket`, run `devsecops render`, then `devsecops bootstrap --apply`."
     if check.name == "Lock table":
@@ -157,6 +160,8 @@ def troubleshooting_anchor_for_check(check: Check) -> str:
         return "#aws-doctor-cannot-inspect-resources"
     if name == "AWS outputs":
         return "#check-aws-account-and-deployed-resources"
+    if name == "Lambda concurrency":
+        return "#lambda-concurrency-is-insufficient"
     if name.startswith("Health "):
         return "#health-check-returns-500"
     if name in {"Backend bucket", "State bucket", "Lock table", "Backend lock table"}:
@@ -232,6 +237,7 @@ def readiness_category_for_check(check: Check) -> str:
         "AWS identity",
         "ECR repository",
         "Lambda execution role",
+        "Lambda concurrency",
         "API Gateway",
         "CloudWatch log group",
     }:

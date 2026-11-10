@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from . import VERSION
-from .aws import _NoRedirectResponseProcessor, aws_sigv4_headers, verify_ecr_lambda_image
+from .aws import _NoRedirectResponseProcessor, aws_sigv4_headers, get_lambda_capacity, verify_ecr_lambda_image
 from .config import ConfigValidationError
 
 
@@ -155,7 +155,8 @@ class Lab:
                 or not re.fullmatch(r"[a-z]{2}-[a-z]+-[0-9]", s.get("region", ""))
                 or not re.fullmatch(r"kit-lab-" + re.escape(self.name) + r"-[a-f0-9]{6}", s.get("project_name", ""))
                 or not isinstance(s.get("profile"), str) or not s["profile"]
-                or s.get("reserved_concurrency") != 10):
+                or type(s.get("reserved_concurrency")) is not int
+                or not (s["reserved_concurrency"] == -1 or 1 <= s["reserved_concurrency"] <= 1000)):
             raise LabError("Invalid lab settings; restore the original settings instead of editing deployment scope.")
 
     def base_env(self) -> dict[str, str]:
@@ -368,11 +369,50 @@ class Lab:
             raise LabError("Live Lambda identity/image does not match this lab.")
         return {"arn": arn, "image_uri": image}
 
-    def capacity(self) -> None:
-        limits = self.aws(["lambda", "get-account-settings"])["AccountLimit"]
-        if self.settings["reserved_concurrency"] >= limits["UnreservedConcurrentExecutions"]:
-            raise LabError("Reserved concurrency would consume the available unreserved pool. "
-                           "Resolve the account concurrency prerequisite before workload planning.")
+    def capacity(self) -> dict[str, Any]:
+        def adapter(_root: Path, args: list[str]) -> tuple[Any, subprocess.CompletedProcess[str]]:
+            try:
+                value = self.aws(args)
+                return value, subprocess.CompletedProcess(args, 0, json.dumps(value), "")
+            except LabError as error:
+                if args[:2] == ["lambda", "get-function-concurrency"] and "ResourceNotFoundException" in str(error):
+                    return {}, subprocess.CompletedProcess(args, 255, "", str(error))
+                raise
+        try:
+            report = get_lambda_capacity(self.root, self.settings["project_name"] + "-dev-lambda", self.settings["region"],
+                                         self.settings["reserved_concurrency"], allow_unreserved=True, aws_json_fn=adapter)
+        except ConfigValidationError as error:
+            raise LabError(str(error)) from error
+        if self.event_dir:
+            write_json(self.event_dir / ("capacity-" + uuid.uuid4().hex[:8] + ".json"), report)
+        return report
+
+    def concurrency(self, mode: str | None, reserved: int | None) -> dict[str, Any]:
+        """Change only local lab policy; existing plan hashes become invalid."""
+        if mode is None:
+            if reserved is not None:
+                raise LabError("--reserved-executions requires --mode reserved.")
+            return self.finish("configured", reserved_concurrency=self.settings["reserved_concurrency"],
+                               message="Reserved values allocate dedicated capacity; -1 uses the shared account pool (dev only).")
+        if mode == "unreserved" and reserved is None:
+            requested = -1
+        elif mode == "reserved" and type(reserved) is int and 1 <= reserved <= 1000:
+            requested = reserved
+        else:
+            raise LabError("Choose --mode unreserved without a value, or --mode reserved --reserved-executions 1..1000.")
+        previous = self.settings["reserved_concurrency"]
+        self.settings["reserved_concurrency"] = requested
+        write_json(self.settings_path, self.settings)
+        return self.finish("configured", previous_reserved_concurrency=previous, reserved_concurrency=requested,
+                           mode=mode, message="Local policy saved; no AWS changes. Create a new reviewed plan before apply. "
+                           + ("Uses the shared account pool, with no dedicated function cap or guarantee." if requested == -1 else "Account capacity will be checked before plan/apply."))
+
+    def verify_capacity(self, context: dict[str, Any]) -> dict[str, Any]:
+        report = self.capacity()
+        requested = self.settings["reserved_concurrency"]
+        if context.get("reserved_concurrency") != requested or report["current_reserved"] != max(0, requested):
+            raise LabError("Configured, Terraform-state and live function concurrency differ; inspect drift before proceeding.")
+        return report
 
     def plan(self, stage: str, image: str | None = None) -> dict[str, Any]:
         self.identity()
@@ -542,7 +582,8 @@ class Lab:
         # Terraform refresh must agree with the restored live Lambda.
         if self.outputs().get("image_uri") != previous["image_uri"]:
             raise LabError("Recovery state did not record the restored image digest.")
-        return {"function": previous, "health": self.health(), "state_sha256": digest(self.state)}
+        return {"function": previous, "health": self.health(), "capacity": self.verify_capacity(self.outputs()),
+                "state_sha256": digest(self.state)}
 
     def apply(self, plan_id: str, sha256: str, yes: bool) -> dict[str, Any]:
         directory, review = self.reviewed(plan_id, sha256)
@@ -578,7 +619,8 @@ class Lab:
             if not live or live["image_uri"] != review["image_uri"] or context.get("image_uri") != review["image_uri"]:
                 raise LabError("Live Lambda, planned digest and Terraform state do not agree.")
             health = self.health()
-            return self.finish("healthy", function=live, health=health, state_sha256=digest(self.state),
+            capacity = self.verify_capacity(context)
+            return self.finish("healthy", function=live, health=health, capacity=capacity, state_sha256=digest(self.state),
                                message="Saved plan applied; live digest, Terraform state and signed health agree.")
         except (LabError, KeyboardInterrupt) as error:
             recovery: dict[str, Any] = {"status": "manual-attention", "message": "Keep state and evidence; inspect the partial apply before replanning."}
@@ -603,8 +645,9 @@ class Lab:
         if live:
             if live["image_uri"] != context.get("image_uri"):
                 raise LabError("Live Lambda digest differs from Terraform state; inspect drift before proceeding.")
-            return self.finish("healthy", identity=identity, outputs=context, function=live, health=self.health())
-        return self.finish("not-deployed", identity=identity, repository_url=self.repository, outputs=context,
+            return self.finish("healthy", identity=identity, outputs=context, function=live, health=self.health(),
+                               capacity=self.verify_capacity(context))
+        return self.finish("not-deployed", identity=identity, repository_url=self.repository, outputs=context, capacity=self.capacity(),
                            message="No lab workload recorded. Prepare registry, publish images, then review a workload plan.")
 
     def logs(self) -> dict[str, Any]:
@@ -644,6 +687,8 @@ def execute(root: Path, args: argparse.Namespace) -> dict[str, Any]:
         try:
             if args.lab_command == "plan":
                 return lab.plan(args.stage, args.image_uri)
+            if args.lab_command == "concurrency":
+                return lab.concurrency(args.mode, args.reserved_executions)
             if args.lab_command == "apply":
                 return lab.apply(args.plan_id, args.sha256, args.yes)
             if args.lab_command == "request":
@@ -665,7 +710,7 @@ def configure_parser(subparsers: Any, handler: Any) -> None:
     parser = subparsers.add_parser("lab", help="Operate an isolated dev lab as one AWS operator.",
                                   description="Single-operator dev lab with private local state and evidence. Does not bypass production approval.")
     commands = parser.add_subparsers(dest="lab_command", required=True)
-    for command in ("init", "plan", "apply", "status", "request", "logs"):
+    for command in ("init", "plan", "apply", "status", "request", "logs", "concurrency"):
         child = commands.add_parser(command)
         child.add_argument("name", help="Lab name (3–16 lowercase letters, digits, hyphens).")
         child.add_argument("--format", choices=("human", "json"), default="human")
@@ -685,3 +730,6 @@ def configure_parser(subparsers: Any, handler: Any) -> None:
             child.add_argument("--method", choices=("GET", "POST"), default="GET")
             child.add_argument("--path", default="/version")
             child.add_argument("--body", help="JSON object for POST /analyze (at most 64 KiB).")
+        elif command == "concurrency":
+            child.add_argument("--mode", choices=("reserved", "unreserved"), help="Explicit local dev policy; omitted means inspect only.")
+            child.add_argument("--reserved-executions", type=int, help="Required with reserved mode (1..1000); cannot be used with unreserved mode.")

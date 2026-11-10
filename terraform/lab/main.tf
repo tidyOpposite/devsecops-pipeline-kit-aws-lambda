@@ -49,8 +49,8 @@ variable "reserved_concurrency" {
   type    = number
   default = 10
   validation {
-    condition     = var.reserved_concurrency >= 1 && var.reserved_concurrency <= 1000 && floor(var.reserved_concurrency) == var.reserved_concurrency
-    error_message = "Lab reserved concurrency must be an integer from 1 to 1000."
+    condition     = var.reserved_concurrency == -1 || (var.reserved_concurrency >= 1 && var.reserved_concurrency <= 1000 && floor(var.reserved_concurrency) == var.reserved_concurrency)
+    error_message = "Lab concurrency must be -1 (explicit shared-pool dev mode) or an integer from 1 to 1000. Zero disables invocations and is not a deployment mode."
   }
 }
 
@@ -138,6 +138,7 @@ output "lab_context" {
     lambda_function_name = module.lambda.function_name
     image_uri            = module.lambda.image_uri
     api_endpoint         = module.api_gateway.api_endpoint
+    reserved_concurrency = module.lambda.reserved_concurrency
   }
 }
 

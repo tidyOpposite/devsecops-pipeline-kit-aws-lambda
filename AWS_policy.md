@@ -211,6 +211,19 @@ the sandbox backend using [Manual sandbox plans](docs/sandbox-plans.md).
 
 ## Deploy Permissions Baseline
 
+Capacity preflight requires `lambda:GetAccountSettings` (account-wide) and
+`lambda:GetFunctionConcurrency` on the selected project function, including
+before first creation. Give the sandbox plan role these **read** actions too;
+an access-denied response is not treated as an absent function. Only the deploy
+role needs `lambda:PutFunctionConcurrency`/`lambda:DeleteFunctionConcurrency`
+for managing reservations. The baseline below includes them separately.
+
+The CLI-generated primary stack and protected workflow request a reservation
+of 10; the runner checks the actual deployment role's region/account before
+planning and again before saved-plan apply. A local diagnostic uses its local
+AWS profile and does not prove the OIDC role's quota or permissions. Production
+approval, role separation and incident image rollback remain unchanged.
+
 Terraform creates and updates IAM, KMS, S3, ECR, Lambda, API Gateway,
 CloudWatch Logs, SQS, and related policies. A practical deploy-role baseline is
 shown below. Tighten resources by ARN once your account, project name, and
@@ -225,6 +238,18 @@ environment names are stable.
       "Effect": "Allow",
       "Action": "ecr:GetAuthorizationToken",
       "Resource": "*"
+    },
+    {
+      "Sid": "LambdaAccountCapacityRead",
+      "Effect": "Allow",
+      "Action": "lambda:GetAccountSettings",
+      "Resource": "*"
+    },
+    {
+      "Sid": "LambdaFunctionCapacity",
+      "Effect": "Allow",
+      "Action": ["lambda:GetFunctionConcurrency", "lambda:PutFunctionConcurrency", "lambda:DeleteFunctionConcurrency"],
+      "Resource": "arn:aws:lambda:<AWS_REGION>:<ACCOUNT_ID>:function:<PROJECT_NAME>-*-lambda"
     },
     {
       "Sid": "ECRManageAndRead",

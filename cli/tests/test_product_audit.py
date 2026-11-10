@@ -593,6 +593,8 @@ class ReadinessRegressionTests(unittest.TestCase):
             ("sts", "get-caller-identity"): {"Account": "123456789012"},
             ("dynamodb", "describe-table"): {"Table": {"TableStatus": "ACTIVE"}},
             ("ecr", "describe-images"): {"imageDetails": [{"imageTags": ["sha-abc123"]}]},
+            ("lambda", "get-account-settings"): {"AccountLimit": {"ConcurrentExecutions": 1000, "UnreservedConcurrentExecutions": 1000}},
+            ("lambda", "get-function-concurrency"): {},
         }
 
         def aws_json(root, args):
