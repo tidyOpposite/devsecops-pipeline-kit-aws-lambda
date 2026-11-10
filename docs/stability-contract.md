@@ -1,6 +1,12 @@
 # Stability Contract
 
-Current prerelease: `0.16.0b1` (`v0.16.0-beta.1`).
+Current source: `0.16.0b2.dev0` (unpublished). Published prerelease:
+`0.16.0b1` (`v0.16.0-beta.1`).
+
+`lab` is a separate dev-only single-operator path. Its JSON kind is
+`single-operator-lab`, with `production_acceptance=false`. Saved plans expire
+after one hour and require an exact review hash and explicit `--yes` for apply.
+Private state/evidence are documented in [the lab guide](single-operator-lab.md).
 Previous published baseline: `v0.15.0`. Final acceptance is pending.
 
 This contract explains which `devsecops` surfaces are stable enough to script

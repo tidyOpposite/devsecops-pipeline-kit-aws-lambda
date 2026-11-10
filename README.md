@@ -10,8 +10,10 @@ Lambda container deployment pipeline from one terminal CLI. It turns a local
 configuration into reviewable Terraform and GitHub setup artifacts, then shows
 what still blocks a deployment.
 
-Current version: **`0.16.0b1`**, prerelease tag **`v0.16.0-beta.1`**.
-See the [prerelease notes](docs/release-v0.16.0b1.md) and
+Current source: **`0.16.0b2.dev0`** (unpublished development version).
+Published prerelease: **`0.16.0b1`**, tag **`v0.16.0-beta.1`**.
+The source adds a [single-operator dev lab](docs/single-operator-lab.md).
+See the [source notes](docs/release-v0.16.0b2.dev0.md), [prerelease notes](docs/release-v0.16.0b1.md) and
 [installation guide](docs/distribution.md#install-the-prerelease).
 The previous published baseline is `v0.15.0`.
 Final AWS/GitHub and supported-platform acceptance is pending;

@@ -150,6 +150,7 @@ override.tf.json
 .terraformrc
 terraform.rc
 terraform/acceptance/.terraform.lock.hcl
+terraform/lab/.terraform.lock.hcl
 terraform/acceptance/runtime-acceptance.txt
 
 # IDE settings folders

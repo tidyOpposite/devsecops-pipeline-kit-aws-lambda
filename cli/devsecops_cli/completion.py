@@ -19,6 +19,7 @@ COMPLETION_COMMANDS = [
     "setup",
     "status",
     "deploy",
+    "lab",
     "dry-run",
     "image",
     "generate",
@@ -34,6 +35,7 @@ COMPLETION_COMMANDS = [
     "completion",
 ]
 COMPLETION_SUBCOMMANDS = {
+    "lab": ["init", "plan", "apply", "status", "request", "logs"],
     "deploy": ["prod", "status", "logs", "rollback"],
     "config": ["show", "validate", "diff", "reset", "set", "schema"],
     "doctor": ["local", "github", "aws", "branch", "actions", "all"],
@@ -48,6 +50,13 @@ COMPLETION_SUBCOMMANDS = {
     "completion": list(COMPLETION_SHELLS),
 }
 COMPLETION_OPTIONS = {
+    "lab": ["--help"],
+    "lab init": ["--help", "--expected-account-id", "--region", "--profile", "--format"],
+    "lab plan": ["--help", "--stage", "--image-uri", "--format"],
+    "lab apply": ["--help", "--plan-id", "--sha256", "--yes", "--format"],
+    "lab status": ["--help", "--format"],
+    "lab request": ["--help", "--method", "--path", "--body", "--format"],
+    "lab logs": ["--help", "--format"],
     "devsecops": ["--help", "--version"],
     "setup": [
         "--help",

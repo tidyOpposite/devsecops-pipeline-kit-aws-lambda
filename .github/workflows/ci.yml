@@ -144,6 +144,13 @@ jobs:
           terraform -chdir=terraform/acceptance init -backend=false -input=false -lockfile=readonly -no-color
           terraform -chdir=terraform/acceptance test -test-directory=tests -no-color
 
+      - name: Rehearse single-operator dev lab without AWS credentials
+        run: |
+          cp terraform/.terraform.lock.hcl terraform/lab/.terraform.lock.hcl
+          terraform -chdir=terraform/lab init -backend=false -input=false -lockfile=readonly -no-color
+          terraform -chdir=terraform/lab validate -no-color
+          terraform -chdir=terraform/lab test -no-color
+
   scanner-boundary:
     name: Locked Scanner Isolation
     runs-on: ubuntu-latest

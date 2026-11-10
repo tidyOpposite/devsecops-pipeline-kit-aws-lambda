@@ -17,7 +17,10 @@ The canonical package path is GitHub Releases:
   * `SHA256SUMS`
 
 PyPI publication is deferred. Published installs use GitHub Release assets.
-Current version is `0.16.0b1`, published as prerelease `v0.16.0-beta.1`.
+Current source is `0.16.0b2.dev0` (unpublished). The published prerelease is
+`0.16.0b1`, tag `v0.16.0-beta.1`; it does not contain the new `lab` commands.
+For the lab, install a matching source checkout with `python3 -m pip install --no-deps .`
+inside a virtual environment. Keep its Terraform sources and installed CLI together.
 Final production acceptance is pending. The previous published baseline is
 [v0.15.0](https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/tag/v0.15.0),
 published 4 November 2026.

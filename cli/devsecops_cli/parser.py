@@ -17,6 +17,7 @@ from .github import DEFAULT_BRANCH
 from .paths import PRODUCTION_EVIDENCE_DIR, RC_EVIDENCE_DIR
 from .setup import SETUP_MODES
 from .teardown import configure_parser as configure_teardown_parser
+from .lab import configure_parser as configure_lab_parser
 
 COMPLETION_SHELLS = ("bash", "zsh", "fish")
 
@@ -94,9 +95,10 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     subparsers = parser.add_subparsers(
         dest="command",
-        metavar="{menu,setup,status,deploy,dry-run,generate,doctor,config}",
+        metavar="{menu,setup,status,deploy,lab,dry-run,generate,doctor,config}",
     )
     parser.set_defaults(func=handlers.cmd_overview)
+    configure_lab_parser(subparsers, handlers.cmd_lab)
 
     # Primary product surfaces appear first in top-level help.
     menu_parser = subparsers.add_parser(
@@ -724,6 +726,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
         "setup",
         "status",
         "deploy",
+        "lab",
         "dry-run",
         "generate",
         "doctor",

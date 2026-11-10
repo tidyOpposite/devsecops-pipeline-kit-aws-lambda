@@ -18,6 +18,18 @@ from .paths import AUDIT_REPORT, DEPLOYMENT_STATE_FILE, DIST_DIR, GENERATED_TFVA
 # non-additive way.  Individual command status belongs in the entries below.
 CONTRACT_SCHEMA_VERSION = 1
 COMMAND_CONTRACTS: list[dict[str, Any]] = [
+    *[{
+        "command": "devsecops lab " + command,
+        "status": "stable", "scope": "single-operator-dev",
+        "stable_flags": flags + ["--format"], "formats": ["human", "json"],
+        "json_kind": "single-operator-lab",
+        "notes": "Dev-only local state and private proof; saved plan/hash/--yes required for AWS mutation. Not production acceptance.",
+    } for command, flags in (
+        ("init", ["--expected-account-id", "--region", "--profile"]),
+        ("plan", ["--stage", "--image-uri"]),
+        ("apply", ["--plan-id", "--sha256", "--yes"]),
+        ("status", []), ("request", ["--method", "--path", "--body"]), ("logs", []),
+    )],
     {
         "command": "devsecops",
         "status": "stable",
@@ -687,6 +699,11 @@ DEPRECATION_POLICY = {
 # Stable keys are minimum guarantees.  Producers may add fields within the
 # same schema version, but should not rename or remove the documented keys.
 JSON_OUTPUT_CONTRACTS = [
+    {
+        "kind": "single-operator-lab",
+        "commands": ["devsecops lab init/plan/apply/status/request/logs --format json"],
+        "stable_keys": ["kind", "schema_version", "status", "name", "account_id", "region", "production_acceptance", "evidence"],
+    },
     {
         "kind": "command-error",
         "commands": ["Any JSON command encountering an invalid config or boundary error"],

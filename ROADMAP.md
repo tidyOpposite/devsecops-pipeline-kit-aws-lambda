@@ -1,6 +1,8 @@
 # Roadmap
 
-Current version: **`0.16.0b1`**, prerelease **`v0.16.0-beta.1`**.
+Current source: **`0.16.0b2.dev0`** (unpublished); published prerelease
+**`0.16.0b1`**, **`v0.16.0-beta.1`**. Source includes a
+[single-operator dev lab](docs/single-operator-lab.md); real AWS acceptance remains pending.
 The previous published baseline is `v0.15.0`. See the
 [prerelease notes](docs/release-v0.16.0b1.md) and
 [known limitations](docs/known-limitations.md) for the current scope.
@@ -45,8 +47,9 @@ Gaps that make the project feel raw:
 * The product has not yet proven a full happy path in a documented real AWS
   account walkthrough.
 * Windows/WSL2 support is unverified and outside the current release target.
-* A one-operator demonstration in a single AWS account is still pending;
-  the protected production workflow requires an independent reviewer.
+* The single-operator dev lab is implemented in source; its real cloud
+  deploy/update/recovery/cleanup acceptance is pending. The protected
+  production workflow requires an independent reviewer.
 
 ## Roadmap Themes
 

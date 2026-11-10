@@ -560,17 +560,19 @@ def canonical_query_string(query: str) -> str:
     return "&".join(f"{key}={value}" for key, value in sorted(encoded))
 
 
-def aws_sigv4_headers(url: str, region: str | None = None, now: dt.datetime | None = None) -> tuple[dict[str, str], str | None]:
-    """Build SigV4 headers for an API Gateway ``GET`` health request.
+def aws_sigv4_headers(url: str, region: str | None = None, now: dt.datetime | None = None,
+                     *, method: str = "GET", payload: bytes = b"",
+                     credentials: dict[str, str] | None = None) -> tuple[dict[str, str], str | None]:
+    """Build SigV4 headers for an API Gateway request (GET health by default).
 
-    Credentials come only from the standard AWS environment variables.  This
-    avoids persisting secrets or introducing a separate credential-resolution
-    policy in the dependency-free CLI.
+    Existing callers use the standard AWS environment variables. Named-profile
+    callers can supply in-memory AWS CLI process credentials without changing
+    the process environment or persisting secrets.
     """
 
-    access_key = os.environ.get("AWS_ACCESS_KEY_ID", "")
-    secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
-    session_token = os.environ.get("AWS_SESSION_TOKEN", "")
+    access_key = credentials.get("AccessKeyId", "") if credentials is not None else os.environ.get("AWS_ACCESS_KEY_ID", "")
+    secret_key = credentials.get("SecretAccessKey", "") if credentials is not None else os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+    session_token = credentials.get("SessionToken", "") if credentials is not None else os.environ.get("AWS_SESSION_TOKEN", "")
     resolved_region = region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
     if not access_key or not secret_key or not resolved_region:
         return {}, "AWS SigV4 health checks require AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION/AWS_DEFAULT_REGION."
@@ -580,8 +582,7 @@ def aws_sigv4_headers(url: str, region: str | None = None, now: dt.datetime | No
     amz_date = timestamp.strftime("%Y%m%dT%H%M%SZ")
     date_stamp = timestamp.strftime("%Y%m%d")
     service = "execute-api"
-    method = "GET"
-    payload_hash = hashlib.sha256(b"").hexdigest()
+    payload_hash = hashlib.sha256(payload).hexdigest()
     canonical_uri = urllib.parse.quote(parsed.path or "/", safe="/-_.~")
     canonical_query = canonical_query_string(parsed.query)
     headers = {

@@ -34,6 +34,7 @@ from . import parser as _parser_builder
 from . import context as _project_context_service
 from . import snapshots as _snapshot_store
 from . import teardown as _teardown
+from . import lab as _lab
 from .context import PRODUCTION_DEPLOY_COMMAND, missing_project_files, project_context
 from .aws import (
     aws_sigv4_headers,
@@ -4259,6 +4260,27 @@ def cmd_github(args: argparse.Namespace) -> int:
     return EXIT_VALIDATION_FAILED
 
 
+def cmd_lab(args: argparse.Namespace) -> int:
+    """Operate a dev-only single-operator lab, separate from production."""
+    try:
+        payload = _lab.execute(repo_root(), args)
+    except _lab.LabToolError as error:
+        return emit_command_error(args, str(error), EXIT_MISSING_EXTERNAL_TOOL)
+    except (_lab.LabError, OSError, ValueError) as error:
+        return emit_command_error(args, str(error), EXIT_VALIDATION_FAILED)
+    if args.format == "json":
+        emit_json(payload)
+    else:
+        draw_box("Single-operator AWS lab", ["DEV only · separate local state · IAM API", "Result: " + payload["status"]])
+        # Full structured results also make captured console evidence inspectable.
+        print_text(json.dumps(payload, indent=2, ensure_ascii=False))
+    if payload.get("interrupted"):
+        return EXIT_INTERRUPTED
+    if payload.get("exit_code") == EXIT_MISSING_EXTERNAL_TOOL:
+        return EXIT_MISSING_EXTERNAL_TOOL
+    return EXIT_VALIDATION_FAILED if payload["status"] == "failed" else EXIT_OK
+
+
 def cmd_terraform(args: argparse.Namespace) -> int:
     """Dispatch Terraform planning or backend bootstrap operations."""
 
@@ -4700,6 +4722,7 @@ def menu_deploy_hub() -> None:
     print_text("[8] Preview production rollback")
     print_text("[9] Check production prerequisites")
     print_text("[10] Finish demo / cleanup guide")
+    print_text("[11] Single-operator AWS lab (dev)")
     print_text("[0] Back")
     choice = read_input("\nChoose: ").strip().lower()
     if choice in MENU_CANCEL_INPUTS:
@@ -4734,8 +4757,68 @@ def menu_deploy_hub() -> None:
         cmd_status(argparse.Namespace(pre_deploy=True, strict=True, format="human"))
     elif choice == "10":
         cmd_teardown(argparse.Namespace(teardown_command=None, format="human"))
+    elif choice == "11":
+        menu_lab_hub(repo_root())
+        return
     else:
         print(warn("Unknown option."))
+    pause_for_menu()
+
+
+def menu_lab_hub(root: Path) -> None:
+    """Review lab scope and saved plans before any provider mutation."""
+    clear_screen()
+    draw_box("Single-operator AWS lab", ["DEV only; no production approval or production state.",
+              "Commands and private proof: docs/single-operator-lab.md"])
+    for line in ("[1] Initialize local lab scope", "[2] Check live status", "[3] Create a plan",
+                 "[4] Review/apply a saved plan", "[5] Send a signed API request", "[6] Read Lambda logs", "[0] Back"):
+        print_text(line)
+    choice = read_input("\nChoose: ").strip().lower()
+    if choice in MENU_CANCEL_INPUTS:
+        return
+    if choice not in {"1", "2", "3", "4", "5", "6"}:
+        print(warn("Unknown option."))
+        pause_for_menu()
+        return
+    name = prompt_text("Lab name", "diploma")
+    if is_cancel_input(name):
+        return
+    values: dict[str, Any] = {"name": name, "format": "human"}
+    if choice == "1":
+        values.update(lab_command="init", expected_account_id=prompt_text("Expected AWS account ID", ""),
+                      region=prompt_text("AWS region", "eu-north-1"), profile=prompt_text("Signed-in AWS CLI profile", "devsecops-practical"))
+    elif choice == "2":
+        values.update(lab_command="status")
+    elif choice == "3":
+        stage = prompt_text("Stage: registry, workload, rollback, destroy", "registry")
+        image = prompt_text("Immutable ECR image URI", "") if stage in {"workload", "rollback"} else None
+        values.update(lab_command="plan", stage=stage, image_uri=image)
+    elif choice == "4":
+        values.update(lab_command="apply", plan_id=prompt_text("Saved plan ID", ""),
+                      sha256=prompt_text("Review SHA-256", ""), yes=False)
+        # Show the complete structured review before requesting confirmation.
+        if cmd_lab(argparse.Namespace(**values)) != EXIT_OK:
+            pause_for_menu()
+            return
+        lab = _lab.Lab(root, name)
+        try:
+            plan_path = lab.home / "plans" / values["plan_id"] / "plan.txt"
+            print_text(plan_path.read_text())
+        except OSError as error:
+            print(fail(str(error)))
+            pause_for_menu()
+            return
+        if not prompt_bool("Apply this exact saved plan to AWS (may create/change/delete resources)", False):
+            pause_for_menu()
+            return
+        values["yes"] = True
+    elif choice == "5":
+        method = prompt_text("Method: GET or POST", "GET")
+        values.update(lab_command="request", method=method, path=prompt_text("Path", "/version"),
+                      body=prompt_text("JSON body", '{"text":"Привіт, диплом!"}') if method == "POST" else None)
+    else:
+        values.update(lab_command="logs")
+    cmd_lab(argparse.Namespace(**values))
     pause_for_menu()
 
 

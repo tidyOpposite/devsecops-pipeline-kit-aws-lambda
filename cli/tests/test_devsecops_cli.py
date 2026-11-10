@@ -146,7 +146,7 @@ devsecops dry-run
         self.assertNotIn("Use `readiness --strict`", readme)
         self.assertNotIn("there is no explicit\n  clean-config workflow", roadmap)
         self.assertIn("schema versioning and migration behavior are implemented", roadmap)
-        self.assertIn("only eight entry points", inventory)
+        self.assertIn("nine entry points", inventory)
 
     def test_module_execution_does_not_emit_runtime_warning(self) -> None:
         env = os.environ.copy()
@@ -577,7 +577,7 @@ devsecops dry-run
 
     def test_top_level_help_is_grouped_and_legacy_aliases_are_not_primary_choices(self) -> None:
         help_text = cli.build_parser().format_help()
-        self.assertIn("{menu,setup,status,deploy,dry-run,generate,doctor,config}", help_text)
+        self.assertIn("{menu,setup,status,deploy,lab,dry-run,generate,doctor,config}", help_text)
         self.assertIn("protected production deployment", help_text)
         self.assertIn("Legacy aliases still work", help_text)
         self.assertIn("Stable exit codes", help_text)
@@ -586,7 +586,7 @@ devsecops dry-run
         visible_names = [choice.dest for choice in visible._choices_actions]
         self.assertEqual(
             visible_names,
-            ["menu", "setup", "status", "deploy", "dry-run", "generate", "doctor", "config"],
+            ["menu", "setup", "status", "deploy", "lab", "dry-run", "generate", "doctor", "config"],
         )
         self.assertNotIn("gh-doctor           ", help_text)
         self.assertNotIn("aws-doctor          ", help_text)
@@ -609,7 +609,7 @@ devsecops dry-run
         fish = cli.completion_script("fish")
 
         self.assertIn("complete -F _devsecops_completion devsecops", bash)
-        self.assertIn("menu setup status deploy dry-run image generate", bash)
+        self.assertIn("menu setup status deploy lab dry-run image generate", bash)
         self.assertIn("prod status logs rollback", bash)
         self.assertIn("show validate diff reset set schema", bash)
         self.assertIn("#compdef devsecops", zsh)

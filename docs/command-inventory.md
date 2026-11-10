@@ -32,8 +32,8 @@ devsecops status
 devsecops dry-run
 ```
 
-The primary help intentionally shows only eight entry points: `menu`, `setup`,
-`status`, `deploy`, `dry-run`, `generate`, `doctor`, and `config`. Stable
+The primary help shows nine entry points: `menu`, `setup`,
+`status`, `deploy`, `lab`, `dry-run`, `generate`, `doctor`, and `config`. Stable
 operational and support commands remain callable and are listed below without
 competing with the first-success route.
 
@@ -68,6 +68,7 @@ Accepted replacements preserve project identity/backend and create a snapshot.
 | `setup` | `start`, `config new`; `compose` remains an Advanced editor | Starting or resuming initial project setup. |
 | `status` | `dashboard`, `readiness`, `next` | One score, status areas, blockers, and the next action. |
 | `deploy prod/status/logs/rollback` | raw `gh workflow run`, generic Actions status | The complete protected production deployment lifecycle. |
+| `lab init/plan/apply/status/request/logs` | Deploy menu → Single-operator AWS lab | Separate dev lab with local state, reviewed saved plans, IAM API requests and private proof. See [guide](single-operator-lab.md). |
 | `image validate` | `preflight` | Validating the Lambda image before deployment. |
 | `generate` / “Generate deployment files” | `render`, `--render` | Creating CLI-owned Terraform and GitHub helper files. |
 | `doctor` / “Diagnose problems” | — | Technical troubleshooting after status identifies a problem. |

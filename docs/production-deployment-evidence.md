@@ -5,7 +5,9 @@ and GitHub repository. The goal is to produce a reviewable evidence bundle that
 can be attached to a release record without requiring reviewers to inspect the
 source tree.
 
-Current prerelease is `0.16.0b1` (`v0.16.0-beta.1`); the previous published
+Current source is `0.16.0b2.dev0` (unpublished). The single-operator `lab`
+records separate dev evidence and does not satisfy this production contract.
+Published prerelease is `0.16.0b1` (`v0.16.0-beta.1`); the previous published
 baseline is `v0.15.0`. Production acceptance is still pending. After the
 remaining fixes, choose a stable candidate and collect this bundle from one
 reviewed commit and its CI wheel. Do not use the old published wheel to prove current fixes.
