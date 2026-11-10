@@ -8,7 +8,7 @@ contract for released DevSecOps Pipeline Kit CLI versions.
 The canonical package path is GitHub Releases:
 
 * Repository: `tidyOpposite/devsecops-pipeline-kit-aws-lambda`
-* Release tag format: `vX.Y.Z`
+* Release tag format: `vX.Y.Z`; prereleases use tags such as `v0.16.0-beta.1`
 * Python package name: `devsecops-pipeline-cli`
 * Release assets produced by the current workflow:
   * `install.sh`
@@ -17,13 +17,29 @@ The canonical package path is GitHub Releases:
   * `SHA256SUMS`
 
 PyPI publication is deferred. Published installs use GitHub Release assets.
-Current source is `0.16.0.dev0` (unpublished beta hardening); install that source
-from its checkout as below to use the audit fixes. Final acceptance and a new
-published release are still pending. The latest published baseline is
+Current version is `0.16.0b1`, published as prerelease `v0.16.0-beta.1`.
+Final production acceptance is pending. The previous published baseline is
 [v0.15.0](https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/tag/v0.15.0),
 published 4 November 2026.
 
-## Install Current Hardening Source
+## Install The Prerelease
+
+Choose the prerelease explicitly; an unpinned installer selects the latest
+non-prerelease. Keep the Terraform/workflow checkout at the same tag:
+
+```bash
+git clone --branch v0.16.0-beta.1 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-beta &&
+cd devsecops-beta &&
+sh install.sh --version v0.16.0-beta.1 &&
+export PATH="$HOME/.local/bin:$PATH" &&
+devsecops --version
+```
+
+Expected CLI version: `devsecops 0.16.0b1`. Prerelease package filenames use
+the canonical Python version, for example
+`devsecops_pipeline_cli-0.16.0b1-py3-none-any.whl`.
+
+## Install Current Source
 
 Install CLI, Terraform and workflows from the same checkout. Use Python 3.11,
 3.12, 3.13 or 3.14 with venv/pip support (Ubuntu may need `python3-venv`).
@@ -39,7 +55,7 @@ devsecops setup --yes --strict
 ```
 
 Record `git rev-parse HEAD`, `devsecops --version` and the built wheel checksum
-for evaluation. Source installation includes unpublished fixes; running an
+for evaluation. Source installation uses that checkout; running an
 installer pinned to `v0.15.0` installs the historical wheel instead.
 
 When using a manual wheel or pipx installation, keep a checkout too; installing
@@ -97,8 +113,8 @@ Expected version is `devsecops 0.15.0`. That release reports
 `Guided setup complete`; its ordinary status can still show production gaps.
 The current source reports `Demo complete` with separate demo status.
 
-After all fixes and acceptance, publish a new version and create the final
-thesis pin from its tag, source commit and checksum manifest. Never repoint the
+After all fixes and acceptance, publish a stable version and pin its tag,
+source commit and checksum manifest. Never repoint the
 old tag or imply that the old wheel includes new source changes.
 
 Use `PYTHON=/path/to/python3.12` when auto-detection should use a specific
@@ -117,7 +133,7 @@ Run the installer again, then validate local config before generating or applyin
 anything:
 
 ```bash
-sh install.sh --version v0.15.0
+sh install.sh --version v0.16.0-beta.1
 devsecops --version
 devsecops config validate
 devsecops config diff
@@ -127,11 +143,10 @@ devsecops generate --dry-run
 Read [Upgrade guide](upgrade-guide.md) before upgrading across a release that
 changes `.devsecops-pipeline.toml` schema behavior.
 
-Choose the intended published tag explicitly; this baseline command does not
-upgrade to unpublished `0.16.0.dev0`. Use the source install above for current
-fixes. Use a release's verified installer as shown above when outside a reviewed
-checkout. An unpinned `sh install.sh` resolves latest and is not a reproducible
-thesis install.
+Choose the intended tag explicitly. `v0.16.0-beta.1` opts into the prerelease;
+the pinned baseline section above still installs historical `v0.15.0`.
+Use a release's verified installer when outside a reviewed checkout.
+An unpinned `sh install.sh` resolves latest and does not select this beta.
 
 Each installer run prepares a fresh environment under
 `~/.local/share/devsecops-pipeline-cli/environments/venv-*` (or the configured

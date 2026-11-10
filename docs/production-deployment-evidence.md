@@ -5,11 +5,10 @@ and GitHub repository. The goal is to produce a reviewable evidence bundle that
 can be attached to a release record without requiring reviewers to inspect the
 source tree.
 
-Current source is `0.16.0.dev0` (unpublished beta hardening); the published
-baseline is `v0.15.0`. This walkthrough remains unexecuted for the final
-hardening candidate. After all audit fixes, select a new publishable version,
-synchronize metadata/notes, then collect this bundle from one reviewed commit
-and its CI wheel. Do not use the old published wheel to prove current fixes.
+Current prerelease is `0.16.0b1` (`v0.16.0-beta.1`); the previous published
+baseline is `v0.15.0`. Production acceptance is still pending. After the
+remaining fixes, choose a stable candidate and collect this bundle from one
+reviewed commit and its CI wheel. Do not use the old published wheel to prove current fixes.
 
 Complete the [finish-demo/decommission acceptance](runbooks/finish-demo.md#final-acceptance-record)
 after deployment/recovery proof. Preserve its retention decisions, restore test,

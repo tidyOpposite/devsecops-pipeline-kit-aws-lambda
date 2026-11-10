@@ -1,11 +1,10 @@
 # Roadmap
 
-Current source: **`0.16.0.dev0` beta hardening, awaiting final acceptance**.
-The published baseline is `v0.15.0`. The current source contains further audit
-fixes; it is installed from a checkout until a new release is accepted and
-published. See the [product audit](docs/product-audit-v0.15.0.md) for local
-verification and open issues. Final AWS/GitHub, sandbox and WSL2 acceptance
-remains deferred until all fixes are complete.
+Current version: **`0.16.0b1`**, prerelease **`v0.16.0-beta.1`**.
+The previous published baseline is `v0.15.0`. See the
+[prerelease notes](docs/release-v0.16.0b1.md) and
+[known limitations](docs/known-limitations.md) for the current scope.
+Final AWS/GitHub, sandbox and supported-platform acceptance remains pending.
 
 ## Product Direction
 
@@ -32,8 +31,8 @@ Strengths:
 * Security-aware deployment model with immutable Lambda image input, GitHub
   OIDC, Terraform validation, IaC scanning, optional Snyk, optional HTTP
   validation, optional OWASP ZAP baseline, and production rollback.
-* Clear repository decision to avoid bundling sample application code and to
-  consume a prebuilt `LAMBDA_IMAGE_URI`.
+* Deployment consumes a prebuilt `LAMBDA_IMAGE_URI`; an optional text-statistics
+  Lambda is included for testing without a separate application repository.
 
 Gaps that make the project feel raw:
 
@@ -45,8 +44,9 @@ Gaps that make the project feel raw:
   checkout; cross-workstation rollback requires an explicit reviewed image.
 * The product has not yet proven a full happy path in a documented real AWS
   account walkthrough.
-* WSL2 install and first-success evidence is still required before a stable
-  release can be declared production-proven.
+* Windows/WSL2 support is unverified and outside the current release target.
+* A one-operator demonstration in a single AWS account is still pending;
+  the protected production workflow requires an independent reviewer.
 
 ## Roadmap Themes
 

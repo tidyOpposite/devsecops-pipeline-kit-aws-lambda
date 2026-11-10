@@ -10,10 +10,12 @@ Lambda container deployment pipeline from one terminal CLI. It turns a local
 configuration into reviewable Terraform and GitHub setup artifacts, then shows
 what still blocks a deployment.
 
-Current source version: **`0.16.0.dev0`**, unpublished beta hardening.
-Published baseline: [v0.15.0](https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/tag/v0.15.0).
-The current fixes require the source install below. Final AWS/GitHub and supported-platform
-acceptance is pending; a production-ready release has not been declared.
+Current version: **`0.16.0b1`**, prerelease tag **`v0.16.0-beta.1`**.
+See the [prerelease notes](docs/release-v0.16.0b1.md) and
+[installation guide](docs/distribution.md#install-the-prerelease).
+The previous published baseline is `v0.15.0`.
+Final AWS/GitHub and supported-platform acceptance is pending;
+a production-ready release has not been declared.
 
 ## What This Product Does
 
@@ -68,7 +70,7 @@ boundary and image requirements.
 
 Copy this block from a directory where you want to keep the project. It obtains
 the current source, installs that same checkout into an isolated environment,
-and runs the local demo. This includes the unpublished hardening fixes; the
+and runs the local demo. This includes the prerelease hardening fixes; the
 published `v0.15.0` wheel does not contain them.
 
 ```bash
@@ -224,14 +226,14 @@ for a safe plan before any explicit apply.
 
 ## Development Status
 
-The current checkout is **`0.16.0.dev0` beta hardening, awaiting acceptance**.
-The published baseline remains `v0.15.0` (4 November 2026). Local fixes and
-tests are tracked in the [product audit](docs/product-audit-v0.15.0.md);
-their presence in source does not update an existing release asset.
+The current checkout is **`0.16.0b1`**, released as **`v0.16.0-beta.1`**
+for testing before final acceptance. The previous published baseline is
+`v0.15.0` (4 November 2026). See the [changelog](CHANGELOG.md) and
+[known limitations](docs/known-limitations.md) for changes and remaining work.
 
 Complete the remaining fixes, then run the AWS/GitHub deployment and recovery
 walkthrough, sandbox acceptance and supported-platform checks against one reviewed commit
-and wheel. Publish a new version only after those results are attached. Keep
+and wheel. Publish a stable version only after those results are attached. Keep
 `v0.15.0` and its assets unchanged. The [RC checklist](docs/v1.0.0-release-candidate-checklist.md)
 and `devsecops criteria --strict` define the stable-release evidence gate.
 
@@ -880,7 +882,7 @@ devsecops health --aws-sigv4
 * [Upgrade guide](docs/upgrade-guide.md)
 * [Known limitations](docs/known-limitations.md)
 * [Changelog](CHANGELOG.md)
-* [Current unpublished hardening notes](docs/release-v0.16.0.dev0.md)
+* [v0.16.0-beta.1 prerelease notes](docs/release-v0.16.0b1.md)
 * [v0.15.0 release notes](docs/release-v0.15.0.md)
 * [v0.14.0 release notes](docs/release-v0.14.0.md)
 * [v0.13.1 release notes](docs/release-v0.13.1.md)

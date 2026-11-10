@@ -1,9 +1,12 @@
 # Release Checklist
 
-Use this checklist for every new release. The published baseline is `v0.15.0`;
-current source is `0.16.0.dev0`, unpublished beta hardening. Do not reuse the
-existing tag or publish the development version. Choose a new final version
-after all fixes, then complete acceptance against that commit and CI wheel.
+Current prerelease: `0.16.0b1` (`v0.16.0-beta.1`).
+Previous published baseline: `v0.15.0`.
+
+Use this guide for releases. Prereleases may be published for testing while
+cloud acceptance is pending; a stable release additionally requires the
+production evidence gates. Never replace an existing tag or its assets.
+Store per-run logs and acceptance records outside Git.
 
 ## 1. Prepare The Version
 

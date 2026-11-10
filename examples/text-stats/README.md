@@ -92,5 +92,6 @@ docker stop devsecops-text-stats-local
 Приклад не змінює `prod` approval policy і не додає шлях обходу reviewer.
 Одноосібний хмарний сценарій ще потребує окремої реалізації та перевірки;
 production і multi-account приймання залишаються відкритими.
-Усі фактичні результати та скріншоти збираються в
-[окремому звіті](../../docs/diploma-demonstration-report.md).
+Зберігати фактичні результати, скріншоти й власний звіт локально, наприклад
+у `dist/devsecops/diploma-evidence/` або `docs/local/`; ці матеріали не
+публікуються разом із кодом.

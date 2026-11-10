@@ -5,6 +5,13 @@ semantic versioning.
 
 ## Unreleased
 
+## v0.16.0-beta.1 - 2026-11-10
+
+Python package version: `0.16.0b1`. Prerelease for testing; production
+acceptance remains pending. Internal audit journals, personal demonstration
+reports and working notes are excluded from tracking. Release and operations
+guides remain public; candidate-specific logs and results stay local.
+
 ### Added
 
 * Include an optional stateless text-statistics Lambda for diploma acceptance,

@@ -139,6 +139,7 @@ DEVSECOPS_CLI_ROADMAP.md
 .terraform/
 *.tfstate
 *.tfstate.*
+*.tfplan
 crash.log
 *.tfvars
 *.tfvars.json
@@ -162,3 +163,11 @@ Thumbs.db
 # Other files
 Docker Security Vulnerabilities and Best Practices.pdf
 OWASP-Top-10-Serverless-Interpretation-en.pdfПояснювальна_записка.docx
+
+# Local audit, diploma evidence and unpublished working notes
+/docs/product-audit-*.md
+/docs/diploma-demonstration-report.md
+/docs/release-v0.16.0.dev0.md
+/docs/local/
+/platform-transcript.txt
+/wsl2-transcript.txt

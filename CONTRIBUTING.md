@@ -1,5 +1,11 @@
 # Contributing
 
+Keep per-run test logs, personal demonstration reports and working audit notes
+outside tracked documentation. Use `docs/local/`, `.devsecops/` or
+`dist/devsecops/` for local records; these directories are ignored by Git.
+Public `docs/` should contain reusable user/maintainer guides, release notes
+and product limitations rather than workstation-specific verification logs.
+
 This repository is now developed as a CLI-first DevSecOps product for AWS
 Lambda pipelines. Contributions are welcome when they improve the terminal
 experience, correctness, security, reproducibility, documentation, or the

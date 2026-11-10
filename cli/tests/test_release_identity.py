@@ -49,10 +49,10 @@ class ReleaseIdentityTests(unittest.TestCase):
                 release_version.validate_release_version(root, "v2.3.4")
 
     def test_development_and_malformed_tags_are_not_publishable(self):
-        for tag in (f"v{VERSION}", "v01.2.3", "v1.2", "v1.2.3-rc.01", "v1.2.3-preview.1"):
+        for tag in ("v2.3.4.dev0", "v01.2.3", "v1.2", "v1.2.3-rc.01", "v1.2.3-preview.1"):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 release_version.validate_release_version(ROOT, tag)
-        result = subprocess.run([sys.executable, "-m", "devsecops_cli.release_version", f"v{VERSION}", str(ROOT)],
+        result = subprocess.run([sys.executable, "-m", "devsecops_cli.release_version", "v2.3.4.dev0", str(ROOT)],
                                 env=dict(os.environ, PYTHONPATH=str(ROOT / "cli")), text=True, capture_output=True, check=False)
         self.assertEqual(result.returncode, 1)
         self.assertIn("development versions cannot be published", result.stderr)

@@ -1,7 +1,7 @@
 # Stability Contract
 
-Current source: `0.16.0.dev0` (unpublished beta hardening).
-Published baseline: `v0.15.0`. Final acceptance is pending.
+Current prerelease: `0.16.0b1` (`v0.16.0-beta.1`).
+Previous published baseline: `v0.15.0`. Final acceptance is pending.
 
 This contract explains which `devsecops` surfaces are stable enough to script
 against before `v1.0.0`, which surfaces are compatibility aliases or

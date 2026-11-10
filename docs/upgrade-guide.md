@@ -9,7 +9,7 @@ The broader stability and deprecation policy is documented in
 
 ## Current Schema
 
-The current `0.16.0.dev0` source and published `v0.15.0` use config schema version `1`.
+The current `0.16.0b1` source and published `v0.15.0` use config schema version `1`.
 
 There is no schema migration between `v0.15.0` and this hardening source. Existing
 `.devsecops-pipeline.toml` files with `schema_version = 1`, or legacy files
