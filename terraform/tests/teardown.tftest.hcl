@@ -78,11 +78,11 @@ run "backend_teardown_is_separate_and_preserves_nonempty_buckets" {
 
 run "reject_invalid_manual_account_guard" {
   command = plan
+  # Terraform 1.10 can prune provider-only variable validation from a targeted
+  # mock plan. Exercise the full root plan, with a valid unrelated image input.
   variables {
     expected_account_id = "not-an-account"
-  }
-  plan_options {
-    target = [module.storage]
+    lambda_image_uri    = "123456789012.dkr.ecr.us-east-1.amazonaws.com/fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   }
   expect_failures = [var.expected_account_id]
 }

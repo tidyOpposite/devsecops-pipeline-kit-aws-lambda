@@ -21,6 +21,9 @@ guides remain public; candidate-specific logs and results stay local.
 
 ### Fixed
 
+* Exercise account-ID validation with a full mocked Terraform plan so the
+  regression also runs on the CI-pinned Terraform 1.10.5.
+
 * Remove unverified Windows/WSL2 support claims from the current release target.
   Require a same-commit macOS or supported Ubuntu platform transcript instead;
   production evidence, independent approval and isolated-account checks remain
