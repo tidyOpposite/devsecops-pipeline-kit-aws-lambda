@@ -18,6 +18,10 @@ semantic versioning.
 
 ### Fixed
 
+* Sort canonical source labels when fingerprinting lab plans and release proof.
+  Identical installed CLI bytes previously produced a different fingerprint
+  when the venv and checkout sorted in a different absolute path order.
+
 * Read all CloudWatch pages before selecting the latest 50 lab log events in
   a fixed 15-minute window. A partial first page previously hid recent events
   after deployment or rollback. Exercise short/empty pages and later-page

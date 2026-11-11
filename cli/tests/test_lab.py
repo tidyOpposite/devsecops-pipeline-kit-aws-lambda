@@ -125,6 +125,22 @@ class LabTests(unittest.TestCase):
         lab.write_json(self.lab.settings_path, self.lab.settings)
         self.lab.begin_event("test")
 
+    def test_source_fingerprint_ignores_install_path_and_absolute_sort_order(self):
+        source = self.root / "cli/devsecops_cli"
+        source.mkdir(parents=True)
+        installed = self.root.parent / (self.root.name + "z-installed")
+        installed.mkdir()
+        self.addCleanup(lambda: __import__("shutil").rmtree(installed))
+        for folder in (source, installed):
+            (folder / "lab.py").write_text("# same installed bytes\n")
+            (folder / "main.py").write_text("# another module\n")
+        with patch.object(lab, "__file__", str(source / "lab.py")):
+            expected = lab.source_digest(self.root)
+        with patch.object(lab, "__file__", str(installed / "lab.py")):
+            self.assertEqual(lab.source_digest(self.root), expected)
+            (installed / "main.py").write_text("# substituted module\n")
+            self.assertNotEqual(lab.source_digest(self.root), expected)
+
     def seed(self, image=IMAGE_A):
         self.lab.live_image = image
         self.lab.live_reserved = max(0, self.lab.settings["reserved_concurrency"])

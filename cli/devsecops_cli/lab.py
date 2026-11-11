@@ -80,9 +80,11 @@ def source_digest(root: Path) -> str:
     paths += [root / "terraform" / ".terraform.lock.hcl"]
     paths += list(Path(__file__).parent.glob("*.py"))
     value = hashlib.sha256()
-    for path in sorted(paths):
-        # Absolute checkout paths do not affect the fingerprint.
-        label = str(path.relative_to(root)) if path.is_relative_to(root) else "cli/devsecops_cli/" + path.name
+    labelled = [(str(path.relative_to(root)) if path.is_relative_to(root)
+                 else "cli/devsecops_cli/" + path.name, path) for path in paths]
+    # Sort canonical labels, not absolute paths: an installed package can sort
+    # before or after the Terraform checkout on another host or in another venv.
+    for label, path in sorted(labelled):
         value.update(label.encode() + b"\0" + path.read_bytes() + b"\0")
     return value.hexdigest()
 
