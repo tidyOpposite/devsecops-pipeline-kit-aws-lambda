@@ -660,11 +660,13 @@ class Lab:
         live = self.live_function(context)
         if not live:
             raise LabError("No lab function recorded; deploy the workload before reading logs.")
+        end_ms = int(time.time() * 1000)
         value = self.aws(["logs", "filter-log-events", "--log-group-name",
                           "/aws/lambda/" + self.settings["project_name"] + "-dev-lambda",
-                          "--start-time", str(int((time.time() - 900) * 1000)), "--limit", "50", "--no-paginate"])
+                          "--start-time", str(end_ms - 900_000), "--end-time", str(end_ms),
+                          "--query", "{events:events[-50:]}"])
         return self.finish("ok", function=live, log_events=value.get("events", []),
-                           message="Up to 50 Lambda log events from the last 15 minutes; private evidence may include application data.")
+                           message="Latest 50 Lambda log events from the last 15 minutes, after reading all pages; private evidence may include application data.")
 
     def finish(self, status: str, **values: Any) -> dict[str, Any]:
         payload = {"kind": "single-operator-lab", "schema_version": SCHEMA, "status": status,

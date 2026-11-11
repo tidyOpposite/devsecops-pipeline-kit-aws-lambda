@@ -5,6 +5,13 @@ semantic versioning.
 
 ## Unreleased
 
+### Fixed
+
+* Read all CloudWatch pages before selecting the latest 50 lab log events in
+  a fixed 15-minute window. A partial first page previously hid recent events
+  after deployment or rollback. Exercise short/empty pages and later-page
+  failures through the actual AWS CLI against an unsigned local test server.
+
 ### Security
 
 * Permit the configured workload-key administrators to encrypt and decrypt

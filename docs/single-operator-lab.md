@@ -116,6 +116,12 @@ devsecops lab request diploma --method POST --path /analyze \
 devsecops lab logs diploma
 ```
 
+`logs` reads all CloudWatch pages in a fixed 15-minute window and returns the
+latest 50 events in chronological order. A short or empty page can still have a
+continuation token; it does not mean the query is complete. Busy windows may
+require several read requests. A page retrieval failure fails the command
+instead of reporting incomplete output as success.
+
 Each successful workload apply requires the actual Lambda resolved digest,
 Terraform state image and signed `/health` HTTP 2xx to agree. Configured,
 state and live concurrency policy must also match. Capacity is checked again
