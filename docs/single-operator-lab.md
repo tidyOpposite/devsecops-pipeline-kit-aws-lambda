@@ -3,7 +3,9 @@
 `devsecops lab` demonstrates the real shared Terraform modules and an IAM
 protected Lambda API with one operator in one AWS account. It is always `dev`.
 Production deployment still requires its normal GitHub/OIDC/reviewer controls;
-the distinct-account runtime acceptance workflow is unchanged.
+the distinct-account runtime acceptance workflow is unchanged. These production
+integrations are experimental and outside stable 1.0 acceptance. The local CLI
+and this single-operator lab form the stable target.
 
 This command is in unpublished source `0.16.0b2.dev0`, after beta.1. Install the
 CLI from the matching checkout in a virtual environment; beta.1 release assets

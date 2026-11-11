@@ -98,7 +98,7 @@ COMPLETION_OPTIONS = {
     "config schema": ["--help", "--format"],
     "next": ["--help", "--format"],
     "start": ["--help", "--preset", "--render", "--yes"],
-    "criteria": ["--help", "--format", "--evidence-dir", "--strict", "--verify-github", "--artifacts-dir"],
+    "criteria": ["--scope", "--help", "--format", "--evidence-dir", "--strict", "--verify-github", "--artifacts-dir"],
     "doctor": ["--help", "--deep", "--strict", "--format"],
     "doctor local": ["--help", "--deep", "--strict", "--format"],
     "doctor github": ["--help", "--repo", "--strict", "--format"],

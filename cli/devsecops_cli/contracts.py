@@ -909,6 +909,17 @@ GENERATED_ARTIFACT_CONTRACTS = [
 ]
 
 
+# Stable 1.0 targets local CLI and the single-operator lab. Production helpers
+# retain all runtime guards but are outside the accepted cloud release scope.
+for _contract in COMMAND_CONTRACTS:
+    if (_contract["scope"] in {"github", "deployment"}
+            or _contract["command"] in {"devsecops terraform bootstrap", "devsecops terraform plan"}):
+        _contract["status"] = "experimental"
+        _contract["notes"] += " Experimental production integration; not included in stable lab acceptance."
+    if _contract["command"] == "devsecops criteria":
+        _contract["stable_flags"].append("--scope")
+
+
 def command_contracts(status: str = "all") -> list[dict[str, Any]]:
     """Return command contracts, optionally filtered by lifecycle status.
 

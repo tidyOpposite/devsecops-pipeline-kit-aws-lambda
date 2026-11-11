@@ -1,5 +1,11 @@
 # Roadmap
 
+Stable 1.0 acceptance targets the local CLI and **single-operator dev lab in one
+AWS account**. GitHub/OIDC production deployment, independent reviewers and
+separate-account sandbox acceptance are **experimental integrations**, outside
+this stable scope. Their runtime security guards remain unchanged. See
+[Single-operator release evidence](docs/single-operator-release-evidence.md).
+
 Current source: **`0.16.0b2.dev0`** (unpublished); published prerelease
 **`0.16.0b1`**, **`v0.16.0-beta.1`**. Source includes a
 [single-operator dev lab](docs/single-operator-lab.md); real AWS acceptance remains pending.

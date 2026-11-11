@@ -280,6 +280,26 @@ def unpack_evidence(archive: Path, directory: Path) -> None:
 
     directory.mkdir(parents=True, exist_ok=False)
     with zipfile.ZipFile(archive) as bundle:
+        if "manifest.json" in bundle.namelist():
+            from .lab_release import MAX_FILE, MAX_TOTAL, verify_manifest
+            entries = bundle.infolist()
+            if len(entries) > 10001 or len({e.filename for e in entries}) != len(entries):
+                raise ValueError("Duplicate or excessive archive entries")
+            total = 0
+            for entry in entries:
+                name = Path(entry.filename)
+                total += entry.file_size
+                if (entry.is_dir() or name.is_absolute() or ".." in name.parts or "\\" in entry.filename
+                        or entry.file_size > MAX_FILE or total > MAX_TOTAL
+                        or (entry.external_attr >> 16) & 0o170000 == 0o120000):
+                    raise ValueError("Unsafe evidence archive entry")
+                target = directory / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(bundle.read(entry))
+            covered = verify_manifest(directory)
+            if set(bundle.namelist()) != covered | {"manifest.json"}:
+                raise ValueError("Archive has unmanifested files")
+            return
         for name in [*PRODUCTION_EVIDENCE_REQUIRED_FILES, *PLATFORM_EVIDENCE_REQUIRED_FILES]:
             matches = [entry for entry in bundle.infolist() if entry.filename == name]
             if not matches:

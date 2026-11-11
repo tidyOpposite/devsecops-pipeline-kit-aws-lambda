@@ -1,11 +1,18 @@
 # Release Checklist
 
+Stable 1.0 acceptance targets the local CLI and **single-operator dev lab in one
+AWS account**. GitHub/OIDC production deployment, independent reviewers and
+separate-account sandbox acceptance are **experimental integrations**, outside
+this stable scope. Their runtime security guards remain unchanged. See
+[Single-operator release evidence](single-operator-release-evidence.md).
+
+
 Current prerelease: `0.16.0b1` (`v0.16.0-beta.1`).
 Previous published baseline: `v0.15.0`.
 
 Use this guide for releases. Prereleases may be published for testing while
 cloud acceptance is pending; a stable release additionally requires the
-production evidence gates. Never replace an existing tag or its assets.
+scoped single-operator evidence gates. Never replace an existing tag or its assets.
 Store per-run logs and acceptance records outside Git.
 
 ## 1. Prepare The Version
@@ -160,7 +167,7 @@ git push origin "${TAG}"
 ```
 
 The `Publish GitHub Release` workflow runs on `v*.*.*` tags.
-For a final tag at `v1.0.0` or later, complete the [production evidence workflow](production-deployment-evidence.md#final-verification-gate)
+For a final tag at `v1.0.0` or later, complete the [single-operator evidence workflow](single-operator-release-evidence.md)
 and stage its separate draft before pushing the stable tag. The publisher
 cross-checks GitHub runs and logs for the release commit and publishes the
 reviewed CI candidate artifacts. A missing or invalid bundle fails publication.

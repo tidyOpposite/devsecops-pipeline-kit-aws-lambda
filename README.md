@@ -16,8 +16,9 @@ The source adds a [single-operator dev lab](docs/single-operator-lab.md).
 See the [source notes](docs/release-v0.16.0b2.dev0.md), [prerelease notes](docs/release-v0.16.0b1.md) and
 [installation guide](docs/distribution.md#install-the-prerelease).
 The previous published baseline is `v0.15.0`.
-Final AWS/GitHub and supported-platform acceptance is pending;
-a production-ready release has not been declared.
+Stable 1.0 targets the local CLI and single-operator dev lab in one AWS account.
+GitHub/OIDC production workflows remain experimental, with their safeguards intact.
+Final candidate acceptance is pending; version 1.0 has not been released.
 
 ## What This Product Does
 
@@ -228,14 +229,13 @@ for a safe plan before any explicit apply.
 
 ## Development Status
 
-The current checkout is **`0.16.0b1`**, released as **`v0.16.0-beta.1`**
+The current checkout is **`0.16.0b2.dev0`**, following **`v0.16.0-beta.1`**
 for testing before final acceptance. The previous published baseline is
 `v0.15.0` (4 November 2026). See the [changelog](CHANGELOG.md) and
 [known limitations](docs/known-limitations.md) for changes and remaining work.
 
-Complete the remaining fixes, then run the AWS/GitHub deployment and recovery
-walkthrough, sandbox acceptance and supported-platform checks against one reviewed commit
-and wheel. Publish a stable version only after those results are attached. Keep
+Complete the [single-operator release acceptance](docs/single-operator-release-evidence.md),
+including platform and cleanup checks against one reviewed commit and wheel. Publish a stable version only after those results are attached. Keep
 `v0.15.0` and its assets unchanged. The [RC checklist](docs/v1.0.0-release-candidate-checklist.md)
 and `devsecops criteria --strict` define the stable-release evidence gate.
 
@@ -916,6 +916,6 @@ The full accepted-limitations and stable-release blocker register is tracked in
   tenant checks, and business authorization are still outside this repository.
 * Optional DAST is a passive baseline scan only. Authenticated flows and
   business-logic checks need workload-specific tests.
-* Before `v1.0.0`, the release record still needs a real AWS/GitHub production
+* Experimental production proof requires a real AWS/GitHub production
   walkthrough evidence bundle plus final GitHub CLI, AWS CLI, and supported-platform
   compatibility transcripts. Windows and WSL2 are outside this release target.

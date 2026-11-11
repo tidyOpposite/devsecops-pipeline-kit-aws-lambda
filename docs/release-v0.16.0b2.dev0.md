@@ -23,3 +23,7 @@ development version as a GitHub Release tag or assume beta.1 assets include it.
 
 Real deploy/update/recovery/cleanup acceptance is pending.
 See [the reusable lab guide](single-operator-lab.md).
+
+* Scope stable 1.0 to local CLI and single-operator dev lab. Production helpers
+  are experimental. Add checksum/source/package-bound lab release proof with
+  real lifecycle and cleanup; preserve the separate production verifier.

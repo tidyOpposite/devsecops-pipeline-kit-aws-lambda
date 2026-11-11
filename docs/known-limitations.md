@@ -23,19 +23,19 @@ stay explicit in docs and release notes, but they do not block `v1.0.0`.
 
 ## Blockers Before v1.0.0 Stable
 
-These must be closed before tagging `v1.0.0`.
-
-Run `devsecops criteria --strict` before any stable tag decision. It checks
-the contents of the production evidence bundle and supported-platform transcript against
-the release commit. Stable publication also verifies GitHub runs and logs and
-compares the publication wheel with the reviewed CI candidate.
+Stable scope is local CLI plus the single-operator dev lab in one AWS account.
+Production/OIDC, independent review and a separate sandbox account are outside
+this scope and remain experimental. Do not claim production acceptance from lab proof.
 
 | Blocker | Closure evidence |
 | --- | --- |
-| Full AWS/GitHub production walkthrough execution evidence is missing. | Completed [Production deployment evidence](production-deployment-evidence.md) bundle attached to the release record. |
-| GitHub CLI and AWS CLI compatibility have not been verified in the target repository and AWS account for the release candidate. | `gh --version`, `aws --version`, `devsecops doctor github --strict --format json`, `devsecops doctor aws --environment prod --strict --format json`, and Actions status evidence. |
-| Supported-platform acceptance needs a transcript for the release candidate. | macOS or supported Ubuntu install, `devsecops --version`, local demo, completion, and unit-test transcript in `platform-transcript.txt`; exact CI runs record the remaining declared matrix. |
-| Final teardown/retention acceptance has not been executed in the approved AWS test account. | [Finish-demo acceptance](runbooks/finish-demo.md#final-acceptance-record), data restore proof, per-workspace cleanup, backend retention/retirement, KMS schedule and later billing verification. |
+| Candidate lab acceptance | Same commit/wheel: fresh A, update B, failed C with automatic B, manual A, signed HTTP, state/digest/logs. |
+| Platform acceptance | Candidate install/demo/completion/tests and upgrade/failure recovery transcripts for declared platforms. |
+| Cleanup/retention | Verified independent archives/restore, reviewed destroy, exact resource absence, KMS schedule and explicit delayed-billing follow-up. |
+| Package/source identity | Successful candidate CI, wheel SHA-256, checked source fingerprint and checksum manifest; `devsecops criteria --strict`. |
+
+The [release evidence contract](single-operator-release-evidence.md) is normative.
+`criteria --scope production` retains the separate experimental production verifier.
 
 ## Review Rule
 

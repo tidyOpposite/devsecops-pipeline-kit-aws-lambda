@@ -1,5 +1,11 @@
 # Distribution And Compatibility
 
+Stable 1.0 acceptance targets the local CLI and **single-operator dev lab in one
+AWS account**. GitHub/OIDC production deployment, independent reviewers and
+separate-account sandbox acceptance are **experimental integrations**, outside
+this stable scope. Their runtime security guards remain unchanged. See
+[Single-operator release evidence](single-operator-release-evidence.md).
+
 This document is the install, verification, shell completion, and compatibility
 contract for released DevSecOps Pipeline Kit CLI versions.
 

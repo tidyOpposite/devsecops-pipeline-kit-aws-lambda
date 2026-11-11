@@ -110,14 +110,14 @@ class ReleaseEvidenceTests(unittest.TestCase):
         document = self.documents["workflow-run.json"]
         document["run"]["display_title"] += " [" + "a" * 32 + "]"
         self.write("workflow-run.json", document)
-        payload = v1_criteria_payload(ROOT, self.directory, artifacts_dir=self.directory)
+        payload = v1_criteria_payload(ROOT, self.directory, scope="production", artifacts_dir=self.directory)
         self.assertTrue(payload["stable_ready"], payload["stable_release_gates"])
 
     def test_http_204_evidence_allows_an_empty_response_body(self):
         self.write("health-response.txt", "")
         self.write("health-status.txt", "204")
         self.write("health.json", checks("health", **{"Health endpoint URL": f"{HEALTH} (argument)", "Health response": "HTTP 204: HTTP 204"}))
-        payload = v1_criteria_payload(ROOT, self.directory)
+        payload = v1_criteria_payload(ROOT, self.directory, scope="production")
         self.assertTrue(payload["stable_ready"], payload["stable_release_gates"])
 
     def test_platform_gate_accepts_macos_and_refuses_wsl_or_missing_identity(self):
@@ -132,7 +132,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
         ):
             with self.subTest(platform=platform):
                 self.write("platform-transcript.txt", original.replace(ubuntu, platform))
-                self.assertEqual(v1_criteria_payload(ROOT, self.directory)["stable_ready"], accepted)
+                self.assertEqual(v1_criteria_payload(ROOT, self.directory, scope="production")["stable_ready"], accepted)
         self.write("platform-transcript.txt", original)
 
     def test_archive_includes_required_supported_platform_transcript(self):
@@ -160,10 +160,10 @@ class ReleaseEvidenceTests(unittest.TestCase):
         ]:
             with self.subTest(name=name):
                 self.write(name, content)
-                self.assertFalse(v1_criteria_payload(ROOT, self.directory)["stable_ready"])
+                self.assertFalse(v1_criteria_payload(ROOT, self.directory, scope="production")["stable_ready"])
                 self.write(name, self.documents[name])
         self.wheel.write_bytes(b"different wheel")
-        self.assertFalse(v1_criteria_payload(ROOT, self.directory, artifacts_dir=self.directory)["stable_ready"])
+        self.assertFalse(v1_criteria_payload(ROOT, self.directory, scope="production", artifacts_dir=self.directory)["stable_ready"])
 
     def test_authenticated_github_crosscheck_rejects_a_different_restored_digest(self):
         response = {
@@ -189,9 +189,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, json.dumps(value) if isinstance(value, dict) else value, "")
 
         with patch.object(evidence.subprocess, "run", side_effect=fake):
-            self.assertTrue(v1_criteria_payload(ROOT, self.directory, repository=REPOSITORY)["stable_ready"])
+            self.assertTrue(v1_criteria_payload(ROOT, self.directory, scope="production", repository=REPOSITORY)["stable_ready"])
             response["actions/jobs/121/logs"] = response["actions/jobs/131/logs"]
-            self.assertFalse(v1_criteria_payload(ROOT, self.directory, repository=REPOSITORY)["stable_ready"])
+            self.assertFalse(v1_criteria_payload(ROOT, self.directory, scope="production", repository=REPOSITORY)["stable_ready"])
 
     def test_production_capture_checks_context_before_writing_evidence(self):
         for mismatch in (None, "backend", "workspace", "account", "digest", "lambda_arn"):

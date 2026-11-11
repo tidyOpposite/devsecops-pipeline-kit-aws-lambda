@@ -139,6 +139,7 @@ from .config import (
     write_config,
 )
 from .workflow import decode_pipeline_config
+from .lab_release import lab_evidence_checks
 from .release_evidence import (
     PLATFORM_EVIDENCE_REQUIRED_FILES,
     production_evidence_checks,
@@ -2313,8 +2314,8 @@ def make_criterion(
 
 
 def v1_criteria_payload(root: Path, evidence_dir: Path | None = None, *, repository: str | None = None,
-                        artifacts_dir: Path | None = None) -> dict[str, Any]:
-    """Evaluate source, test, and evidence requirements for stable release."""
+                        artifacts_dir: Path | None = None, scope: str = "single-operator-dev") -> dict[str, Any]:
+    """Evaluate stable CLI/lab proof or the separate experimental production proof."""
 
     if evidence_dir is None:
         evidence_dir = root / PRODUCTION_EVIDENCE_DIR / f"v{VERSION}"
@@ -2411,30 +2412,13 @@ def v1_criteria_payload(root: Path, evidence_dir: Path | None = None, *, reposit
             "Update generated artifact docs and golden tests before releasing stable.",
         ),
         make_criterion(
-            "production-walkthrough-documented",
-            "At least one full AWS/GitHub production deployment walkthrough is documented.",
-            [
-                "docs/production-deployment-evidence.md",
-                "docs/first-successful-pipeline.md",
-                "README.md production deployment flow",
-            ],
-            [
-                file_contains_check(
-                    root,
-                    "Production evidence walkthrough",
-                    "docs/production-deployment-evidence.md",
-                    [
-                        "workflow-run.json",
-                        "terraform-output.json",
-                        "aws-outputs.json",
-                        "health.json",
-                        "cloudwatch-tail.txt",
-                        "active-lambda-image.txt",
-                    ],
-                ),
-                test_contains_check(root, "Production evidence docs test", ["test_production_evidence_docs_cover_milestone_eight_contract"]),
-            ],
-            "Update docs/production-deployment-evidence.md with the full AWS/GitHub walkthrough.",
+            "lab-walkthrough-documented",
+            "At least one full single-operator AWS lab walkthrough is documented.",
+            ["docs/single-operator-lab.md", "docs/single-operator-release-evidence.md"],
+            [file_contains_check(root, "Lab lifecycle walkthrough", "docs/single-operator-lab.md",
+                ["--stage registry", "--stage workload", "--stage rollback", "--stage destroy", "lab request", "lab logs"]),
+             file_exists_check(root, "Lab release evidence contract", "docs/single-operator-release-evidence.md")],
+            "Complete docs/single-operator-lab.md and its release evidence contract.",
         ),
         make_criterion(
             "local-rollback-safe",
@@ -2522,6 +2506,12 @@ def v1_criteria_payload(root: Path, evidence_dir: Path | None = None, *, reposit
             [str(evidence_dir), "docs/production-deployment-evidence.md"],
             production_evidence_checks(root, evidence_dir, repository=repository, artifacts_dir=artifacts_dir),
             f"Run docs/production-deployment-evidence.md and store the required files under {evidence_dir_display}.",
+        ) if scope == "production" else make_criterion(
+            "single-operator-evidence-bundle-attached",
+            "Single-operator AWS lab release proof is attached.",
+            [str(evidence_dir), "docs/single-operator-release-evidence.md"],
+            lab_evidence_checks(root, evidence_dir, repository=repository, artifacts_dir=artifacts_dir),
+            f"Complete docs/single-operator-release-evidence.md under {evidence_dir_display}.",
         ),
         make_criterion(
             "supported-platform-transcript-attached",
@@ -2539,6 +2529,8 @@ def v1_criteria_payload(root: Path, evidence_dir: Path | None = None, *, reposit
     ]
     return {
         "kind": "v1-criteria",
+        "scope": scope,
+        "production_acceptance": scope == "production" and not next_actions,
         "schema_version": CONTRACT_SCHEMA_VERSION,
         "cli_version": VERSION,
         "generated_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -2583,6 +2575,7 @@ def cmd_criteria(args: argparse.Namespace) -> int:
         root, Path(evidence_arg) if evidence_arg else None,
         repository=getattr(args, "verify_github", None),
         artifacts_dir=root / artifacts_arg if artifacts_arg else None,
+        scope=getattr(args, "scope", "single-operator-dev"),
     )
     if getattr(args, "format", "human") == "json":
         emit_json(payload)
@@ -4707,7 +4700,8 @@ def menu_deploy_hub() -> None:
     draw_box(
         "Deploy",
         [
-            "Check deployment status, start the protected workflow, or inspect the deployed service.",
+            "Stable target: Single-operator AWS lab (option 11).",
+            "GitHub/OIDC production operations are experimental; their safeguards still apply.",
             "Opening this section does not change GitHub or AWS.",
         ],
     )

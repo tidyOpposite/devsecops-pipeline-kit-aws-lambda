@@ -197,9 +197,10 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
     criteria_parser.add_argument("--format", choices=["human", "json"], default="human", help="Output mode.")
     criteria_parser.add_argument(
         "--evidence-dir",
-        help=f"Production evidence directory. Defaults to {PRODUCTION_EVIDENCE_DIR}/v{VERSION}.",
+        help=f"Scoped release evidence directory. Defaults to {PRODUCTION_EVIDENCE_DIR}/v{VERSION}.",
     )
     criteria_parser.add_argument("--strict", action="store_true", help="Exit non-zero until all criteria and stable-release gates are OK.")
+    criteria_parser.add_argument("--scope", choices=("single-operator-dev", "production"), default="single-operator-dev", help="Stable CLI/lab target or separate experimental production acceptance.")
     criteria_parser.add_argument("--verify-github", metavar="OWNER/REPO", help="Cross-check CI, deploy and recovery proof with GitHub.")
     criteria_parser.add_argument("--artifacts-dir", help="Compare the publication wheel with the reviewed wheel checksum.")
     criteria_parser.set_defaults(func=handlers.cmd_criteria)
@@ -331,7 +332,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
 
     deploy_parser = subparsers.add_parser(
         "deploy",
-        help="Start, inspect, troubleshoot, or roll back the protected production deployment.",
+        help="Experimental: operate the protected GitHub/OIDC production deployment.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_help_epilog(
             (

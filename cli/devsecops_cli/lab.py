@@ -82,7 +82,7 @@ def source_digest(root: Path) -> str:
     value = hashlib.sha256()
     for path in sorted(paths):
         # Absolute checkout paths do not affect the fingerprint.
-        label = str(path.relative_to(root)) if path.is_relative_to(root) else "cli/" + path.name
+        label = str(path.relative_to(root)) if path.is_relative_to(root) else "cli/devsecops_cli/" + path.name
         value.update(label.encode() + b"\0" + path.read_bytes() + b"\0")
     return value.hexdigest()
 
@@ -174,8 +174,11 @@ class Lab:
         self.event_dir = self.home / "evidence" / (dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8])
         self.event_dir.mkdir(parents=True, mode=0o700)
         self.sequence = 0
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, capture_output=True, text=True, check=False)
+        clean = subprocess.run(["git", "diff", "--quiet", "HEAD", "--"], cwd=self.root, capture_output=True, check=False)
         write_json(self.event_dir / "operation.json", {"kind": "single-operator-lab", "schema_version": SCHEMA,
-                   "operation": operation, "started_at": utc(), "cli_version": VERSION, "settings": self.settings,
+                   "operation": operation, "started_at": utc(), "cli_version": VERSION,
+                   "source_commit": commit.stdout.strip() if commit.returncode == 0 else None, "source_clean": clean.returncode == 0, "settings": self.settings,
                    "source_sha256": source_digest(self.root), "production_acceptance": False})
 
     def run(self, argv: list[str], env: dict[str, str], *, secret: bool = False) -> subprocess.CompletedProcess[str]:

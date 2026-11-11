@@ -1,5 +1,11 @@
 # Command Inventory
 
+Stable 1.0 acceptance targets the local CLI and **single-operator dev lab in one
+AWS account**. GitHub/OIDC production deployment, independent reviewers and
+separate-account sandbox acceptance are **experimental integrations**, outside
+this stable scope. Their runtime security guards remain unchanged. See
+[Single-operator release evidence](single-operator-release-evidence.md).
+
 This document records the current `devsecops` command surface and the product
 status of each command. It is a product contract: users should know which
 commands are the preferred workflow, which commands are compatibility aliases,
@@ -88,10 +94,10 @@ but they are hidden from primary help and shell completion.
 | `devsecops dry-run` | Stable | First success | Previews the first-success path without writing files or requiring AWS credentials. |
 | `devsecops image validate` | Stable | First success | Checks Lambda image URI shape, immutability, and region before production deploy. |
 | `devsecops health` | Stable | Operations | Requires HTTP 2xx without redirects; uses Terraform output unless `--url` is provided. `--timeout` must be positive (default 20 seconds). Signed checks require HTTPS; use `--aws-sigv4 --trusted-host HOST` for an exact custom API Gateway domain. |
-| `devsecops deploy prod` | Stable | Deployment | Runs production preflight, prevents an overlapping manual run, confirms the exact immutable image, and dispatches the protected workflow. Supports `--dry-run`, `--yes`, and `--watch`. |
-| `devsecops deploy status` | Stable | Deployment | Resolves an explicit run or reconciles the journaled request ID. Verifies the production job and operation steps before reporting success. Supports human, compact, and JSON output. |
-| `devsecops deploy logs` | Stable | Deployment | Reads full or failed-step Actions logs for the same selected deployment run. |
-| `devsecops deploy rollback` | Stable | Deployment recovery | Restores a verified previous digest from a successful deployment attempt or a reviewed explicit image through the protected workflow. |
+| `devsecops deploy prod` | Experimental | Deployment | Runs production preflight, prevents an overlapping manual run, confirms the exact immutable image, and dispatches the protected workflow. Supports `--dry-run`, `--yes`, and `--watch`. |
+| `devsecops deploy status` | Experimental | Deployment | Resolves an explicit run or reconciles the journaled request ID. Verifies the production job and operation steps before reporting success. Supports human, compact, and JSON output. |
+| `devsecops deploy logs` | Experimental | Deployment | Reads full or failed-step Actions logs for the same selected deployment run. |
+| `devsecops deploy rollback` | Experimental | Deployment recovery | Restores a verified previous digest from a successful deployment attempt or a reviewed explicit image through the protected workflow. |
 | `devsecops generate` | Stable | Generation | Writes CLI-owned Terraform and GitHub helper artifacts. Use `--dry-run` to preview file changes. |
 | `devsecops report` | Stable | Reporting | Writes a CLI-owned Markdown readiness report or JSON audit evidence with `--format json`. |
 | `devsecops evidence collect` | Stable | Advanced / release | Collects local release-candidate evidence artifacts with `--rc`. |
@@ -100,10 +106,10 @@ but they are hidden from primary help and shell completion.
 | `devsecops completion <shell>` | Stable | Distribution | Prints dependency-free shell completion for `bash`, `zsh`, or `fish`. |
 | `devsecops doctor` | Stable | Diagnostics | Primary diagnostics group for local, GitHub, AWS, branch, Actions, and all-in-one checks. |
 | `devsecops doctor local` | Stable | Diagnostics | Checks local readiness. `--deep` adds external Terraform/AWS checks and may vary by installed tools. |
-| `devsecops doctor github` | Stable | GitHub | Checks repository variables, repository/prod secret metadata, and current OIDC verification; accepts `--repo OWNER/REPO`. |
+| `devsecops doctor github` | Experimental | GitHub | Checks repository variables, repository/prod secret metadata, and current OIDC verification; accepts `--repo OWNER/REPO`. |
 | `devsecops doctor aws` | Stable | AWS | Checks AWS identity, backend, and deployed resources. |
-| `devsecops doctor branch` | Stable | GitHub | Checks branch protection and required checks. |
-| `devsecops doctor actions` | Stable | GitHub | Shows recent GitHub Actions runs, failed jobs, failed steps, next actions, and runbook links. |
+| `devsecops doctor branch` | Experimental | GitHub | Checks branch protection and required checks. |
+| `devsecops doctor actions` | Experimental | GitHub | Shows recent GitHub Actions runs, failed jobs, failed steps, next actions, and runbook links. |
 | `devsecops doctor all` | Stable | Diagnostics | Runs local, GitHub, branch, and AWS checks together. |
 | `devsecops aws` | Stable | AWS | Primary AWS group for deployed output inspection and AWS doctor workflows. |
 | `devsecops aws outputs` | Stable | AWS | Read-only inspection of deployed Lambda, API Gateway, and CloudWatch outputs. |
@@ -129,11 +135,11 @@ but they are hidden from primary help and shell completion.
 | `devsecops snapshot restore` | Stable | Recovery | Restores local CLI-owned files from a snapshot. This is not the cloud Lambda deployment rollback. |
 | `devsecops snapshots` | Alias | Recovery | Compatibility alias for snapshot listing and inspection. |
 | `devsecops rollback` | Alias | Recovery | Compatibility alias for `devsecops snapshot restore`. |
-| `devsecops github` | Stable | GitHub | Primary GitHub group for setup, status, branch, and GitHub doctor workflows. |
-| `devsecops github setup` | Stable | GitHub | Prints or writes a CLI helper, or applies settings to a pinned `--repo OWNER/REPO` with partial results and retry support. |
-| `devsecops github status` | Stable | GitHub | Shows recent GitHub Actions runs, failed jobs, failed steps, next actions, and runbook links. |
-| `devsecops github branch` | Stable | GitHub | Checks branch protection and required checks. |
-| `devsecops github doctor` | Stable | GitHub | Checks GitHub CLI, variables, and secrets. |
+| `devsecops github` | Experimental | GitHub | Primary GitHub group for setup, status, branch, and GitHub doctor workflows. |
+| `devsecops github setup` | Experimental | GitHub | Prints or writes a CLI helper, or applies settings to a pinned `--repo OWNER/REPO` with partial results and retry support. |
+| `devsecops github status` | Experimental | GitHub | Shows recent GitHub Actions runs, failed jobs, failed steps, next actions, and runbook links. |
+| `devsecops github branch` | Experimental | GitHub | Checks branch protection and required checks. |
+| `devsecops github doctor` | Experimental | GitHub | Checks GitHub CLI, variables, and secrets. |
 | `devsecops github-setup` | Alias | GitHub | Compatibility alias for `devsecops github setup`. |
 | `devsecops gh-setup` | Alias | GitHub | Alias for `devsecops github-setup`. |
 | `devsecops gh-doctor` | Alias | GitHub | Compatibility alias for `devsecops doctor github`. |
@@ -142,8 +148,8 @@ but they are hidden from primary help and shell completion.
 | `devsecops branch-doctor` | Alias | GitHub | Compatibility alias for `devsecops doctor branch`. |
 | `devsecops aws-doctor` | Alias | AWS | Compatibility alias for `devsecops doctor aws`. |
 | `devsecops terraform` | Stable | Terraform | Primary Terraform group for plan and backend bootstrap helpers. |
-| `devsecops terraform plan <env>` | Stable | Terraform | Convenience wrapper for Terraform plan against an environment workspace. Delegates to Terraform without hiding Terraform output. |
-| `devsecops terraform bootstrap` | Stable | Terraform | Plans or applies the Terraform backend bootstrap stack. Mutates AWS only with `--apply`. |
+| `devsecops terraform plan <env>` | Experimental | Terraform | Convenience wrapper for Terraform plan against an environment workspace. Delegates to Terraform without hiding Terraform output. |
+| `devsecops terraform bootstrap` | Experimental | Terraform | Plans or applies the Terraform backend bootstrap stack. Mutates AWS only with `--apply`. |
 | `devsecops terraform teardown` | Stable | Terraform | Local decommission guide, also available from Deploy/Advanced menu. No AWS requests. |
 | `devsecops terraform teardown bucket-plan` | Stable | Terraform | Read-only inventory of one exact versioned S3 bucket; writes a new private manifest with SHA-256. |
 | `devsecops terraform teardown bucket-purge` | Stable | Terraform | Permanently removes reviewed versions/uploads after exact scope, backup acknowledgment and fresh inventory; backend purposes require separate permission. Never deletes buckets. |

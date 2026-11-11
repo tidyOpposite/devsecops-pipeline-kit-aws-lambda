@@ -530,7 +530,7 @@ devsecops dry-run
             "Config schema versioning and migration behavior are implemented.",
             "Clean config generation, validation, rendering, and readiness are covered by end-to-end tests.",
             "Generated Terraform and GitHub artifacts are deterministic and documented.",
-            "At least one full AWS/GitHub production deployment walkthrough is documented.",
+            "At least one full single-operator AWS lab walkthrough is documented.",
             "Local rollback cannot overwrite files outside the CLI-owned file set.",
             "Security controls have documented behavior and regression tests.",
             "Release and upgrade flows are documented.",
@@ -636,11 +636,11 @@ devsecops dry-run
         self.assertEqual(result, cli.EXIT_OK)
         self.assertEqual(payload["kind"], "command-inventory")
         self.assertEqual(payload["schema_version"], cli.CONTRACT_SCHEMA_VERSION)
-        self.assertEqual(by_command["devsecops terraform plan"]["status"], "stable")
-        self.assertEqual(by_command["devsecops terraform bootstrap"]["status"], "stable")
+        self.assertEqual(by_command["devsecops terraform plan"]["status"], "experimental")
+        self.assertEqual(by_command["devsecops terraform bootstrap"]["status"], "experimental")
         self.assertEqual(by_command["devsecops status"]["status"], "stable")
         self.assertEqual(by_command["devsecops setup"]["status"], "stable")
-        self.assertEqual(by_command["devsecops deploy prod"]["status"], "stable")
+        self.assertEqual(by_command["devsecops deploy prod"]["status"], "experimental")
         self.assertEqual(by_command["devsecops deploy status"]["json_kind"], "deployment-status")
         self.assertIn("--image-uri", by_command["devsecops deploy rollback"]["stable_flags"])
         self.assertIn("--mode", by_command["devsecops setup"]["stable_flags"])
@@ -1282,9 +1282,9 @@ devsecops dry-run
         self.assertEqual(payload["kind"], "v1-criteria")
         self.assertFalse(payload["stable_ready"])
         self.assertTrue(all(item["status"] == "OK" for item in payload["criteria"]))
-        self.assertEqual(gate_statuses["production-evidence-bundle-attached"], "BLOCKED")
+        self.assertEqual(gate_statuses["single-operator-evidence-bundle-attached"], "BLOCKED")
         self.assertEqual(gate_statuses["supported-platform-transcript-attached"], "BLOCKED")
-        self.assertTrue(any("production-deployment-evidence" in action for action in payload["next_actions"]))
+        self.assertTrue(any("single-operator-release-evidence" in action for action in payload["next_actions"]))
 
     def test_criteria_strict_rejects_placeholder_external_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1311,25 +1311,10 @@ devsecops dry-run
         first_success_doc = (ROOT_DIR / "docs/first-successful-pipeline.md").read_text(encoding="utf-8")
         command_status = {item["command"]: item["status"] for item in cli.command_contracts()}
         required_stable_commands = [
-            "devsecops status",
-            "devsecops setup",
-            "devsecops config validate",
-            "devsecops config diff",
-            "devsecops dry-run",
-            "devsecops generate",
-            "devsecops image validate",
-            "devsecops config set",
-            "devsecops terraform bootstrap",
-            "devsecops github setup",
-            "devsecops doctor github",
-            "devsecops doctor branch",
-            "devsecops report",
-            "devsecops deploy prod",
-            "devsecops deploy status",
-            "devsecops deploy logs",
-            "devsecops deploy rollback",
-            "devsecops doctor aws",
-            "devsecops evidence collect",
+            "devsecops status", "devsecops setup", "devsecops config validate", "devsecops config diff",
+            "devsecops dry-run", "devsecops generate", "devsecops image validate", "devsecops config set",
+            "devsecops report", "devsecops evidence collect", "devsecops lab init", "devsecops lab plan",
+            "devsecops lab apply", "devsecops lab status", "devsecops lab request", "devsecops lab logs",
         ]
 
         for command in required_stable_commands:

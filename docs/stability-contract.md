@@ -1,5 +1,11 @@
 # Stability Contract
 
+Stable 1.0 acceptance targets the local CLI and **single-operator dev lab in one
+AWS account**. GitHub/OIDC production deployment, independent reviewers and
+separate-account sandbox acceptance are **experimental integrations**, outside
+this stable scope. Their runtime security guards remain unchanged. See
+[Single-operator release evidence](single-operator-release-evidence.md).
+
 Current source: `0.16.0b2.dev0` (unpublished). Published prerelease:
 `0.16.0b1` (`v0.16.0-beta.1`).
 
@@ -42,7 +48,7 @@ devsecops inventory --status stable --format markdown
 | Configuration and generation | `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops generate --dry-run`, `devsecops report --deep --format --output --print` |
 | Advanced release maintenance | `devsecops inventory --format --status`, `devsecops evidence collect --rc --output`, `devsecops criteria --format --evidence-dir --strict` |
 | GitHub setup | `devsecops github setup --write --apply --repo --deploy-role-arn --plan-role-arn --snyk-token`, `devsecops github status --limit --strict --format`, `devsecops github branch --branch --strict --format`, `devsecops github doctor --repo --strict --format` |
-| Terraform helpers | `devsecops terraform plan <environment> --no-init --create-workspace`, `devsecops terraform bootstrap --apply` |
+| Experimental Terraform helpers | `devsecops terraform plan <environment> --no-init --create-workspace`, `devsecops terraform bootstrap --apply` |
 | Decommission | `devsecops terraform teardown --format`, `devsecops terraform teardown bucket-plan --bucket --expected-account-id --region --purpose --output --format`, `devsecops terraform teardown bucket-purge --bucket --expected-account-id --region --manifest --sha256 --acknowledge-backup --allow-backend-cleanup --format` |
 | Snapshots | `devsecops snapshot list --format`, `devsecops snapshot show <selection> --format`, `devsecops snapshot restore --to --last --dry-run --yes` |
 | Completion and inventory | `devsecops completion <shell> --program`, `devsecops inventory --format --status` |

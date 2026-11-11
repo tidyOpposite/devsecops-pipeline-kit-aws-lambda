@@ -5,6 +5,14 @@ semantic versioning.
 
 ## Unreleased
 
+### Changed
+
+* Target stable 1.0 acceptance at the local CLI and single-operator dev lab in
+  one AWS account. Production GitHub/OIDC helpers remain experimental with
+  unchanged runtime safeguards; no reviewer or second account is required for
+  lab acceptance. Validate the candidate wheel/source, raw lifecycle and cleanup
+  evidence separately from production proof.
+
 ### Fixed
 
 * Read all CloudWatch pages before selecting the latest 50 lab log events in

@@ -5,6 +5,10 @@ and GitHub repository. The goal is to produce a reviewable evidence bundle that
 can be attached to a release record without requiring reviewers to inspect the
 source tree.
 
+**Experimental integration.** This production contract is outside stable 1.0
+CLI/lab acceptance. See [the stable lab contract](single-operator-release-evidence.md).
+Use `devsecops criteria --scope production --strict` to verify this separate path.
+
 Current source is `0.16.0b2.dev0` (unpublished). The single-operator `lab`
 records separate dev evidence and does not satisfy this production contract.
 Published prerelease is `0.16.0b1` (`v0.16.0-beta.1`); the previous published
