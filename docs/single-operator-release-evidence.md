@@ -35,7 +35,7 @@ published only through a separate explicit release decision.
   targeted list proves absence; KMS PendingDeletion needs its actual deadline.
   Archive data/images/logs/state independently and exercise restore before
   permanent cleanup. Preserve the actual backup/restore command transcripts.
-- `platform-transcript.txt` and platform-specific records: actual OS identity,
+- `platform-macos.txt` and `platform-debian.txt` (both mandatory), plus platform-specific records: actual OS identity,
   candidate commit/install/version, local demo, completion, passing tests,
   upgrade and installation failure recovery. Record tested architecture.
 - `notes.md`: captions, limitations, UTC timestamps, inventory, retained data,

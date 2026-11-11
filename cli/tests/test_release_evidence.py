@@ -93,7 +93,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "health.json": checks("health", **{"Health endpoint URL": f"{HEALTH} (argument)", "Health response": "HTTP 200: ok"}),
             "health-response.txt": "ok", "health-status.txt": "200", "cloudwatch-log-groups.json": {"logGroups": [{"logGroupName": LOG_GROUP}]},
             "cloudwatch-tail.txt": "request completed", "active-lambda-image.txt": IMAGE, "notes.md": "Protected prod walkthrough",
-            "platform-transcript.txt": f"Release commit: {self.commit}\nLinux host 6.8.0-generic x86_64 GNU/Linux\nID=ubuntu\nVERSION_ID=24.04\n"
+            "platform-transcript.txt": f"Release commit: {self.commit}\nLinux host 6.8.0-generic x86_64 GNU/Linux\nID=debian\nVERSION_ID=13\n"
                 f"Successfully installed devsecops-pipeline-cli-{VERSION}\ndevsecops {VERSION}\n"
                 "Demo complete\n# bash completion for devsecops\nRan 200 tests in 2s\n\nOK\n",
         }
@@ -122,18 +122,31 @@ class ReleaseEvidenceTests(unittest.TestCase):
 
     def test_platform_gate_accepts_macos_and_refuses_wsl_or_missing_identity(self):
         original = self.documents["platform-transcript.txt"]
-        ubuntu = 'Linux host 6.8.0-generic x86_64 GNU/Linux\nID=ubuntu\nVERSION_ID=24.04\n'
+        debian = 'Linux host 6.8.0-generic x86_64 GNU/Linux\nID=debian\nVERSION_ID=13\n'
         for platform, accepted in (
+            ("Linux host 6.12.0-arm64 aarch64 GNU/Linux\nID=debian\nVERSION_ID=13\n", True),
             ("Darwin host 25.5.0 arm64\nProductName:\tmacOS\nProductVersion:\t26.5.1\n", True),
             ("Darwin host 21.5.0 arm64\nProductName:\tmacOS\nProductVersion:\t12.5.1\n", False),
-            ("Linux host 6.6-microsoft-standard-WSL2 x86_64\nID=ubuntu\nVERSION_ID=24.04\n", False),
+            ("Linux host 6.6-microsoft-standard-WSL2 x86_64\nID=debian\nVERSION_ID=13\n", False),
             ("Linux host 6.8.0-generic x86_64 GNU/Linux\nID=debian\nVERSION_ID=12\n", False),
             ("Linux host 6.8.0-generic x86_64 GNU/Linux\n", False),
         ):
             with self.subTest(platform=platform):
-                self.write("platform-transcript.txt", original.replace(ubuntu, platform))
+                self.write("platform-transcript.txt", original.replace(debian, platform))
                 self.assertEqual(v1_criteria_payload(ROOT, self.directory, scope="production")["stable_ready"], accepted)
         self.write("platform-transcript.txt", original)
+
+    def test_platform_specific_records_cannot_substitute_one_os_for_the_other(self):
+        text = self.documents["platform-transcript.txt"]
+        self.write("platform-debian.txt", text)
+        self.write("platform-macos.txt", text)
+        self.assertTrue(all(c["status"] == "OK" for c in evidence.platform_evidence_checks(
+            self.directory, ROOT, filename="platform-debian.txt", required_os="debian")))
+        self.assertTrue(any(c["status"] == "BLOCKED" for c in evidence.platform_evidence_checks(
+            self.directory, ROOT, filename="platform-macos.txt", required_os="macos")))
+        (self.directory / "platform-debian.txt").unlink()
+        self.assertTrue(any(c["status"] == "BLOCKED" for c in evidence.platform_evidence_checks(
+            self.directory, ROOT, filename="platform-debian.txt", required_os="debian")))
 
     def test_archive_includes_required_supported_platform_transcript(self):
         archive = self.directory / "platform-bundle.zip"

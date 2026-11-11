@@ -247,11 +247,11 @@ def production_evidence_checks(root: Path, directory: Path, *, repository: str |
     return [*checks, evidence_check("Release evidence contents", True, "Release identity, deployment, recovery and package evidence match.")]
 
 
-def platform_evidence_checks(directory: Path, root: Path) -> list[dict[str, str]]:
-    documents, checks = read_evidence(directory, PLATFORM_EVIDENCE_REQUIRED_FILES)
+def platform_evidence_checks(directory: Path, root: Path, *, filename: str = "platform-transcript.txt", required_os: str | None = None) -> list[dict[str, str]]:
+    documents, checks = read_evidence(directory, [filename])
     if not documents:
         return checks
-    text = documents["platform-transcript.txt"]
+    text = documents[filename]
     try:
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=10, check=False)
         commit = head.stdout.strip()
@@ -259,20 +259,20 @@ def platform_evidence_checks(directory: Path, root: Path) -> list[dict[str, str]
         macos = (re.search(r"^Darwin .* (?:arm64|x86_64)(?:\s|$)", text, re.MULTILINE) is not None
                  and re.search(r"^ProductName:\s+macOS\s*$", text, re.MULTILINE) is not None
                  and macos_version is not None and int(macos_version[1]) >= 13)
-        ubuntu = (re.search(r"^Linux .* (?:aarch64|arm64|x86_64)(?:\s|$)", text, re.MULTILINE) is not None
-                  and re.search(r'^ID="?ubuntu"?$', text, re.MULTILINE) is not None
-                  and re.search(r'^VERSION_ID="?(?:22\.04|24\.04)"?$', text, re.MULTILINE) is not None
+        debian = (re.search(r"^Linux .* (?:aarch64|arm64|x86_64)(?:\s|$)", text, re.MULTILINE) is not None
+                  and re.search(r'^ID="?debian"?$', text, re.MULTILINE) is not None
+                  and re.search(r'^VERSION_ID="?13"?$', text, re.MULTILINE) is not None
                   and re.search(r"^Linux .*?(?:microsoft|wsl)", text, re.MULTILINE | re.IGNORECASE) is None)
         valid = (head.returncode == 0 and is_commit_sha(commit)
                  and f"Release commit: {commit}" in text.splitlines() and f"devsecops {VERSION}" in text.splitlines()
-                 and (macos or ubuntu)
+                 and ((macos and required_os in {None, "macos"}) or (debian and required_os in {None, "debian"}))
                  and f"Successfully installed devsecops-pipeline-cli-{VERSION}" in text
                  and any(marker in text for marker in ("Demo complete", "Guided setup complete")) and "# bash completion for devsecops" in text
                  and re.search(r"^Ran [1-9]\d* tests? in .*\n(?:\s*\n)?OK(?:\s|$)", text, flags=re.MULTILINE) is not None)
     except (OSError, subprocess.TimeoutExpired):
         valid = False
     return [*checks, evidence_check("Supported platform transcript contents", valid,
-        "Transcript must show the release commit, macOS or supported Ubuntu identity, installed version, demo, completion and passing tests. Windows/WSL2 are outside this release target.")]
+        "Transcript must show the release commit, macOS or Debian 13 identity, installed version, demo, completion and passing tests. Windows/WSL2 are outside this release target.")]
 
 
 def unpack_evidence(archive: Path, directory: Path) -> None:

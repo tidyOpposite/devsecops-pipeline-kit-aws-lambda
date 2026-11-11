@@ -35,6 +35,8 @@ class LabReleaseTests(unittest.TestCase):
         self.write('release-install.txt',f'devsecops {VERSION}')
         self.write('release-checksums.txt',f'{checksum}  {wheel}\n{wheel}: OK')
         self.write('notes.md','Fixture. Not real AWS proof.')
+        self.write('platform-macos.txt','Fixture platform; checked separately by criteria.')
+        self.write('platform-debian.txt','Fixture platform; checked separately by criteria.')
         operations=[]
         for number,stage in enumerate(['a','b','c','rollback','destroy'],1):
             event='events/'+stage; plan='plans/'+stage

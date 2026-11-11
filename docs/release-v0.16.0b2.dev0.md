@@ -27,3 +27,8 @@ See [the reusable lab guide](single-operator-lab.md).
 * Scope stable 1.0 to local CLI and single-operator dev lab. Production helpers
   are experimental. Add checksum/source/package-bound lab release proof with
   real lifecycle and cleanup; preserve the separate production verifier.
+
+* Replace Ubuntu Linux acceptance with Debian 13 ARM64. Require separate macOS
+  and Debian transcripts; add a pinned Debian CI container check. Track the
+  signed AWS provider Linux ARM64 content checksum so read-only lab init can
+  validate an already installed provider on Debian.

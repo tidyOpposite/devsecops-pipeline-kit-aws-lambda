@@ -17,7 +17,8 @@ from . import VERSION
 from .lab import source_digest
 
 REQUIRED_FILES = ["release-proof.json", "release-install.txt", "release-checksums.txt",
-                  "lab-scenario.json", "cleanup.json", "manifest.json", "notes.md"]
+                  "lab-scenario.json", "cleanup.json", "manifest.json", "notes.md",
+                  "platform-macos.txt", "platform-debian.txt"]
 MAX_FILE = 64 * 1024 * 1024
 MAX_TOTAL = 512 * 1024 * 1024
 SCOPE = "single-operator-dev"

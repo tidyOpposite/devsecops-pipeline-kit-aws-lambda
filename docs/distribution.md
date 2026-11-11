@@ -51,7 +51,7 @@ the canonical Python version, for example
 ## Install Current Source
 
 Install CLI, Terraform and workflows from the same checkout. Use Python 3.11,
-3.12, 3.13 or 3.14 with venv/pip support (Ubuntu may need `python3-venv`).
+3.12, 3.13 or 3.14 with venv/pip support (Debian needs `python3-venv`).
 
 ```bash
 git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
@@ -255,11 +255,11 @@ devsecops completion bash --program devsecops-dev
 
 | Component | Supported versions | Release gate |
 | --- | --- | --- |
-| Ubuntu Linux | Ubuntu 22.04 LTS and 24.04 LTS on x86_64 or arm64 | GitHub Actions runs package, unit, golden, install, Terraform fmt, init, and validate checks on Ubuntu. |
+| Debian Linux | Debian 13 (trixie), ARM64/aarch64 | Native Debian 13 VM acceptance plus pinned Debian CI container for package/unit/install checks. Ubuntu remains a CI host, not a declared acceptance target. |
 | macOS | macOS 13 or newer on Intel or Apple Silicon | Supported for local CLI usage with Python, Terraform, AWS CLI, GitHub CLI, and shell completion installed by the operator. |
-| Windows and WSL2 | Not supported or verified for the current source/release target. | No Windows/WSL2 acceptance claim is made. Use a supported Ubuntu or macOS host. |
+| Windows and WSL2 | Not supported or verified for the current source/release target. | No Windows/WSL2 acceptance claim is made. Use a supported Debian or macOS host. |
 | Python | 3.11, 3.12, 3.13, and 3.14 | CLI tests, packaging, and install smoke run in CI for all supported Python versions. Package metadata uses `requires-python = ">=3.11,<3.15"` so unsupported Python releases are not advertised as supported. |
-| Terraform CLI | 1.5.0 or newer | Terraform `required_version` is `>= 1.5.0`; CI validates with the pinned workflow version. |
+| Terraform CLI | 1.10.5 or newer for stable lab | The experimental primary stack retains its older minimum; lab requires >= 1.10.5. |
 | GitHub CLI | 2.45.0 or newer | Required for `gh variable`, `gh secret`, `gh api`, and `gh run` workflows. Missing-tool behavior is tested; run `devsecops doctor github` in real repositories. |
 | AWS CLI | 2.15.0 or newer | Required for AWS diagnostics, backend checks, ECR inspection, Lambda outputs, and health-adjacent workflows. AWS CLI v1 is not supported. |
 

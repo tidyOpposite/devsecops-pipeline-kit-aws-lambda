@@ -332,7 +332,7 @@ def build_parser(handlers: Any) -> argparse.ArgumentParser:
 
     deploy_parser = subparsers.add_parser(
         "deploy",
-        help="Experimental: operate the protected GitHub/OIDC production deployment.",
+        help="Experimental: protected production deployment via GitHub/OIDC.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_help_epilog(
             (

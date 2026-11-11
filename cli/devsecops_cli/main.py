@@ -2517,8 +2517,10 @@ def v1_criteria_payload(root: Path, evidence_dir: Path | None = None, *, reposit
             "supported-platform-transcript-attached",
             "Supported platform compatibility transcript is attached.",
             [str(evidence_dir / PLATFORM_EVIDENCE_REQUIRED_FILES[0]), "docs/distribution.md"],
-            platform_evidence_checks(evidence_dir, root),
-            f"Capture macOS or supported Ubuntu install, dry-run, completion, and test transcript in {evidence_dir_display}/{PLATFORM_EVIDENCE_REQUIRED_FILES[0]}. Windows/WSL2 are not release targets.",
+            (platform_evidence_checks(evidence_dir, root) if scope == "production" else
+             [*platform_evidence_checks(evidence_dir, root, filename="platform-macos.txt", required_os="macos"),
+              *platform_evidence_checks(evidence_dir, root, filename="platform-debian.txt", required_os="debian")]),
+            f"Capture candidate macOS and Debian 13 install/demo/completion/tests in {evidence_dir_display}/platform-macos.txt and platform-debian.txt. Windows/WSL2 are not release targets.",
         ),
     ]
 

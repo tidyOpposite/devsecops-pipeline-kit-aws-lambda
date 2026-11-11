@@ -43,7 +43,7 @@ security controls rather than an opaque deployment service.
 
 For the no-credentials quick start below, you need:
 
-- Ubuntu Linux or macOS with Git and Python 3.11, 3.12, 3.13, or 3.14.
+- Debian 13 or macOS with Git and Python 3.11, 3.12, 3.13, or 3.14.
 - venv/pip support and Internet access to clone and install pinned build tools.
 
 The commands below create the checkout and enter it before installing the CLI.

@@ -20,7 +20,7 @@ FAKE = {"Version": 1, "AccessKeyId": "AKIAFAKELOCALTESTONLY", "SecretAccessKey":
         "SessionToken": "fake-local-token"}
 
 
-@unittest.skipIf(sys.platform == "win32", "Current support target is macOS and Ubuntu.")
+@unittest.skipIf(sys.platform == "win32", "Current support target is macOS and Debian.")
 class LabCredentialTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="kit credential test ")

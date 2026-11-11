@@ -7,6 +7,9 @@ semantic versioning.
 
 ### Changed
 
+* Target Debian 13 ARM64 instead of Ubuntu for Linux acceptance. Require both
+  macOS and Debian candidate transcripts; keep Ubuntu as CI infrastructure.
+
 * Target stable 1.0 acceptance at the local CLI and single-operator dev lab in
   one AWS account. Production GitHub/OIDC helpers remain experimental with
   unchanged runtime safeguards; no reviewer or second account is required for
