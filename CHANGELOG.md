@@ -7,6 +7,10 @@ semantic versioning.
 
 ### Security
 
+* Permit the configured workload-key administrators to encrypt and decrypt
+  Lambda configuration and generate data keys through regional Lambda only. Key
+  administration alone previously caused first deployment to fail with KMS
+  AccessDenied. Cover lab and named deployment-role policies with Terraform tests.
 * Refresh the Text Stats Lambda base digest and patch its system packages
   from a pinned Amazon Linux 2023 repository snapshot. Document final-image
   ECR scanning before workload deployment, including incomplete scan results.

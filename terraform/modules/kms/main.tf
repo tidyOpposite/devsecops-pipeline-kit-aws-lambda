@@ -50,6 +50,25 @@ data "aws_iam_policy_document" "kms_key_policy" {
     resources = ["*"]
   }
 
+  # Lambda encrypts environment configuration and optimized container images
+  # on behalf of the deployer; key administration/CreateGrant is insufficient.
+  statement {
+    sid    = "AllowLambdaConfigurationUsage"
+    effect = "Allow"
+    principals {
+      type        = "AWS"
+      identifiers = local.key_admin_principals
+    }
+    actions   = ["kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["lambda.${var.aws_region}.amazonaws.com"]
+    }
+  }
+
   statement {
     sid    = "AllowS3ServiceUsage"
     effect = "Allow"

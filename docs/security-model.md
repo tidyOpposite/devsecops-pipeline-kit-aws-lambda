@@ -74,6 +74,19 @@ flowchart LR
 | Terraform workspaces | Environment state isolation. | Account-level isolation; use separate AWS accounts for stronger production boundaries. |
 | DynamoDB locking | Parallel state mutation. | Bad plans, overprivileged IAM, or manual console drift. |
 
+## Workload KMS permissions
+
+The workload KMS key separates key administration from cryptographic use.
+The configured Terraform administrator role and account principal may encrypt
+and decrypt Lambda configuration and generate data keys only through Lambda in
+the configured region (`kms:ViaService`). Lambda also needs `kms:CreateGrant`,
+already covered by the key administration policy. Terraform's deployment role
+still needs permission to manage the configured AWS resources; the Lambda
+execution role's KMS access does not replace the deployer's permissions.
+See [Lambda environment encryption](https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars-encryption.html),
+[Lambda container image encryption](https://docs.aws.amazon.com/lambda/latest/api/API_CreateFunction.html#lambda-CreateFunction-request-KMSKeyArn),
+and [KMS ViaService](https://docs.aws.amazon.com/kms/latest/developerguide/conditions-kms.html#conditions-kms-via-service).
+
 ## Residual Risks
 
 * API Gateway defaults to IAM authorization, but application-level identity,
