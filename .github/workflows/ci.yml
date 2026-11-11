@@ -172,6 +172,10 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+      - name: Trust this checked-out workspace inside the container
+        # Checkout's temporary HOME is not shared by later container steps.
+        # Trust only this runner workspace, never all repositories.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Record Debian identity
         run: uname -a && cat /etc/os-release && cat /etc/debian_version
       - name: Exercise package, CLI and installer recovery on Debian
