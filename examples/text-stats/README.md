@@ -38,9 +38,12 @@ CI запускає тести прикладу на кожній підтрим
 ## Три незмінні образи
 
 Dockerfile використовує офіційний Python 3.13 Lambda base image, зафіксований
-digest саме для `linux/amd64` (перевірено 6 листопада 2026).
-Перед фінальним прийманням перевірити оновлення й результати сканування
-базового образу. `--provenance=false` запобігає створенню index замість
+digest саме для `linux/amd64` (оновлено 11 листопада 2026). Системні пакети
+оновлюються з фіксованого snapshot Amazon Linux `2023.12.20261109`:
+навіть свіжий upstream image може ще не містити виправлень безпеки.
+Обидва pins потрібно переглядати разом; не замінювати snapshot на `latest`.
+Див. [versioned repositories AWS](https://docs.aws.amazon.com/linux/al2023/ug/deterministic-upgrades-usage.html).
+`--provenance=false` запобігає створенню index замість
 сумісного з Lambda маніфесту. Див. [інструкцію AWS](https://docs.aws.amazon.com/lambda/latest/dg/python-image.html).
 
 ```bash
@@ -87,6 +90,24 @@ docker stop devsecops-text-stats-local
 і пройти [контракт образу](../../docs/bring-your-own-image.md). Використовувати
 унікальні теги з Git SHA та release, а для деплою — URI за digest.
 Ці локальні теги не слід перезаписувати в ECR.
+
+Сканувати **кінцевий образ**, а не лише базовий. Для ECR із scan-on-push
+дочекатися завершення перевірки й переглянути всі результати за digest:
+
+```bash
+aws ecr wait image-scan-complete \
+  --repository-name "$ECR_REPOSITORY" --image-id imageDigest="$IMAGE_DIGEST"
+aws ecr describe-image-scan-findings \
+  --repository-name "$ECR_REPOSITORY" --image-id imageDigest="$IMAGE_DIGEST"
+```
+
+Використовувати профіль і регіон цільового lab; `IMAGE_DIGEST` має формат
+`sha256:…`. Незавершене чи недоступне сканування не є чистим результатом.
+За наявності HIGH/CRITICAL оновити pins/пакети, перебудувати й повторити
+перевірку перед workload apply. Решту знахідок також переглянути й записати
+рішення. Нуль знахідок описує стан бази сканера на час перевірки, тому перед
+новим прийманням потрібен свіжий результат. Ці команди — окрема перевірка
+оператора; `devsecops lab plan/apply` автоматично її не виконує.
 
 Приклад не змінює `prod` approval policy і не додає шлях обходу reviewer.
 Для одного оператора у source-версії є окрема команда

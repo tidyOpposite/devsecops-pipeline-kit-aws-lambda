@@ -5,6 +5,12 @@ semantic versioning.
 
 ## Unreleased
 
+### Security
+
+* Refresh the Text Stats Lambda base digest and patch its system packages
+  from a pinned Amazon Linux 2023 repository snapshot. Document final-image
+  ECR scanning before workload deployment, including incomplete scan results.
+
 ## v0.16.0-beta.1 - 2026-11-10
 
 Python package version: `0.16.0b1`. Prerelease for testing; production

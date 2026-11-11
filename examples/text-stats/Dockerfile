@@ -1,6 +1,11 @@
-# Refresh the base digest deliberately before final cloud acceptance.
-ARG LAMBDA_BASE_IMAGE=public.ecr.aws/lambda/python:3.13@sha256:d018a22af8e9927f446deb98b69ce00500b75e040cd4434d817f0a56a5b3ab01
+# Review both pins and rescan the final image before cloud deployment.
+ARG LAMBDA_BASE_IMAGE=public.ecr.aws/lambda/python:3.13@sha256:3bf1fa4c9bdc5e41d704ae2480b6a26a7b0e2fa6bfb1933f621c658999a2e7da
 FROM ${LAMBDA_BASE_IMAGE}
+# The upstream image can lag security fixes. Use a versioned AL2023 snapshot,
+# not a moving "latest" repository, and fail the build if patching fails.
+RUN dnf upgrade -y --refresh --releasever=2023.12.20261109 \
+      --setopt=install_weak_deps=0 \
+    && dnf clean all
 ARG APP_RELEASE=demo-a
 ARG APP_HEALTH=healthy
 COPY app.py ${LAMBDA_TASK_ROOT}/app.py
