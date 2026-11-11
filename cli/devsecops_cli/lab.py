@@ -286,8 +286,12 @@ class Lab:
         bridge.write_text(code)
         os.chmod(bridge, 0o600)
         config = self.home / "aws-runtime-config"
+        # AWS shared-config readers can remove matching outer quotes from a
+        # value. Start with an unquoted, fixed launcher so a Python path with
+        # spaces is not mistaken for a quote around the entire command. Keep
+        # the exact interpreter and helper arguments shell-quoted and literal.
         config.write_text("[profile kit-lab-runtime]\nregion = " + self.settings["region"]
-                          + "\ncredential_process = " + shlex.join([sys.executable, "-I", str(bridge)]) + "\n")
+                          + "\ncredential_process = " + shlex.join(["/usr/bin/env", sys.executable, "-I", str(bridge)]) + "\n")
         os.chmod(config, 0o600)
         empty = self.home / "aws-empty-credentials"
         empty.touch(mode=0o600)

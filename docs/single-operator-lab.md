@@ -13,6 +13,11 @@ access key is required; CLI login/SSO credentials are resolved in memory via
 AWS CLI `export-credentials`, including for the pinned Terraform provider.
 This bridge follows the [AWS login guidance](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html)
 and [process credential contract](https://docs.aws.amazon.com/sdkref/latest/guide/feature-process-credentials.html).
+Interpreter and checkout paths may contain spaces. The private runtime profile
+uses `/usr/bin/env` as a fixed launcher for the exact CLI interpreter, with
+literal quoted arguments. CI exercises the actual locked provider with fake
+credentials and a local STS endpoint; a shell-only test cannot catch shared
+config parsing errors. No real credential output is written to disk.
 The lab executes Terraform directly; GitHub Actions and its production scanner
 jobs are not part of this path. Run image/security checks separately before
 using the demonstration to make any security claims.

@@ -124,6 +124,7 @@ jobs:
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
 
       - name: Terraform fmt check
         run: terraform -chdir="${TF_WORKING_DIR}" fmt -check -recursive
@@ -150,6 +151,14 @@ jobs:
           terraform -chdir=terraform/lab init -backend=false -input=false -lockfile=readonly -no-color
           terraform -chdir=terraform/lab validate -no-color
           terraform -chdir=terraform/lab test -no-color
+
+      - name: Verify credential process with spaced interpreter paths
+        env:
+          DEVSECOPS_TEST_TERRAFORM: terraform
+          DEVSECOPS_TEST_AWS_PROVIDER_DIR: ${{ github.workspace }}/terraform/.terraform/providers
+        # The real locked provider signs requests only to a local fake STS
+        # server. No real AWS identity, credentials or cloud resources are used.
+        run: PYTHONPATH=cli python3 -m unittest discover -s cli/tests -p test_lab_credentials.py
 
   scanner-boundary:
     name: Locked Scanner Isolation

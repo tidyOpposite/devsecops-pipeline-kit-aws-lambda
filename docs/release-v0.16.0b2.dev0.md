@@ -17,6 +17,9 @@ development version as a GitHub Release tag or assume beta.1 assets include it.
   reservations; recheck in the protected runner before planning and apply.
 * Add explicit `lab concurrency --mode unreserved` for low-quota dev accounts,
   with live/state readback. Production retains its positive reservation policy.
+* Fix lab provider credential-process startup when the installed CLI's Python
+  path contains spaces. Verify the locked provider against local fake STS in
+  CI, including literal shell characters in workspace paths.
 
 Real deploy/update/recovery/cleanup acceptance is pending.
 See [the reusable lab guide](single-operator-lab.md).
