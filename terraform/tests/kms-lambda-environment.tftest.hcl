@@ -4,7 +4,7 @@ mock_provider "aws" {
   }
 }
 
-run "lab_operator_can_configure_encrypted_lambda_environment" {
+run "operator_can_configure_encrypted_lambda_environment" {
   command = plan
   module {
     source = "./modules/kms"
@@ -28,7 +28,7 @@ run "lab_operator_can_configure_encrypted_lambda_environment" {
       toset(statement.resources) == toset(["*"]) &&
       anytrue([for condition in statement.condition : condition.test == "StringEquals" && condition.variable == "kms:ViaService" && toset(condition.values) == toset(["lambda.eu-north-1.amazonaws.com"])])
     ])
-    error_message = "The lab operator needs Encrypt/Decrypt/GenerateDataKey on this key through regional Lambda; key administration alone cannot create a function."
+    error_message = "The operator needs Encrypt/Decrypt/GenerateDataKey on this key through regional Lambda; key administration alone cannot create a function."
   }
 }
 

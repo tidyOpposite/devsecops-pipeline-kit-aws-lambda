@@ -1,123 +1,106 @@
-# DevSecOps CLI Kit for AWS Lambda
+# DevSecOps CLI Kit для AWS Lambda
 
-A terminal CLI for configuring, deploying and operating a Lambda container in
-an explicitly selected AWS account. Review saved Terraform plans before apply,
-check signed HTTP responses, and recover a previous image after failed health
-validation.
+CLI для розгортання й експлуатації контейнерного застосунку AWS Lambda в явно
+вибраному обліковому записі AWS. Один процес роботи: налаштування → збережений
+план → перегляд → застосування → перевірка → відновлення або видалення.
 
-Current release: **`v1.0.0`** (Python package **`1.0.0`**).
-Stable scope is the local CLI and single-operator AWS dev lab in one account.
-GitHub/OIDC production integrations remain experimental. The previous
-prerelease is `v0.16.0-beta.1`; the previous non-prerelease baseline is `v0.15.0`.
-See the [1.0 release notes](docs/release-v1.0.0.md),
-[installation guide](docs/distribution.md) and [changelog](CHANGELOG.md).
+Поточний випуск: **`1.0.1`** (GitHub prerelease). Попри номер patch-версії,
+він змінює CLI несумісно з `1.0.0`; перед оновленням прочитайте
+[посібник переходу](docs/upgrade-guide.md). AWS acceptance нового коду ще потрібне.
 
-## Choose Your Workflow
+## Встановлення
 
-| Workflow | Purpose | Requirements |
-| --- | --- | --- |
-| Local demo | Learn the menu, configuration and plan preview without cloud requests. | Git, Python 3.11–3.14 and venv/pip on Debian 13 or macOS. |
-| Single-operator AWS lab | Deploy, update, verify, roll back and remove a dev workload in one account. Included in the stable release. | The checkout and matching CLI, Terraform, AWS CLI with a named profile, and Lambda-compatible images in ECR. |
-| Experimental production integration | Operate through protected GitHub Actions/OIDC workflows. | Additional repository protections, separate plan/deploy roles and a remote Terraform backend. |
+Потрібні Git, Python 3.11–3.14, Terraform від 1.10.5 та AWS CLI v2.
+Підтримувані цільові системи — macOS і Linux; Windows не перевірено.
 
-The lab requires neither an independent reviewer nor a second AWS account.
-Production integration retains its separate safeguards and acceptance process.
-
-## Quick Start
-
-Install the current checkout and run its local demo:
-
-```bash
-git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
-cd devsecops-pipeline-kit &&
-python3 -m venv .venv &&
-.venv/bin/python -m pip install --no-deps . &&
-export PATH="$PWD/.venv/bin:$PATH" &&
-devsecops --version &&
-devsecops setup --yes --strict &&
-devsecops status &&
-devsecops dry-run
+```sh
+git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git
+cd devsecops-pipeline-kit-aws-lambda
+python3 -m venv .venv
+.venv/bin/python -m pip install --no-deps .
+.venv/bin/devsecops --version
+.venv/bin/devsecops --help
 ```
 
-Expected result: `Demo complete`, a local `.devsecops-pipeline.toml`, and a
-sample-image preview. A new setup defaults to demo; an existing setup resumes
-its saved mode. No AWS or GitHub credentials are needed for this path.
+Альтернатива — `sh install.sh --venv /absolute/path/to/new-venv`.
+Інсталятор встановлює поточний checkout і відмовляється перезаписувати наявний каталог.
+Збережіть checkout: wheel містить Python CLI, а Terraform залишається в репозиторії.
+У командах нижче `devsecops` має бути доступний через PATH вашого virtualenv.
 
-Keep the checkout: the wheel contains the CLI, while Terraform and workflow
-sources live in the repository. Record `git rev-parse HEAD` and
-`devsecops --version` when verifying a source build. Commands from checkout
-subdirectories use the detected project root.
+## Перше розгортання
 
-For release assets, verified installation and supported tool versions, see
-[Distribution and compatibility](docs/distribution.md).
+Увійдіть в AWS через іменований профіль і незалежно перевірте account ID.
+Усі значення облікового запису й URI нижче замініть своїми.
 
-## Daily Commands
-
-```bash
-devsecops menu                       # Interactive navigation
-devsecops                           # Compact status and next action
-devsecops config validate            # Check local settings
-devsecops config diff                # Review configuration drift
-devsecops generate --dry-run         # Preview generated files
-devsecops snapshot list              # Inspect local recovery points
-devsecops inventory --format json    # Command and stability contract
+```sh
+aws sts get-caller-identity --profile project
+devsecops init service --expected-account-id 123456789012 --region eu-north-1 --profile project
+devsecops plan service --stage registry
 ```
 
-Run `devsecops COMMAND --help` for flags and examples. Human-readable output
-includes a recommended next command; machine-readable output stays parseable.
-Configuration changes belong in the local config. Regenerate CLI-owned files
-instead of editing them directly. Local snapshot restore affects local files;
-cloud rollback is a separate operation.
+`init` зберігає локальні налаштування та перевіряє identity; ресурсів він не створює.
+Прочитайте `plan.txt`, указаний у результаті планування. Потім застосуйте саме
+цей план, підставивши його `plan_id` та SHA-256 **review.json**:
 
-## Deploy One AWS Lab
-
-Start with the [single-operator lab guide](docs/single-operator-lab.md). It covers
-AWS authentication, account/region checks, registry creation, image publication,
-concurrency, signed requests and cleanup. The optional
-[Text Stats Lambda](examples/text-stats/README.md) supplies small A/B/C images
-for a complete update and recovery demonstration.
-
-```bash
-devsecops lab init diploma --expected-account-id 123456789012 --region eu-north-1 --profile diploma
-devsecops lab plan diploma --stage registry
-# Read the saved plan; use its actual plan ID and review SHA-256:
-devsecops lab apply diploma --plan-id PLAN_ID --sha256 REVIEW_SHA256 --yes
+```sh
+devsecops apply service --plan-id PLAN_ID --sha256 REVIEW_SHA256 --yes
 ```
 
-Apply accepts the reviewed saved plan, bound to account, region, source,
-settings, state and immutable image. Use `lab status`, `lab request` and
-`lab logs` to inspect actual results. Failed updates attempt recovery to the
-previous verified image; a recovered deployment still returns a failure exit.
+Це створює KMS та ECR. Зберіть і опублікуйте власний Lambda-сумісний образ
+у повернутий ECR-репозиторій своїм процесом збирання. CLI перевіряє готовий
+образ, але не збирає його. Потрібні `linux/amd64`, підтримуваний Lambda runtime
+і маршрут `GET /health`, що повертає HTTP 2xx.
 
-Lab state, settings and evidence live under `.devsecops/labs/`. Back them up
-before teardown. Follow [Finish demo / decommission](docs/runbooks/finish-demo.md)
-to review retained data, empty owned versioned buckets and ECR, apply a destroy
-plan, then verify resource absence, KMS schedules and delayed billing.
+```sh
+devsecops plan service --stage workload --image-uri '123456789012.dkr.ecr.eu-north-1.amazonaws.com/YOUR_REPOSITORY@sha256:YOUR_DIGEST'
+# Прочитайте новий plan.txt та використайте його власні ID і SHA-256:
+devsecops apply service --plan-id WORKLOAD_PLAN_ID --sha256 WORKLOAD_REVIEW_SHA256 --yes
+devsecops status service
+devsecops request service --path /health
+devsecops logs service
+```
 
-## Current Limitations
+## Щоденна робота
 
-- The CLI consumes published images. Application builds, dependency scans and
-  image publication belong to the workload's build process.
-- The lab uses local state and one operator. It does not run the production
-  workflow or its security scanners. Low-quota shared-pool mode has no dedicated
-  per-function capacity guarantee.
-- API Gateway defaults to IAM authorization. Application users, tenant checks
-  and business permissions remain workload responsibilities.
-- Production/OIDC workflows are experimental. Optional ZAP testing is a passive
-  baseline scan; Snyk requires a separate account/token.
-- Windows/WSL2 compatibility is unverified. PyPI publishing is deferred.
+```sh
+devsecops config service --format json
+devsecops concurrency service
+devsecops request service --method POST --path /your-route --body '{"key":"value"}'
+devsecops plan service --stage workload --image-uri 'YOUR_ECR_URI@sha256:NEW_DIGEST'
+devsecops plan service --stage rollback --image-uri 'YOUR_ECR_URI@sha256:KNOWN_GOOD_DIGEST'
+```
 
-See [Known limitations](docs/known-limitations.md) for the full scope and
-[release evidence](docs/single-operator-release-evidence.md) for acceptance
-requirements tied to a specific commit and wheel.
+Кожне оновлення, ручне повернення образу та видалення проходять через новий
+збережений план і його явне погодження. План чинний одну годину та використовується
+для однієї спроби apply. Зміна source, settings, state або файлів плану робить його непридатним.
+Автоматичне recovery після невдалого оновлення повертає попередній перевірений
+образ; загальний результат розгортання залишається невдалим.
 
-## Documentation
+За низької квоти можна явно обрати спільний пул:
+`devsecops concurrency service --mode unreserved`, після чого створити новий план.
+Він не забезпечує окремої гарантованої ємності чи ліміту функції.
 
-Use the [documentation index](docs/README.md) to find installation, upgrades,
-troubleshooting, security, command contracts and maintainer guides.
+## Стан і межі підтримки
 
-- [First successful pipeline](docs/first-successful-pipeline.md)
-- [Experimental production walkthrough](docs/experimental-production-walkthrough.md)
-- [Stability contract](docs/stability-contract.md) and [generated artifacts](docs/generated-artifacts.md)
-- [Contributing and tests](CONTRIBUTING.md)
-- [Release checklist](docs/release-checklist.md) and [roadmap](ROADMAP.md)
+Стан, налаштування, плани й приватні докази лежать у
+`.devsecops/deployments/<name>/`. Зберігайте їх резервну копію поза Git.
+CLI працює з одним оператором і локальним backend; тег середовища залишається
+`dev`. Він не є системою спільного керування production-розгортаннями.
+API Gateway використовує IAM; HTTP-запити CLI підписуються SigV4.
+
+Для переходу зі старого збереженого стану:
+`devsecops migrate NAME`, перегляд результату, потім `devsecops migrate NAME --yes`.
+Перехід локальний: імена й теги наявних AWS-ресурсів зберігаються; потрібен новий план.
+Деталі — у [посібнику оновлення](docs/upgrade-guide.md).
+
+Видалення виконуйте за [процедурою виведення з експлуатації](docs/runbooks/decommission.md):
+резервування, зупинка записувачів, переглянуте очищення S3/ECR, destroy-план,
+перевірка залишків і запланованого видалення ключів.
+
+## Документація
+
+- [Індекс](docs/README.md), [команди](docs/command-inventory.md), [контракти](docs/stability-contract.md).
+- [Архітектура](docs/cli-architecture.md), [Mermaid-діаграми українською](docs/diagrams.uk.md).
+- [Власний образ](docs/bring-your-own-image.md), [модель безпеки](docs/security-model.md), [AWS-дозволи](AWS_policy.md).
+- [Діагностика](docs/troubleshooting.md), [вартість](docs/cost-estimation.md), [розробка й тести](CONTRIBUTING.md).
+- [Підготовка релізу](docs/release-checklist.md): перевірки, артефакти й приймання нового коду в AWS.

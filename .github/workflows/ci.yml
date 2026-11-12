@@ -1,205 +1,83 @@
-name: CLI and Terraform CI
-
-# Validate both pull requests and the resulting main branch; manual dispatch is
-# retained for maintainers diagnosing runner or dependency changes.
+name: Core CLI and Terraform
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
-
 permissions:
-  # Jobs do not publish artifacts outside their own run or mutate repository state.
   contents: read
-
-env:
-  TF_VERSION: "1.10.5"
-  TF_IN_AUTOMATION: "true"
-  TF_WORKING_DIR: terraform
-
 jobs:
-  cli-tests:
-    name: CLI Unit, Golden, E2E, and Install Smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  python:
     strategy:
-      # Exercise every Python version declared in package compatibility metadata.
       fail-fast: false
       matrix:
-        python-version:
-          - "3.11"
-          - "3.12"
-          - "3.13"
-          - "3.14"
-
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.11', '3.12', '3.13', '3.14']
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Run CLI test suite
+          python-version: ${{ matrix.python }}
+      - name: Unit and offline integration tests
         run: PYTHONPATH=cli python -m unittest discover -s cli/tests
-
-      - name: Test optional diploma Lambda workload
-        run: python -m unittest discover -s examples/text-stats/tests
-
-      - name: Verify optional terminal renderer
+      - name: Check Python formatting and imports
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
         run: |
-          python -m pip install 'rich==14.2.0'
-          PYTHONPATH=cli:cli/tests python -m unittest test_product_audit.ValidationAndUiTests.test_real_rich_renderer_with_readiness_gaps
-
-      - name: Build root package artifacts
-        # Building sdist and wheel catches packaging omissions that editable
-        # source-tree tests cannot detect.
+          python -m pip install ruff==0.17.4
+          ruff check cli/devsecops_cli cli/tests
+          ruff format --check cli/devsecops_cli cli/tests
+      - name: Package and installed CLI smoke check
         run: |
-          python -m pip install --upgrade pip==26.1.2 build==1.5.0 setuptools==82.0.1 wheel==0.47.0
+          python -m pip install build==1.5.0
           python -m build
-
-      - name: Install root CLI package smoke test
-        # Install the project as users do and verify its generated launcher.
-        run: |
-          python -m pip install --no-deps --no-build-isolation .
+          python -m pip install --no-deps dist/*.whl
           devsecops --version
-
-      - name: Stage candidate release assets
-        if: github.ref == 'refs/heads/main' && matrix.python-version == '3.11'
+          python -c 'from importlib.metadata import version; from devsecops_cli import VERSION; assert VERSION == version("devsecops-pipeline-cli")'
+          devsecops --help
+          devsecops plan --help
+          sh -n install.sh
+      - name: Prepare release candidate files
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
         run: |
-          cp install.sh dist/install.sh
-          cd dist
-          sha256sum install.sh *.whl *.tar.gz > SHA256SUMS
-
-      - name: Upload candidate release assets
-        if: github.ref == 'refs/heads/main' && matrix.python-version == '3.11'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+          python -m pip install twine==7.0.0
+          python -m twine check dist/*
+          VERSION=$(python -c 'from devsecops_cli import VERSION; print(VERSION)')
+          git archive --format=tar.gz --prefix="devsecops-cli-kit-$VERSION/" \
+            --output="dist/devsecops-cli-kit-$VERSION-source.tar.gz" HEAD
+          git rev-parse HEAD > dist/SOURCE_COMMIT
+          (cd dist && sha256sum *.whl *.tar.gz SOURCE_COMMIT > SHA256SUMS)
+      - name: Store release candidate files
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-candidate
-          path: |
-            dist/install.sh
-            dist/*.whl
-            dist/*.tar.gz
-            dist/SHA256SUMS
+          name: core-release-candidate
+          path: dist/
           if-no-files-found: error
-          overwrite: true
-          retention-days: 30
-
-  terraform-validate:
-    name: Terraform Format and Validate
+  terraform:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.11"
-
-      - name: Install root CLI package
-        run: |
-          python -m pip install --upgrade pip==26.1.2 setuptools==82.0.1 wheel==0.47.0
-          python -m pip install --no-deps --no-build-isolation .
-          devsecops --version
-
-      - name: Render generated Terraform variables
-        # Terraform validation needs the CLI-owned auto.tfvars shape that a real
-        # project generates from normalized configuration.
-        run: |
-          devsecops config new --preset balanced --render
-          test -f "${TF_WORKING_DIR}/generated.auto.tfvars"
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+          python-version: '3.11'
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
-          terraform_version: ${{ env.TF_VERSION }}
+          terraform_version: '1.10.5'
           terraform_wrapper: false
-
-      - name: Terraform fmt check
-        run: terraform -chdir="${TF_WORKING_DIR}" fmt -check -recursive
-
-      - name: Terraform init without backend
-        # CI validates module structure without contacting or locking shared state.
-        run: terraform -chdir="${TF_WORKING_DIR}" init -backend=false -input=false -no-color
-
-      - name: Terraform validate
-        run: terraform -chdir="${TF_WORKING_DIR}" validate -no-color
-
-      - name: Test AWS constraints with mocked provider
-        run: terraform -chdir="${TF_WORKING_DIR}" test -no-color
-
-      - name: Rehearse isolated acceptance without AWS credentials
+      - name: Validate and test using mocked AWS
         run: |
-          cp terraform/.terraform.lock.hcl terraform/acceptance/.terraform.lock.hcl
-          terraform -chdir=terraform/acceptance init -backend=false -input=false -lockfile=readonly -no-color
-          terraform -chdir=terraform/acceptance test -test-directory=tests -no-color
-
-      - name: Rehearse single-operator dev lab without AWS credentials
-        run: |
-          cp terraform/.terraform.lock.hcl terraform/lab/.terraform.lock.hcl
-          terraform -chdir=terraform/lab init -backend=false -input=false -lockfile=readonly -no-color
-          terraform -chdir=terraform/lab validate -no-color
-          terraform -chdir=terraform/lab test -no-color
-
-      - name: Verify credential process with spaced interpreter paths
+          terraform -chdir=terraform fmt -check -recursive
+          terraform -chdir=terraform init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=terraform validate -no-color
+          terraform -chdir=terraform test -no-color
+      - name: Verify real provider credential process against local STS
         env:
           DEVSECOPS_TEST_TERRAFORM: terraform
-          DEVSECOPS_TEST_AWS_PROVIDER_DIR: ${{ github.workspace }}/terraform/.terraform/providers
-        # The real locked provider signs requests only to a local fake STS
-        # server. No real AWS identity, credentials or cloud resources are used.
-        run: PYTHONPATH=cli python3 -m unittest discover -s cli/tests -p test_lab_credentials.py
-
-  debian-compatibility:
-    name: Debian 13 CLI and Install
-    runs-on: ubuntu-latest
-    container: debian:13.7-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
-    timeout-minutes: 20
-    steps:
-      - name: Install Debian tools
-        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates python3 python3-venv python3-pip
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false
-      - name: Trust this checked-out workspace inside the container
-        # Checkout's temporary HOME is not shared by later container steps.
-        # Trust only this runner workspace, never all repositories.
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - name: Record Debian identity
-        run: uname -a && cat /etc/os-release && cat /etc/debian_version
-      - name: Exercise package, CLI and installer recovery on Debian
-        run: |
-          python3 -m venv /tmp/debian-tools
-          /tmp/debian-tools/bin/pip install build==1.5.0 setuptools==82.0.1 wheel==0.47.0 rich==14.2.0
-          PYTHONPATH=cli /tmp/debian-tools/bin/python -m unittest discover -s cli/tests
-          /tmp/debian-tools/bin/python -m build --no-isolation
-          /tmp/debian-tools/bin/pip install --no-deps dist/*.whl
-          /tmp/debian-tools/bin/devsecops --version
-          /tmp/debian-tools/bin/devsecops completion bash
-
-  scanner-boundary:
-    name: Locked Scanner Isolation
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          persist-credentials: false
-      - name: Build and verify locked Snyk binary
-        run: PYTHONPATH=cli python3 -m devsecops_cli.scanner prepare
-      - name: Prove scanner isolation with sentinel credentials
-        run: PYTHONPATH=cli python3 -m devsecops_cli.scanner probe
+          DEVSECOPS_TEST_AWS_PROVIDER_DIR: terraform/.terraform/providers
+        run: PYTHONPATH=cli python -m unittest discover -s cli/tests -p test_credentials.py

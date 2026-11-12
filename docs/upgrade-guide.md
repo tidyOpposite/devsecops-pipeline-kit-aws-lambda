@@ -1,93 +1,58 @@
-# Upgrade Guide
+# Перехід до основного CLI
 
-Upgrade the CLI and its Terraform/workflow checkout together. Read the target
-release notes before changing local configuration. Package upgrade, local
-snapshot restore and AWS image rollback are separate operations.
+Версія `1.0.1` (GitHub prerelease) має новий інтерфейс і схему deployment settings `2`.
+Попри номер patch-версії, команди несумісні з `1.0.0`.
+Збережіть попередній CLI та резервні копії до зміни робочого середовища.
+Під час оновлення репозиторію жодні AWS-операції не виконуються.
 
-## Current Schema
+## Старий збережений стан одного оператора
 
-Current source and the published `v0.15.0` baseline use config schema `1`.
-Legacy configs without `schema_version` normalize to `1`; missing
-`api_authorization_type` defaults to `AWS_IAM`. A future `schema_version`
-greater than this CLI supports is rejected before rendering or writing files.
-Upgrade the CLI rather than manually lowering that version number.
+Якщо існує `.devsecops/labs/NAME/settings.json`, не запускайте новий `init`
+для того самого розгортання. Спочатку зупиніть старі CLI-операції, заархівуйте
+весь каталог, перевірте account/region/project та виконайте:
 
-## Before Upgrading
-
-```bash
-devsecops --version
-devsecops config validate
-devsecops config diff
-devsecops snapshot list
+```sh
+devsecops migrate NAME --format json
+# Перевірте source, destination та project_name:
+devsecops migrate NAME --yes --format json
+devsecops config NAME
+devsecops status NAME
 ```
 
-Back up `.devsecops-pipeline.toml` and `.devsecops/`, including any lab state,
-settings and evidence. Finish active CLI operations before switching versions.
-Local configuration, Terraform state and credentials must stay outside Git.
+Команда локально переміщує каталог у `.devsecops/deployments/NAME/`, зберігає
+settings.v1.json і переводить settings на схему 2. State та докази зберігаються;
+імена ресурсів, account/region та попередній Purpose не змінюються.
+На першому новому apply output `lab_context` буде замінено на `deployment_context`;
+адреси managed resources залишаються тими самими. Перевірте повний новий план.
 
-## Install And Verify
+Перехід відмовляється перезаписувати destination, працювати з symlink, чужим
+state або невідомою схемою. Після помилки переміщення оригінальні settings
+відновлюються, резервна копія залишається для ручної перевірки. Не видаляйте
+каталоги, щоб приховати помилку; встановіть, де лежить повний актуальний state.
 
-Use the reviewed installer or source procedure in
-[Distribution and compatibility](distribution.md#upgrade). The current installer
-verifies a candidate before replacing the launcher; a failed upgrade preserves
-the previous working CLI. Older published installers retain their old behavior.
+Попередні плани недійсні: змінилися код, Terraform source, шляхи та схеми.
+Створіть новий plan, прочитайте plan.txt і лише тоді застосовуйте його.
+Старий CLI після переходу не повинен створювати другий стан для тих самих ресурсів.
 
-```bash
-devsecops --version
-devsecops config validate
-devsecops config diff
-devsecops generate --dry-run
-```
+## Що більше не підтримується
 
-After reviewing the differences, run `devsecops generate` and `devsecops status`.
-Generated files belong to the CLI; edit local configuration for durable changes.
-An upgrade does not apply AWS changes or synchronize GitHub settings. Existing
-lab plans become invalid when their bound source/provider/settings change:
-review a new plan instead of attempting to reuse the old one.
+Demo/setup modes, lab namespace, GitHub/OIDC dispatch, production workflow,
+Snyk/ZAP wrappers, навчальний Text Stats, presets, generated GitHub helpers,
+старі меню й локальні snapshots прибрано з поточного продукту.
+Окремий `cli/pyproject.toml` прибрано; встановлюйте та збирайте пакет із кореня.
+Історія попередньої реалізації зберігається в Git.
 
-## Existing Configurations And Scripts
+Старі `.devsecops-pipeline.toml`, setup-state, snapshots та generated.auto.tfvars
+не перезаписуються цим оновленням. Після резервування приберіть застарілі
+`terraform/*.tfvars` / `*.auto.tfvars`: Terraform автоматично читає їх і може
+показувати попередження про змінені змінні. Новий CLI передає повний власний
+inputs.tfvars.json; TOML більше не є його джерелом налаштувань.
 
-| Change | Required action |
-| --- | --- |
-| Setup defaults | New `setup --yes` starts a local demo; saved modes resume. `--yes` does not authorize GitHub writes or replacing existing settings with a different preset. |
-| Mode changes | Review the proposed diff. Use `--apply-mode-preset` only when explicitly accepting replacement; omitted authorization leaves existing settings intact. |
-| Image validation | Real deployment images must be Lambda-compatible, in the correct account/region and immutable. Lab uses exact ECR digests. |
-| CloudWatch retention | Values must be AWS-supported choices from `config schema`. Correct legacy production `1095` to `1096` with `config set environments.prod.log_retention_days 1096 --render`. |
-| Health checks | Only HTTP 2xx succeeds; redirects are rejected. Use the final HTTPS endpoint and a positive timeout. |
-| Project discovery | Commands from checkout subdirectories use the nearest project root and stop at nested Git boundaries. Keep a matching checkout alongside the installed CLI. |
-| Demo status | `Demo complete` describes local checks. Production `status --strict`, `--pre-deploy` and `--deep` remain separate experimental checks. |
-| Terminal input | EOF exits or pauses safely. Re-run `setup` to resume saved progress; noninteractive scripts should use explicit commands/flags. |
+## Попередні GitHub/OIDC розгортання
 
-For the experimental GitHub/OIDC path, review its
-[production walkthrough](experimental-production-walkthrough.md). Existing
-pre-hardening deployments must configure `PIPELINE_CONFIG_JSON`, separate
-plan/deploy roles, protected manual workflow dispatch and isolated sandbox
-planning. Update those settings explicitly; a CLI package upgrade does not
-migrate repository or IAM permissions.
-
-## Recover From An Upgrade
-
-If installation fails, keep using the existing launcher and inspect the
-reported failed stage. If a verified new package behaves incorrectly, select a
-previous release with the current installer and restore compatible local files:
-
-```bash
-devsecops snapshot list
-devsecops snapshot show 1
-devsecops snapshot restore --last --dry-run
-devsecops snapshot restore --last
-```
-
-Snapshot restore is restricted to CLI-owned local paths. It does not restore
-AWS resources, Terraform state, GitHub secrets or a deployed Lambda image.
-Use the [rollback runbook](runbooks/failed-rollback.md) for cloud recovery and
-[finish-demo](runbooks/finish-demo.md) for decommissioning.
-
-## Schema Change Policy
-
-Before releasing a schema change, increment `CONFIG_SCHEMA_VERSION`, implement
-a deterministic migration, update schema help/release notes and test both
-legacy loading and future-version refusal. Document required regeneration and
-manual decisions. Migration affects local source config only; see the
-[stability contract](stability-contract.md#config-migration-rules) and
-[generated artifact contract](generated-artifacts.md).
+Автоматичний перехід віддаленого S3/backend-state не реалізовано. Зупиніть dispatch
+і всіх writers. Збережіть попередній checkout та незалежний state backup для
+експлуатації або виведення таких ресурсів з експлуатації. Не запускайте `init`
+для створення паралельного state і не застосовуйте новий локальний root поверх
+remote state без окремої перевіреної міграції. Репозиторій не видаляє GitHub secrets,
+OIDC trust, IAM-ролі чи наявні хмарні ресурси автоматично.

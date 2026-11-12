@@ -54,35 +54,3 @@ run "images_require_explicit_retention_decisions" {
     error_message = "Destroy must not silently remove images still needed for recovery or another workload."
   }
 }
-
-run "backend_teardown_is_separate_and_preserves_nonempty_buckets" {
-  command = apply
-  module {
-    source = "./bootstrap"
-  }
-  variables {
-    expected_account_id = "123456789012"
-    aws_region          = "us-east-1"
-    state_bucket_name   = "teardown-fixture-state"
-    lock_table_name     = "teardown-fixture-locks"
-  }
-  assert {
-    condition = (
-      !aws_s3_bucket.terraform_state.force_destroy &&
-      !aws_s3_bucket.terraform_state_logs.force_destroy &&
-      aws_kms_key.terraform_state.deletion_window_in_days == 7
-    )
-    error_message = "Backend data must be resolved before its destroy; key removal remains scheduled."
-  }
-}
-
-run "reject_invalid_manual_account_guard" {
-  command = plan
-  # Terraform 1.10 can prune provider-only variable validation from a targeted
-  # mock plan. Exercise the full root plan, with a valid unrelated image input.
-  variables {
-    expected_account_id = "not-an-account"
-    lambda_image_uri    = "123456789012.dkr.ecr.us-east-1.amazonaws.com/fixture@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  }
-  expect_failures = [var.expected_account_id]
-}

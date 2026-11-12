@@ -1,9 +1,23 @@
 # Changelog
 
-All notable changes to this project are documented here. The project uses
-semantic versioning.
+## v1.0.1 - 2026-11-12 (prerelease)
 
-## Unreleased
+- Replace demo, lab namespace and experimental GitHub/OIDC deployment with one core CLI.
+- Retain reviewed saved plans, account/region/image/state checks, signed HTTP, recovery and destroy.
+- Move deployment state to `.devsecops/deployments/<name>/`, schema 2; provide explicit local migration preserving existing resource ownership.
+- Scope S3 cleanup to buckets in the selected deployment state and use its named AWS profile.
+- Remove demo workload, scanner wrappers, generated GitHub helpers and alternative Terraform roots.
+- Update installation, CI, core regression tests, documentation and Ukrainian Mermaid diagrams.
+- Keep one root package definition; check formatting and package metadata in CI and retain complete source release candidates with checksums.
+- Refresh SHA-pinned GitHub Actions to current Node 24 releases.
+- Reject noninteger settings, migration and plan schema versions.
+- Mark operation source metadata dirty when the checkout contains untracked files.
+- Despite the patch version number, this release changes the CLI incompatibly with 1.0.0. Breaking changes are documented in `docs/upgrade-guide.md`; the GitHub release is a prerelease pending cloud acceptance.
+
+The entries below describe historical releases and their former interfaces.
+
+All notable changes to this project are documented here. Compatibility exceptions
+are stated explicitly; 1.0.1 is not a backward-compatible patch for 1.0.0.
 
 ## v1.0.0 - 2026-11-12
 

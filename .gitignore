@@ -51,6 +51,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.ruff_cache/
 
 # Translations
 *.mo
@@ -163,7 +164,8 @@ Thumbs.db
 
 # Other files
 Docker Security Vulnerabilities and Best Practices.pdf
-OWASP-Top-10-Serverless-Interpretation-en.pdfПояснювальна_записка.docx
+OWASP-Top-10-Serverless-Interpretation-en.pdf
+Пояснювальна_записка.docx
 
 # Local audit, diploma evidence and unpublished working notes
 /docs/product-audit-*.md

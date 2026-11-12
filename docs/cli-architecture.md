@@ -1,66 +1,29 @@
-# CLI Architecture
+# Архітектура CLI
 
-The CLI is organized as a small application layer over independent domain and
-integration modules. `devsecops_cli.main` owns command orchestration and the
-interactive terminal UI; reusable behavior lives outside it.
+Один Python-пакет, один механізм розгортання та один Terraform root.
+Архітектурні й поведінкові представлення наведено в [Mermaid-діаграмах](diagrams.uk.md).
+Довгі алгоритми поділено на короткі горизонтальні частини з явними переходами.
 
-```mermaid
-flowchart TD
-  entry["__main__.py"] --> app["main.py: commands and UI"]
-  app --> parser["parser.py: CLI contract"]
-  app --> workflows["context.py / doctor.py / setup.py / deploy.py"]
-  app --> output["readiness.py / reports.py / views.py"]
-  app --> state["config.py / render.py / snapshots.py"]
-  app --> providers["aws.py / github.py"]
-  workflows --> providers
-  workflows --> config["config.py"]
-  output --> domain["models.py"]
-  state --> foundations["paths.py / formatting.py / models.py"]
-  providers --> domain
-```
-
-## Module responsibilities
-
-| Module | Responsibility |
+| Модуль | Відповідальність |
 | --- | --- |
-| `main.py` | Command handlers, exit-code mapping, terminal interaction, and dependency composition. |
-| `parser.py` | Argument parser and stable command-line contract. Receives the handler registry instead of importing `main`. |
-| `config.py` | Config schema, presets, migration, validation, serialization, and security controls. |
-| `render.py` | Deterministic generation of Terraform and GitHub helper artifacts. |
-| `snapshots.py` | Snapshot manifests, safe local restore, and rollback boundaries. |
-| `aws.py`, `github.py` | Provider adapters and provider-specific response normalization. |
-| `doctor.py`, `context.py` | Diagnostic and next-action workflows composed from injected adapters. |
-| `setup.py` | Guided-setup modes, atomic resume state, input fingerprints, stage reconciliation, and non-secret state validation. |
-| `deploy.py` | Protected workflow vocabulary, exact dispatch arguments, deployment-run selection, and bounded non-secret deployment history. |
-| `readiness.py` | Pure scoring, grouping, gap detection, and JSON serialization. |
-| `reports.py`, `views.py` | Human-readable reports and presentation rows. |
-| `contracts.py`, `completion.py` | Stable command/artifact metadata and shell completion generation. |
-| `images.py` | ECR image parsing and immutable-image policy checks. |
-| `models.py`, `paths.py`, `formatting.py` | Dependency-light shared foundations. |
+| `__main__.py` | Вхід для `python -m devsecops_cli` |
+| `main.py` | argparse, маршрутизація команд, формати результатів, коди виходу, scope cleanup |
+| `deployment.py` | Налаштування, локальний lock, плани, apply, status, HTTP, logs і recovery |
+| `aws.py` | Перевірка ECR-образу, account capacity, SigV4, заборона HTTP redirects |
+| `images.py` | Розбір URI образів |
+| `lambda_capacity.py` | Чисті правила перевірки ємності |
+| `models.py` | Тип URI образу та доменна помилка валідації |
+| `teardown.py` | Переглянуті S3-маніфести, пагінація, видалення версій і uploads |
+| `migration.py` | Явний локальний перехід попереднього стану зі збереженням ownership |
+| `paths.py` | Пошук checkout з урахуванням меж Git |
+| `terraform/main.tf` | Прив'язаний до account ID локальний backend та композиція ресурсів |
+| `terraform/modules/` | KMS, ECR, storage, Lambda, API Gateway та спільні імена бакетів |
 
-## Dependency rules
+Провайдерні команди проходять через `Deployment.aws` і `Deployment.tf`, які
+можна підмінити в тестах. AWS CLI використовує іменований профіль; Terraform
+отримує його credentials через `credential_process`. Випадкові `AWS_*` і `TF_*`
+з оточення не визначають область розгортання.
 
-1. Only the package entry point, `__main__.py`, may import `main.py`.
-2. Domain and provider modules never import command handlers or terminate the
-   process. They return normalized data or raise typed exceptions.
-3. External commands, HTTP calls, clocks, and identifier generators are passed
-   into workflow functions where tests need to replace them.
-4. `main.py` re-exports established helpers as a compatibility boundary, while
-   their implementation remains in the owning module.
-5. Generated output stays deterministic: rendering receives a config value and
-   does not read provider state implicitly.
-
-The architecture tests reject dependency cycles and reverse imports back into
-`main.py`. Behavioral compatibility is covered by the CLI unit, guided-setup
-resume/safety, golden-output, snapshot-safety, provider-adapter, and end-to-end
-tests.
-
-## Adding functionality
-
-- Add business rules to the narrowest domain module.
-- Add AWS or GitHub translation at the provider boundary.
-- Compose multi-step checks in `doctor.py` or `context.py`.
-- Keep argument parsing declarative in `parser.py` and leave user interaction,
-  output selection, and exit codes in the command layer.
-- Add a focused module test and, when the CLI contract changes, a command-level
-  test as well.
+`main.py` імпортує прикладні модулі; прикладні модулі не імпортують обробники CLI.
+Перевірки ECR/SigV4 і capacity не залежать від термінального інтерфейсу.
+Усі зміни AWS виконуються без GitHub-диспетчеризації.

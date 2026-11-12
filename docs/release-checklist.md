@@ -1,88 +1,66 @@
-# Release Checklist
+# Підготовка релізу основного CLI
 
-Release scope is local CLI plus the single-operator AWS dev lab in one account.
-Production/OIDC integrations retain a separate experimental acceptance process.
-This guide defines release requirements; per-run results and screenshots stay
-outside Git. Never replace an existing tag or its assets.
+Поточна версія `1.0.1` має статус GitHub prerelease. Попри patch-номер,
+перехід від `1.0.0` несумісний;
+локальні тести та докази попереднього релізу не підтверджують новий код в AWS.
+Автоматичної публікації за тегом немає. CI готує кандидат без доступу до AWS.
 
-## Prepare The Version
+## Коміт і push
 
-Update `cli/devsecops_cli/__init__.py`, both `pyproject.toml` files,
-`CHANGELOG.md`, `docs/release-v<VERSION>.md` and the current documentation links.
-Use canonical Python versions (`0.16.0rc1`) for semantic prerelease tags
-(`v0.16.0-rc.1`). Development versions cannot be published.
+- Перевірте `git status --short`, `git diff --check` і весь склад змін, включно
+  з новими файлами. Після видалення старих модулів нові deployment/migration,
+  тести та документація мають увійти до того самого коміту.
+- Не додавайте `.devsecops/`, credentials, state, плани, приватні докази,
+  кеші чи локальні build/dist. Історичні докази зберігайте окремо.
+- Виконайте перевірки з [CONTRIBUTING](../CONTRIBUTING.md). Збирайте пакет
+  у чистому checkout, щоб залишки старої збірки не потрапили до wheel/sdist.
+- Після push дочекайтеся успіху всіх CI jobs для саме цього commit SHA:
+  Python 3.11–3.14 на Linux/macOS, пакування, форматування, Terraform mock-тести
+  та real-provider credential-process test проти локального STS.
 
-```bash
-export VERSION="$(PYTHONPATH=cli python3 -c 'from devsecops_cli import VERSION; print(VERSION)')"
-export TAG="${TAG:-v${VERSION}}"
-PYTHONPATH=cli python3 -m devsecops_cli.release_version "$TAG" .
-```
+## Файли кандидата
 
-Choose the intended prerelease `TAG` explicitly. Check that the tag does not
-already exist locally or on the remote before continuing.
+Завантажте `core-release-candidate` з успішного запуску CI. Він містить:
 
-## Validate The Candidate
+- wheel для встановлення Python CLI;
+- Python sdist для збирання пакета;
+- `devsecops-cli-kit-VERSION-source.tar.gz` з повним checkout, Terraform,
+  provider lock, модулями, документацією та інсталятором;
+- `SOURCE_COMMIT` і `SHA256SUMS` для перевірки походження та цілісності файлів.
 
-Follow [Contributing](../CONTRIBUTING.md#local-checks): CLI/example tests,
-installer syntax, package build/install, completion and applicable Terraform
-checks. Inspect `git diff --check` and the full staged changes before committing.
-Use a fresh package-output directory so existing evidence is not deleted.
+Звірте SHA з CI та перевірте суми командою `sha256sum -c SHA256SUMS`
+(macOS: `shasum -a 256 -c SHA256SUMS`). Розпакуйте повний source archive,
+встановіть відповідний wheel у новий virtualenv, перевірте `--version`,
+`--help` і запуск із підкаталогу checkout. Перевірте також встановлення sdist
+і source installer в окремі нові virtualenv. Wheel/sdist не містить Terraform;
+зберігайте повний каталог source archive для виконання команд.
 
-Push the candidate commit and require a successful CI run. Record its exact
-commit, CI run, wheel and SHA-256 manifest. Use the CI wheel for acceptance;
-the stable publisher publishes the checked candidate assets rather than a
-separately rebuilt wheel.
+Розробницький випуск позначайте як GitHub prerelease, не як Latest stable.
+Standalone `install.sh` не є достатнім release asset: він встановлює вихідний
+каталог поруч із собою. Не додавайте приватні AWS-докази до публічних assets.
 
-## Stable Evidence Gate
+## Стабільний випуск
 
-Complete the [single-operator release evidence contract](single-operator-release-evidence.md)
-against the same clean commit, installed wheel and matching Terraform checkout:
+Перед стабільним випуском оператор має перевірити конкретний кандидат у явно
+обраному AWS account/profile та зберегти приватні докази з commit SHA,
+версією CLI, SHA-256 wheel/source archive, image digests і результатами:
 
-- macOS and Debian platform records, including installer/upgrade recovery.
-- Fresh A, update B, failed C/automatic B, manual rollback A and signed HTTP.
-- Independent backups/restore, reviewed destroy and exact resource readback.
-- Retained local state, KMS deletion schedules and explicit billing follow-up.
-- Complete checksummed raw evidence and package/source identity.
+- нове розгортання: init → registry plan/review/apply → власний образ →
+  workload plan/review/apply → status, IAM-запит і всі сторінки logs;
+- оновлення образу, невдалий health check з автоматичним recovery,
+  ручний rollback і відмова повторного чи зміненого плану;
+- міграція старого локального стану після резервування зі збереженням scope, ресурсів
+  і доказів; новий план після міграції та перевірка реального розгортання;
+- [очищення та виведення з експлуатації](runbooks/decommission.md), включно
+  з резервною копією даних, reviewed cleanup/destroy, перевіркою залишків,
+  retention і відкладеного видалення KMS.
 
-```bash
-devsecops criteria --strict --format json \
-  --evidence-dir /absolute/private/candidate \
-  --verify-github OWNER/REPO \
-  --artifacts-dir /absolute/private/candidate/artifacts
-```
+Зафіксуйте фактично перевірені ОС, Python, AWS CLI і Terraform та всі обмеження.
+Не переносіть acceptance старого CLI на новий commit. Зміна виконуваного коду
+після приймання потребує повторної перевірки відповідних сценаріїв.
 
-Changing the candidate commit or version requires matching evidence. Preparatory
-`evidence collect --rc` output alone is not cloud acceptance. Prereleases may be
-published for testing before stable acceptance, with their limitations explicit.
-
-For a stable tag, stage the checked `release-evidence.zip` on a separate draft
-`evidence-v<VERSION>` at that exact commit, as specified by the release workflow.
-Do not push a stable tag until the owner authorizes publication.
-
-## Tag And Publish
-
-After authorization, from the accepted release commit:
-
-```bash
-git tag -a "$TAG" -m "Release $TAG"
-git push origin main
-git push origin "$TAG"
-```
-
-The tag workflow validates version/notes identity before publishing. For stable
-1.0+, it also verifies scoped evidence, GitHub CI and the accepted artifact
-bytes. Check that the workflow succeeded and that the resulting release has
-the correct prerelease flag, notes, installer, wheel, source archive and
-`SHA256SUMS`. Re-download and verify the assets, then install/test the release
-on the declared platforms. A failed workflow is not a completed release.
-
-## Production Evidence Gate
-
-A release claiming production acceptance additionally needs the original
-[production evidence](production-deployment-evidence.md) and
-[separate-account runtime acceptance](security-gate-acceptance.md), including
-reviewer/OIDC protections. This gate does not apply to a lab-only claim. Keep
-production safeguards intact and label the evidence scope accurately.
-
-See [Known limitations](known-limitations.md), [Stability contract](stability-contract.md)
-and [Upgrade guide](upgrade-guide.md) when reviewing compatibility and release claims.
+У фінальному коміті узгодьте версію в `pyproject.toml` та
+`cli/devsecops_cli/__init__.py`, CHANGELOG, README і release notes. Повторіть CI
+та перевірку остаточних артефактів; докази мають відповідати цьому кандидату.
+Лише після приймання створюйте стабільний тег і публікуйте перевірені файли
+з цього SHA. Опубліковані попередні теги й assets не перезаписуйте.
