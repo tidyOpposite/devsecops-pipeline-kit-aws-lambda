@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "devsecops-pipeline-cli"
-version = "0.16.0b2"
+version = "1.0.0"
 description = "CLI for setting up, validating, deploying, and operating a secure AWS Lambda delivery pipeline."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -16,7 +16,7 @@ authors = [
 dependencies = []
 keywords = ["devsecops", "aws", "lambda", "terraform", "github-actions"]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",

@@ -1,8 +1,8 @@
 # Distribution And Compatibility
 
-Current prerelease: `v0.16.0-beta.2` (Python package `0.16.0b2`). The previous
-non-prerelease baseline is `v0.15.0`. Beta.2 includes the single-operator lab;
-beta.1 assets predate that workflow.
+Current release: `v1.0.0` (Python package `1.0.0`), including the
+single-operator AWS lab. The previous non-prerelease baseline is `v0.15.0`.
+The earlier beta.1 assets predate the lab workflow.
 
 Packages are distributed through GitHub Releases, not PyPI:
 `install.sh`, the `devsecops-pipeline-cli` wheel, source archive and `SHA256SUMS`.
@@ -24,20 +24,20 @@ Debian needs `python3-venv`. For editable development, use
 `.venv/bin/python -m pip install --no-deps -e .`. Record `git rev-parse HEAD`
 and the installed version when evaluating a source build.
 
-## Install The Prerelease
+## Install A Release
 
-Choose the prerelease explicitly; an unpinned installer selects the latest
-non-prerelease. Keep the checkout and installed package at the same tag:
+Pin the intended release and keep the checkout and installed package at the
+same tag. An unpinned installer selects the latest non-prerelease:
 
 ```bash
-git clone --branch v0.16.0-beta.2 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-beta &&
+git clone --branch v1.0.0 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-beta &&
 cd devsecops-beta &&
-sh install.sh --version v0.16.0-beta.2 &&
+sh install.sh --version v1.0.0 &&
 export PATH="$HOME/.local/bin:$PATH" &&
 devsecops --version
 ```
 
-Expected version: `devsecops 0.16.0b2`. The installer verifies its wheel against
+Expected version: `devsecops 1.0.0`. The installer verifies its wheel against
 the release manifest. Use a reviewed checkout or verify a downloaded installer
 before executing it; the pinned example below demonstrates that boundary.
 
@@ -97,7 +97,7 @@ old tag or imply that the old wheel includes new source changes.
 Use a reviewed current installer and select the intended release explicitly:
 
 ```bash
-sh install.sh --version v0.16.0-beta.2
+sh install.sh --version v1.0.0
 devsecops --version
 devsecops config validate
 devsecops config diff

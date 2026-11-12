@@ -5,11 +5,11 @@ semantic versioning.
 
 ## Unreleased
 
-## v0.16.0-beta.2 - 2026-11-12
+## v1.0.0 - 2026-11-12
 
-Python package version: `0.16.0b2`. Prerelease for the local CLI and
-single-operator AWS dev lab. Production/OIDC integrations remain experimental;
-this release does not claim stable 1.0 acceptance.
+First stable release for the local CLI and single-operator AWS dev lab in one
+account. Python package version: `1.0.0`. Production/OIDC integrations remain
+experimental and are outside this stable scope.
 
 ### Added
 

@@ -6,7 +6,7 @@ separate-account sandbox acceptance are **experimental integrations**, outside
 this stable scope. Their runtime security guards remain unchanged. See
 [Single-operator release evidence](single-operator-release-evidence.md).
 
-Current prerelease: `0.16.0b2` (`v0.16.0-beta.2`).
+Current release: `1.0.0` (`v1.0.0`).
 
 `lab` is a separate dev-only single-operator path. Its JSON kind is
 `single-operator-lab`, with `production_acceptance=false`. Saved plans expire

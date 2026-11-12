@@ -1,7 +1,7 @@
 # Roadmap
 
-Current prerelease: `v0.16.0-beta.2` (Python package `0.16.0b2`), following beta.1.
-The previous published baseline is `v0.15.0`. Version 1.0 has not been released.
+Current release: `v1.0.0` (Python package `1.0.0`). The previous prerelease is
+`v0.16.0-beta.1`; the previous non-prerelease baseline is `v0.15.0`.
 Completed changes belong in the [changelog](CHANGELOG.md).
 
 ## Version 1.0 Scope
@@ -17,7 +17,7 @@ The target is the local CLI and single-operator AWS dev lab in one account:
 GitHub/OIDC production workflows and separate-account runtime acceptance remain
 experimental. Windows/WSL2 and PyPI distribution are outside this release target.
 
-## Before A Stable Release
+## Before Each Stable Release
 
 1. Select the release version and freeze its commit and successful CI wheel.
 2. Complete both platform records and the AWS lab lifecycle/cleanup against

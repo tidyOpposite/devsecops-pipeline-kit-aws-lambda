@@ -5,19 +5,19 @@ an explicitly selected AWS account. Review saved Terraform plans before apply,
 check signed HTTP responses, and recover a previous image after failed health
 validation.
 
-Current prerelease: **`v0.16.0-beta.2`** (Python package **`0.16.0b2`**).
-It includes the single-operator lab. The previous prerelease is
-`v0.16.0-beta.1`; the previous non-prerelease baseline is `v0.15.0`.
-**Version 1.0 is not released.** See the
-[beta.2 notes](docs/release-v0.16.0b2.md), [installation guide](docs/distribution.md)
-and [changelog](CHANGELOG.md).
+Current release: **`v1.0.0`** (Python package **`1.0.0`**).
+Stable scope is the local CLI and single-operator AWS dev lab in one account.
+GitHub/OIDC production integrations remain experimental. The previous
+prerelease is `v0.16.0-beta.1`; the previous non-prerelease baseline is `v0.15.0`.
+See the [1.0 release notes](docs/release-v1.0.0.md),
+[installation guide](docs/distribution.md) and [changelog](CHANGELOG.md).
 
 ## Choose Your Workflow
 
 | Workflow | Purpose | Requirements |
 | --- | --- | --- |
 | Local demo | Learn the menu, configuration and plan preview without cloud requests. | Git, Python 3.11–3.14 and venv/pip on Debian 13 or macOS. |
-| Single-operator AWS lab | Deploy, update, verify, roll back and remove a dev workload in one account. This is the stable 1.0 target. | The checkout and matching CLI, Terraform, AWS CLI with a named profile, and Lambda-compatible images in ECR. |
+| Single-operator AWS lab | Deploy, update, verify, roll back and remove a dev workload in one account. Included in the stable release. | The checkout and matching CLI, Terraform, AWS CLI with a named profile, and Lambda-compatible images in ECR. |
 | Experimental production integration | Operate through protected GitHub Actions/OIDC workflows. | Additional repository protections, separate plan/deploy roles and a remote Terraform backend. |
 
 The lab requires neither an independent reviewer nor a second AWS account.

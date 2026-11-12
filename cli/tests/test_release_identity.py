@@ -85,7 +85,7 @@ class ReleaseIdentityTests(unittest.TestCase):
         for name in ("pyproject.toml", "cli/pyproject.toml"):
             metadata = tomllib.loads((ROOT / name).read_text())["project"]
             self.assertEqual(metadata["version"], VERSION)
-            self.assertIn("Development Status :: 4 - Beta", metadata["classifiers"])
+            self.assertIn("Development Status :: 5 - Production/Stable", metadata["classifiers"])
         self.assertTrue((ROOT / f"docs/release-v{VERSION}.md").is_file())
 
     def test_publication_checks_identity_before_build_evidence_download_or_publish(self):

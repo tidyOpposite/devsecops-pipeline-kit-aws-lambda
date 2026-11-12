@@ -33,7 +33,7 @@ local demo or a [single-operator AWS lab](single-operator-lab.md).
 
 - [Contributing and tests](../CONTRIBUTING.md), [CLI architecture](cli-architecture.md).
 - [Release checklist](release-checklist.md), [single-operator evidence contract](single-operator-release-evidence.md).
-- [Changelog](../CHANGELOG.md), [current prerelease notes](release-v0.16.0b2.md), [previous beta notes](release-v0.16.0b1.md), [roadmap](../ROADMAP.md).
+- [Changelog](../CHANGELOG.md), [1.0 release notes](release-v1.0.0.md), [previous beta notes](release-v0.16.0b1.md), [roadmap](../ROADMAP.md).
 
 ## Experimental Production Integration
 
