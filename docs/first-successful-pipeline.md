@@ -2,7 +2,8 @@
 
 The stable target is local CLI plus single-operator AWS dev lab. Production
 GitHub/OIDC workflows are a separate [experimental walkthrough](experimental-production-walkthrough.md).
-Current source is `0.16.0b2.dev0`; beta.1 assets do not include lab commands.
+Use `v0.16.0-beta.2` (`0.16.0b2`) or its matching source checkout; beta.1
+assets do not include lab commands.
 
 ## Install and run locally
 

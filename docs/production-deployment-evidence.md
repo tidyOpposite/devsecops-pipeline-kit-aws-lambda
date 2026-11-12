@@ -9,12 +9,11 @@ source tree.
 CLI/lab acceptance. See [the stable lab contract](single-operator-release-evidence.md).
 Use `devsecops criteria --scope production --strict` to verify this separate path.
 
-Current source is `0.16.0b2.dev0` (unpublished). The single-operator `lab`
+Current prerelease is `0.16.0b2` (`v0.16.0-beta.2`). The single-operator `lab`
 records separate dev evidence and does not satisfy this production contract.
-Published prerelease is `0.16.0b1` (`v0.16.0-beta.1`); the previous published
-baseline is `v0.15.0`. Production acceptance is still pending. After the
-remaining fixes, choose a stable candidate and collect this bundle from one
-reviewed commit and its CI wheel. Do not use the old published wheel to prove current fixes.
+The previous non-prerelease baseline is `v0.15.0`. Production acceptance
+requires its own bundle from the reviewed commit and CI wheel; lab proof and
+older published assets do not establish it.
 
 Complete the [finish-demo/decommission acceptance](runbooks/finish-demo.md#final-acceptance-record)
 after deployment/recovery proof. Preserve its retention decisions, restore test,

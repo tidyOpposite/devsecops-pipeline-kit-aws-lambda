@@ -5,10 +5,12 @@ an explicitly selected AWS account. Review saved Terraform plans before apply,
 check signed HTTP responses, and recover a previous image after failed health
 validation.
 
-Current source: **`0.16.0b2.dev0`** (unpublished). Published prerelease:
-**`v0.16.0-beta.1`** (`0.16.0b1`); previous baseline: `v0.15.0`.
-The published beta predates the single-operator lab. **Version 1.0 is not released.**
-See the [source notes](docs/release-v0.16.0b2.dev0.md) and [changelog](CHANGELOG.md).
+Current prerelease: **`v0.16.0-beta.2`** (Python package **`0.16.0b2`**).
+It includes the single-operator lab. The previous prerelease is
+`v0.16.0-beta.1`; the previous non-prerelease baseline is `v0.15.0`.
+**Version 1.0 is not released.** See the
+[beta.2 notes](docs/release-v0.16.0b2.md), [installation guide](docs/distribution.md)
+and [changelog](CHANGELOG.md).
 
 ## Choose Your Workflow
 

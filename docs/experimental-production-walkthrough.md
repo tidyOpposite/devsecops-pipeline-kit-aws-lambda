@@ -15,7 +15,7 @@ not provide Terraform modules or workflows. From that checkout, run demo setup. 
 mode creates local config and runs a no-write dry-run with a clearly marked
 sample image URI. It neither queries nor changes AWS or GitHub.
 
-This walkthrough describes `0.16.0b1` (`v0.16.0-beta.1` prerelease).
+This walkthrough describes `0.16.0b2` (`v0.16.0-beta.2` prerelease).
 Use the Quick Start's local source install for these fixes. The separately
 documented pinned `v0.15.0` baseline reproduces the older published behavior.
 

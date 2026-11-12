@@ -1,6 +1,6 @@
 # Roadmap
 
-Current source: `0.16.0b2.dev0` (unpublished), following `v0.16.0-beta.1`.
+Current prerelease: `v0.16.0-beta.2` (Python package `0.16.0b2`), following beta.1.
 The previous published baseline is `v0.15.0`. Version 1.0 has not been released.
 Completed changes belong in the [changelog](CHANGELOG.md).
 

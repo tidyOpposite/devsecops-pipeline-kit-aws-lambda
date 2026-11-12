@@ -7,9 +7,10 @@ the distinct-account runtime acceptance workflow is unchanged. These production
 integrations are experimental and outside stable 1.0 acceptance. The local CLI
 and this single-operator lab form the stable target.
 
-This command is in unpublished source `0.16.0b2.dev0`, after beta.1. Install the
-CLI from the matching checkout in a virtual environment; beta.1 release assets
-do not include it. AWS CLI v2, a signed-in named profile, Terraform >=1.10.5
+Available since `v0.16.0-beta.2` (`0.16.0b2`). Follow the
+[prerelease install](distribution.md#install-the-prerelease), or install from a
+matching source checkout in a virtual environment. Keep CLI and Terraform at
+the same revision. AWS CLI v2, a signed-in named profile, Terraform >=1.10.5
 and Docker for publishing the optional example are required. No permanent
 access key is required; CLI login/SSO credentials are resolved in memory via
 AWS CLI `export-credentials`, including for the pinned Terraform provider.

@@ -5,6 +5,22 @@ semantic versioning.
 
 ## Unreleased
 
+## v0.16.0-beta.2 - 2026-11-12
+
+Python package version: `0.16.0b2`. Prerelease for the local CLI and
+single-operator AWS dev lab. Production/OIDC integrations remain experimental;
+this release does not claim stable 1.0 acceptance.
+
+### Added
+
+* Add the dev-only `lab` command group and menu for one operator in one AWS
+  account: explicit scope, local state, registry/workload saved plans, signed
+  requests, readback, automatic recovery and manual rollback.
+* Bind plan application to the exact reviewed hash, account/region, source,
+  provider, state, settings and immutable image, with expiry and replay guards.
+* Add explicit shared-pool lab concurrency for low-quota accounts and bridge
+  temporary named-profile credentials to Terraform without persisting keys.
+
 ### Changed
 
 * Consolidate the README, roadmap, upgrade and release guides; add a focused

@@ -1,9 +1,8 @@
 # Distribution And Compatibility
 
-Current source: `0.16.0b2.dev0` (unpublished). The published prerelease is
-`v0.16.0-beta.1` (`0.16.0b1`); the previous baseline is `v0.15.0`.
-**Beta.1 assets do not contain the single-operator lab.** Install the matching
-source checkout for that workflow.
+Current prerelease: `v0.16.0-beta.2` (Python package `0.16.0b2`). The previous
+non-prerelease baseline is `v0.15.0`. Beta.2 includes the single-operator lab;
+beta.1 assets predate that workflow.
 
 Packages are distributed through GitHub Releases, not PyPI:
 `install.sh`, the `devsecops-pipeline-cli` wheel, source archive and `SHA256SUMS`.
@@ -28,17 +27,17 @@ and the installed version when evaluating a source build.
 ## Install The Prerelease
 
 Choose the prerelease explicitly; an unpinned installer selects the latest
-non-prerelease. These commands install beta.1, not the current lab source:
+non-prerelease. Keep the checkout and installed package at the same tag:
 
 ```bash
-git clone --branch v0.16.0-beta.1 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-beta &&
+git clone --branch v0.16.0-beta.2 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-beta &&
 cd devsecops-beta &&
-sh install.sh --version v0.16.0-beta.1 &&
+sh install.sh --version v0.16.0-beta.2 &&
 export PATH="$HOME/.local/bin:$PATH" &&
 devsecops --version
 ```
 
-Expected version: `devsecops 0.16.0b1`. The installer verifies its wheel against
+Expected version: `devsecops 0.16.0b2`. The installer verifies its wheel against
 the release manifest. Use a reviewed checkout or verify a downloaded installer
 before executing it; the pinned example below demonstrates that boundary.
 
@@ -98,7 +97,7 @@ old tag or imply that the old wheel includes new source changes.
 Use a reviewed current installer and select the intended release explicitly:
 
 ```bash
-sh install.sh --version v0.16.0-beta.1
+sh install.sh --version v0.16.0-beta.2
 devsecops --version
 devsecops config validate
 devsecops config diff
