@@ -10,6 +10,7 @@
 - Update installation, CI, core regression tests, documentation and Ukrainian Mermaid diagrams.
 - Keep one root package definition; check formatting and package metadata in CI and retain complete source release candidates with checksums.
 - Refresh SHA-pinned GitHub Actions to current Node 24 releases.
+- Lock AWS provider packages for Linux and macOS on AMD64/ARM64 so readonly initialization and validation work across supported platforms.
 - Reject noninteger settings, migration and plan schema versions.
 - Mark operation source metadata dirty when the checkout contains untracked files.
 - Despite the patch version number, this release changes the CLI incompatibly with 1.0.0. Breaking changes are documented in `docs/upgrade-guide.md`; the GitHub release is a prerelease pending cloud acceptance.

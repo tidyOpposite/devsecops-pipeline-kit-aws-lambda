@@ -17,6 +17,18 @@ python3 -m build
 python3 -m twine check dist/*.whl dist/devsecops_pipeline_cli-*.tar.gz
 ```
 
+Під час оновлення провайдера фіксуйте перевірені пакети для всіх цільових
+платформ, а не лише поточної машини. Після `terraform init` виконайте:
+
+```sh
+terraform -chdir=terraform providers lock \
+  -platform=linux_amd64 -platform=linux_arm64 \
+  -platform=darwin_amd64 -platform=darwin_arm64
+```
+
+Коміт містить оновлений `.terraform.lock.hcl`; CI та CLI продовжують використовувати
+`-lockfile=readonly`. Перевірка пакетів провайдера залишається обов'язковою.
+
 Python-тести підміняють AWS/Terraform та перевіряють неправильний account,
 immutable plans, replay, drift, recovery, SigV4, credential isolation,
 міграцію й scoped cleanup. Terraform тести використовують mock_provider aws.
