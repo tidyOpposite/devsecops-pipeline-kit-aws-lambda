@@ -21,7 +21,8 @@ development version as a GitHub Release tag or assume beta.1 assets include it.
   path contains spaces. Verify the locked provider against local fake STS in
   CI, including literal shell characters in workspace paths.
 
-Real deploy/update/recovery/cleanup acceptance is pending.
+Record deploy/update/recovery/cleanup acceptance for the exact candidate
+commit and wheel before publication.
 See [the reusable lab guide](single-operator-lab.md).
 
 * Scope stable 1.0 to local CLI and single-operator dev lab. Production helpers
@@ -32,3 +33,7 @@ See [the reusable lab guide](single-operator-lab.md).
   and Debian transcripts; add a pinned Debian CI container check. Track the
   signed AWS provider Linux ARM64 content checksum so read-only lab init can
   validate an already installed provider on Debian.
+
+* Simplify user documentation around the demo and single-operator lab; keep
+  production guidance separate and repair its navigation links. Remove
+  duplicate and prose-dependent tests while retaining behavioral regressions.

@@ -1,62 +1,31 @@
 # Troubleshooting Guide
 
-Start with the CLI. It is the primary troubleshooting surface for this project;
-Terraform, GitHub Actions, AWS, and scanner commands are the execution layer
-behind the CLI.
-
-## Start Here
-
-Run:
+Start with the command for the workflow you are actually using:
 
 ```bash
-devsecops status
-devsecops setup --preset balanced
-devsecops status
-devsecops status --watch --interval 10
-devsecops tui
-devsecops status
-devsecops status --strict --format compact
-devsecops doctor
-devsecops doctor --deep
-devsecops github status --format compact
-devsecops aws outputs --environment prod
-devsecops health --aws-sigv4
+devsecops status                  # Local demo/configuration
+devsecops doctor local --deep     # Local tools and Terraform
+devsecops lab status NAME         # Live single-operator dev lab
 ```
 
-Use `[i] Readiness details` from the main menu or `devsecops status` to see the
-checks that block 100% readiness and the concrete fix for each one. Use
-`devsecops doctor` when you need the full local check list. Project status
-groups readiness into Local, Terraform, GitHub, AWS, Security, and Deployment
-scores.
+Use `devsecops lab logs NAME` for workload events. Inspect the evidence path
+returned by a failed lab command before creating a new plan. Do not discard
+local state to recover from an AWS error. For retained data and deletion, use
+[Finish demo / decommission](runbooks/finish-demo.md).
 
-Status and dry-run output do not handle menu keys. Human text and tables wrap
-to the terminal width; long copyable commands stay on one line. On closed
-input, the menu exits with code `0` and setup pauses with code `0`, preserving
-its resume point. Other interactive prompts return `130` without accepting a
-default or confirmation. Rerun interactively to continue.
+For the **experimental production path**, use
+`status --pre-deploy --strict` before first deployment, `status --deep --strict`
+for live workload verification, and `deploy status` / `deploy logs` for its
+GitHub run. Its GitHub/backend diagnostics below do not describe lab readiness.
 
-An invalid `health --url` returns validation code `1` before a network request.
-Use an absolute HTTP(S) URL with a valid hostname/port and no embedded user
-information. Percent-encode spaces and non-ASCII path/query characters; use an
-ASCII/IDNA hostname. A malformed URL is reported as an endpoint input problem.
+Human-readable output includes a recommended next command. `[i]` opens details
+inside the menu; it is not a key handled by standalone status output. Closed
+input exits the menu or pauses setup with code `0`; other interactive prompts
+cancel with `130` without accepting defaults. Re-run setup to resume.
 
-Use `devsecops criteria --strict` when preparing a stable release. It checks
-every Version 1.0 criterion plus the external production and supported-platform evidence
-gates, then prints the next missing artifact or command.
-
-`devsecops tui` uses optional Rich/Textual dependencies. Without them, it falls
-back to compact status. For a published install, add the dependencies
-with `python3.11 -m pipx inject devsecops-pipeline-cli "rich>=13.7" "textual>=0.79"`.
-For development from a local checkout, use
-`PYTHON="${PYTHON:-python3.11}"` and `"${PYTHON}" -m pip install -e ".[tui]"`.
-
-Generate a shareable report:
-
-```bash
-devsecops report --deep
-```
-
-The report is written to `dist/devsecops/readiness-report.md`.
+For release acceptance, `criteria --strict` verifies a scoped lab bundle and
+both platform transcripts; production proof uses `--scope production`.
+The optional TUI falls back to compact status if Rich/Textual are unavailable.
 
 ## CLI Installation And Navigation
 

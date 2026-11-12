@@ -1,80 +1,29 @@
-# DevSecOps Pipeline Kit CLI for AWS Lambda
+# DevSecOps CLI Kit for AWS Lambda
 
-![Stage: beta hardening](https://img.shields.io/badge/stage-beta_hardening-yellow)
-![Development: active](https://img.shields.io/badge/development-active-brightgreen)
-![Acceptance: pending](https://img.shields.io/badge/acceptance-pending-yellow)
-![API stability: 0.x](https://img.shields.io/badge/API_stability-0.x_changes_expected-yellow)
+A terminal CLI for configuring, deploying and operating a Lambda container in
+an explicitly selected AWS account. Review saved Terraform plans before apply,
+check signed HTTP responses, and recover a previous image after failed health
+validation.
 
-DevSecOps Pipeline Kit helps you prepare, validate, and operate a secure AWS
-Lambda container deployment pipeline from one terminal CLI. It turns a local
-configuration into reviewable Terraform and GitHub setup artifacts, then shows
-what still blocks a deployment.
+Current source: **`0.16.0b2.dev0`** (unpublished). Published prerelease:
+**`v0.16.0-beta.1`** (`0.16.0b1`); previous baseline: `v0.15.0`.
+The published beta predates the single-operator lab. **Version 1.0 is not released.**
+See the [source notes](docs/release-v0.16.0b2.dev0.md) and [changelog](CHANGELOG.md).
 
-Current source: **`0.16.0b2.dev0`** (unpublished development version).
-Published prerelease: **`0.16.0b1`**, tag **`v0.16.0-beta.1`**.
-The source adds a [single-operator dev lab](docs/single-operator-lab.md).
-See the [source notes](docs/release-v0.16.0b2.dev0.md), [prerelease notes](docs/release-v0.16.0b1.md) and
-[installation guide](docs/distribution.md#install-the-prerelease).
-The previous published baseline is `v0.15.0`.
-Stable 1.0 targets the local CLI and single-operator dev lab in one AWS account.
-GitHub/OIDC production workflows remain experimental, with their safeguards intact.
-Final candidate acceptance is pending; version 1.0 has not been released.
+## Choose Your Workflow
 
-## What This Product Does
+| Workflow | Purpose | Requirements |
+| --- | --- | --- |
+| Local demo | Learn the menu, configuration and plan preview without cloud requests. | Git, Python 3.11–3.14 and venv/pip on Debian 13 or macOS. |
+| Single-operator AWS lab | Deploy, update, verify, roll back and remove a dev workload in one account. This is the stable 1.0 target. | The checkout and matching CLI, Terraform, AWS CLI with a named profile, and Lambda-compatible images in ECR. |
+| Experimental production integration | Operate through protected GitHub Actions/OIDC workflows. | Additional repository protections, separate plan/deploy roles and a remote Terraform backend. |
 
-- Creates a local, schema-versioned pipeline configuration.
-- Generates Terraform inputs and GitHub repository setup helpers.
-- Checks local, Terraform, GitHub, AWS, and security readiness.
-- Supports GitHub Actions deployment validation, evidence collection, and
-  automatic Lambda image rollback after a failed production validation.
-
-Terraform, GitHub Actions, AWS OIDC, and security scanners remain visible
-execution layers; the CLI configures and checks them instead of hiding them.
-
-## Who It Is For
-
-Use this project if you are a developer, platform engineer, security engineer,
-or student who already has an AWS Lambda workload and wants a guided,
-reviewable DevSecOps delivery path. It is especially suited to demonstrations,
-technical evaluations, and teams that want explicit infrastructure and
-security controls rather than an opaque deployment service.
-
-## Before You Start
-
-For the no-credentials quick start below, you need:
-
-- Debian 13 or macOS with Git and Python 3.11, 3.12, 3.13, or 3.14.
-- venv/pip support and Internet access to clone and install pinned build tools.
-
-The commands below create the checkout and enter it before installing the CLI.
-Demo setup uses a built-in sample image URI; no AWS/GitHub credentials or real
-container image are needed.
-
-A real deployment additionally requires an AWS account, a GitHub repository,
-Terraform, AWS CLI, GitHub CLI, configured OIDC roles, a remote Terraform
-backend, and a real immutable Lambda image in ECR.
-
-## What This Product Does Not Do
-
-- It does not generate, compile, or package your Lambda application. An optional
-  [text statistics example](examples/text-stats/README.md) is included for diploma testing.
-- It does not build or push the Lambda container image. Bring a prebuilt image
-  identified by an immutable tag or digest; `latest` and `bootstrap` are
-  rejected for production.
-- It does not deploy anything during the quick start. Production changes run
-  through the repository's manually triggered GitHub Actions workflow.
-- It is not yet a stable `v1.0` platform; review generated artifacts and pin a
-  release for repeatable evaluations.
-
-See [Bring your own image](docs/bring-your-own-image.md) for the workload
-boundary and image requirements.
+The lab requires neither an independent reviewer nor a second AWS account.
+Production integration retains its separate safeguards and acceptance process.
 
 ## Quick Start
 
-Copy this block from a directory where you want to keep the project. It obtains
-the current source, installs that same checkout into an isolated environment,
-and runs the local demo. This includes the prerelease hardening fixes; the
-published `v0.15.0` wheel does not contain them.
+Install the current checkout and run its local demo:
 
 ```bash
 git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
@@ -88,834 +37,85 @@ devsecops status &&
 devsecops dry-run
 ```
 
-For an existing checkout, enter it and start with `python3 -m venv .venv`.
-Record `git rev-parse HEAD` alongside `devsecops --version` when evaluating a
-source build. Repeat the same source commit and wheel checksum for acceptance.
+Expected result: `Demo complete`, a local `.devsecops-pipeline.toml`, and a
+sample-image preview. A new setup defaults to demo; an existing setup resumes
+its saved mode. No AWS or GitHub credentials are needed for this path.
 
-For a reproducible published baseline, use the
-[pinned v0.15.0 install](docs/distribution.md#pinned-published-baseline).
-That path pins the source tag, installer and wheel version and checks the
-installer before execution. It uses `setup --mode demo` explicitly, as required
-by that historical release. Use a newly accepted release for the final thesis
-demonstration after all fixes and final acceptance are complete.
+Keep the checkout: the wheel contains the CLI, while Terraform and workflow
+sources live in the repository. Record `git rev-parse HEAD` and
+`devsecops --version` when verifying a source build. Commands from checkout
+subdirectories use the detected project root.
 
-Expected result:
+For release assets, verified installation and supported tool versions, see
+[Distribution and compatibility](docs/distribution.md).
 
-- `setup --yes --strict` starts a new local demo or resumes the saved mode, checks dependencies,
-  creates `.devsecops-pipeline.toml`, and saves non-secret progress under
-  `.devsecops/`. Demo mode makes no AWS or GitHub requests.
-- Setup includes a sample-image preview. `status` shows `Demo complete` once
-  its local checks pass; `dry-run` repeats the preview without cloud requests.
-
-The installed wheel provides the CLI; the checkout provides Terraform and
-GitHub workflows. Keep both. Inside the checkout, commands also work from
-subdirectories such as `terraform/` or `docs/`: configuration, progress,
-snapshots and generated artifacts remain at the detected project root. A
-closer config or nested Git repository stops the search for an outer project.
-If no project is found, setup reports the missing files and leaves that
-directory unchanged.
-
-Run `devsecops` without arguments at any time to see compact project status
-and the single recommended next command. Human-readable commands finish with
-the same recommendation, so the setup path can be resumed without memorizing
-the workflow. Machine-readable JSON, TOML, Markdown, generated shell, and
-completion output remains unchanged for scripts.
-
-Compact status checks local inputs and marks cloud readiness as unverified.
-Use `devsecops status --pre-deploy --strict` before the first deploy to verify
-Terraform, GitHub protections, the AWS state backend, and the configured ECR
-image. Then review the pinned inputs with `devsecops deploy prod --dry-run`.
-After deployment, `devsecops status --deep --strict` also checks the workload
-and requires an HTTP 2xx response from `/health`. For IAM-protected APIs,
-provide SigV4 credentials via the standard AWS environment variables.
-Validate the assembled release evidence separately with `devsecops criteria --strict`.
-Generated files are compared with current config; their existence alone does
-not establish readiness. The menu resumes saved setup and supports deployment,
-rollback, and previews with the same confirmation as command-line execution.
-
-User configuration stays outside Git. `devsecops github setup --apply`
-synchronizes schema-owned, non-secret settings to `PIPELINE_CONFIG_JSON` in
-the user's deployment repository. Each cloud workflow materializes Terraform
-inputs and backend settings from that variable. Secrets remain in GitHub
-Secrets/OIDC; personal configuration must not be committed to the public kit.
-
-Continue with the step-by-step
-[First successful pipeline](docs/first-successful-pipeline.md) guide when you
-are ready to connect GitHub and AWS.
-
-## Guided Setup
-
-Run `devsecops setup` without flags for the interactive path. A new setup
-defaults to demo (Enter at the mode prompt); saved modes resume unchanged. It
-is a resumable state machine:
-
-```text
-1. Choose mode: demo, standard, or production
-2. Check dependencies
-3. Create local config
-4. Select an existing immutable Lambda image or open the image guide
-5. Configure Terraform backend names
-6. Verify the active AWS identity
-7. Connect the GitHub repository and OIDC role secrets
-8. Run a no-write dry-run
-9. Show saved progress and one next command
-```
-
-| Mode | Initial preset | Required outcome |
-| --- | --- | --- |
-| `demo` | `student-demo` | Creates local config and completes a dry-run with a clearly marked sample image URI. It does not query or change AWS or GitHub. |
-| `standard` | `balanced` | Requires Git, Terraform, AWS CLI, GitHub CLI, a real image/backend, AWS identity, and repository variables/OIDC role secrets. |
-| `production` | `enterprise` | Uses the production-oriented preset and keeps every standard cloud connection and strict control in scope. |
-
-After a demo, the default screen, status, menu, and TUI show local demo
-completion. A configuration change requires a fresh local preview. JSON status
-labels this with `context.scope=demo` and `demo_complete`; its score describes
-the demo, while production gates remain unverified. `status --strict`,
-`--pre-deploy`, and `--deep` retain production verification requirements.
-
-Connect production separately when ready:
+## Daily Commands
 
 ```bash
-devsecops setup --mode production
+devsecops menu                       # Interactive navigation
+devsecops                           # Compact status and next action
+devsecops config validate            # Check local settings
+devsecops config diff                # Review configuration drift
+devsecops generate --dry-run         # Preview generated files
+devsecops snapshot list              # Inspect local recovery points
+devsecops inventory --format json    # Command and stability contract
 ```
 
-The completed-demo menu exposes this interactive action as option `7`.
+Run `devsecops COMMAND --help` for flags and examples. Human-readable output
+includes a recommended next command; machine-readable output stays parseable.
+Configuration changes belong in the local config. Regenerate CLI-owned files
+instead of editing them directly. Local snapshot restore affects local files;
+cloud rollback is a separate operation.
 
-When existing settings need a mode preset, setup shows the exact configuration
-diff before saving anything. Press Enter to keep your settings, choose yes to
-accept the replacement, or pause without changing saved progress. Project
-identity, region, image, admin role and backend are preserved; policy and
-environment settings are replaced only after acceptance, with a recovery snapshot.
+## Deploy One AWS Lab
 
-For a noninteractive transition, first review the diff:
+Start with the [single-operator lab guide](docs/single-operator-lab.md). It covers
+AWS authentication, account/region checks, registry creation, image publication,
+concurrency, signed requests and cleanup. The optional
+[Text Stats Lambda](examples/text-stats/README.md) supplies small A/B/C images
+for a complete update and recovery demonstration.
 
 ```bash
-devsecops setup --mode production --yes
-# Stops without writes if existing settings would need replacement.
-devsecops setup --mode production --yes --apply-mode-preset
+devsecops lab init diploma --expected-account-id 123456789012 --region eu-north-1 --profile diploma
+devsecops lab plan diploma --stage registry
+# Read the saved plan; use its actual plan ID and review SHA-256:
+devsecops lab apply diploma --plan-id PLAN_ID --sha256 REVIEW_SHA256 --yes
 ```
 
-Use the second command only after reviewing the proposed replacement. `--yes`
-alone never accepts it. If the existing config already meets the selected
-mode's requirements, setup reuses it without applying a preset.
-
-Progress is atomically saved to `.devsecops/setup-state.json`, which is ignored
-by Git and never stores AWS credentials, GitHub tokens, Snyk tokens, or secret
-values. Press `Ctrl-C`, `b`, `back`, or `0` at a prompt and rerun
-`devsecops setup`; completed stages are rechecked against the real project and
-the first incomplete stage is shown. A config change invalidates the saved
-dry-run result so stale progress cannot be reported as complete.
-
-`--yes` accepts only safe local defaults and never implies permission to replace
-existing settings or change GitHub. To apply repository variables and encrypted secrets non-interactively,
-authorization must be explicit:
-
-```bash
-devsecops setup --mode standard --yes \
-  --image-uri <immutable-ecr-image-uri> \
-  --backend-bucket <state-bucket> \
-  --apply-github \
-  --deploy-role-arn <deploy-role-arn> \
-  --plan-role-arn <plan-role-arn>
-```
-
-The command above checks AWS identity but does not create the backend, apply
-Terraform, start a workflow, or deploy AWS resources. Use `--strict` in CI or
-scripts when incomplete required stages should produce a non-zero exit code.
-In standard and production modes the backend stage becomes complete only after
-the configured S3 bucket and DynamoDB lock table are observable in the active
-AWS account. Until then the summary recommends `devsecops terraform bootstrap`
-for a safe plan before any explicit apply.
-
-## Development Status
-
-The current checkout is **`0.16.0b2.dev0`**, following **`v0.16.0-beta.1`**
-for testing before final acceptance. The previous published baseline is
-`v0.15.0` (4 November 2026). See the [changelog](CHANGELOG.md) and
-[known limitations](docs/known-limitations.md) for changes and remaining work.
-
-Complete the [single-operator release acceptance](docs/single-operator-release-evidence.md),
-including platform and cleanup checks against one reviewed commit and wheel. Publish a stable version only after those results are attached. Keep
-`v0.15.0` and its assets unchanged. The [RC checklist](docs/v1.0.0-release-candidate-checklist.md)
-and `devsecops criteria --strict` define the stable-release evidence gate.
-
-The [stability contract](docs/stability-contract.md) identifies scriptable
-commands and compatibility rules. [Known limitations](docs/known-limitations.md)
-separates intentional product boundaries from outstanding acceptance blockers.
-
-## Product Contract
-
-The product boundary is intentionally narrow: `devsecops` is the user-facing
-CLI for setting up, validating, deploying, and operating a secure AWS Lambda
-delivery pipeline. Terraform modules, GitHub Actions workflows, AWS resources,
-and scanners remain transparent execution layers that the CLI configures,
-dispatches, and checks.
-
-`.devsecops-pipeline.toml` is local source configuration. Files written by
-`devsecops generate`, `devsecops report`, and `devsecops github-setup --write`
-are CLI-owned generated artifacts. Do not edit generated files directly for
-durable changes; update the local config and regenerate them.
-
-Stable command flags, compatibility aliases, experimental commands, JSON output
-kinds, config migration rules, and generated artifact compatibility are
-documented in [Stability contract](docs/stability-contract.md). The
-machine-readable inventory is available with:
-
-```bash
-devsecops inventory --format json
-```
-
-## Architecture
-
-The internal CLI module boundaries and dependency rules are documented in
-[CLI architecture](docs/cli-architecture.md).
-
-```mermaid
-flowchart LR
-  operator["Operator"] --> cli["DevSecOps CLI"]
-  cli --> config["Local pipeline config"]
-  cli --> readiness["Readiness + diagnostics"]
-  cli --> generated["Rendered Terraform/GitHub artifacts"]
-  cli --> snapshots["Local snapshots + rollback"]
-  generated --> terraform["Terraform modules"]
-  generated --> githubSetup["GitHub variables/secrets"]
-  githubSetup --> checks
-  githubSetup --> deploy
-  terraform --> checks
-  terraform --> deploy
-  developer["Developer"] --> pr["Pull Request"]
-  pr --> checks["GitHub Actions: Terraform validate + IaC scan"]
-  checks --> plan["Terraform plan in PR comment"]
-  main["Merge to main"] --> deploy["Production deploy workflow"]
-  deploy --> oidc["GitHub OIDC -> AWS IAM role"]
-  oidc --> tfstate["S3 Terraform state + DynamoDB lock"]
-  deploy --> image["Immutable Lambda image URI"]
-  deploy --> ecr["ECR repository for workload images"]
-  image --> lambda["AWS Lambda container"]
-  api["API Gateway HTTP API"] --> lambda
-  lambda --> data["Private workload data bucket"]
-  lambda --> dlq["SQS DLQ"]
-  lambda --> logs["CloudWatch Logs + X-Ray"]
-  deploy --> validation["Optional /health + OWASP ZAP validation"]
-  validation --> rollback["Rollback to previous Lambda image on failure"]
-  rollback --> lambda
-```
-
-## What Is Implemented
-
-| Area | Implementation |
-| --- | --- |
-| CLI product | Dependency-free terminal menu, guided setup, unified status, config presets, reports, snapshots, rollback, and diagnostics. |
-| CLI-managed config | `.devsecops-pipeline.toml` stores local settings and `devsecops generate` generates ignored Terraform/GitHub helper artifacts. |
-| Readiness diagnostics | `devsecops status`, `[i] details`, `doctor`, `gh-doctor`, `actions-status`, and `branch-doctor` explain what blocks a deploy-ready pipeline. |
-| AWS diagnostics | `devsecops aws-doctor` checks AWS identity, backend bucket, lock table, ECR, Lambda execution role, Lambda, API Gateway, CloudWatch logs, and configured ECR image existence. |
-| Environments | `dev`, `staging`, and `prod` are mapped to Terraform workspaces. Resource names include the environment, for example `devsecops-pipeline-prod-lambda`. |
-| Terraform state | Remote S3 backend with DynamoDB locking. `terraform/bootstrap` creates KMS-encrypted state, encrypted locks, access logging, lifecycle retention, and public access blocks. |
-| IaC structure | Root Terraform composes modules in `terraform/modules`: `kms`, `storage`, `ecr`, `lambda`, and `api-gateway`. |
-| PR workflow | All pull requests run Terraform formatting, backend-free validation, and Trivy IaC scanning without AWS credentials. AWS-backed sandbox plans require explicit opt-in and manual dispatch from reviewed `main`. |
-| Production deploy | `devsecops deploy prod` performs readiness and overlap checks, confirms the exact immutable image, and delegates `terraform apply` to a manual protected workflow run from `main`. Direct pushes do not deploy. |
-| Image deployment | The deploy workflow and Terraform require an explicit immutable `LAMBDA_IMAGE_URI` and reject mutable `latest` or `bootstrap` tags. |
-| API authorization | API Gateway routes default to `AWS_IAM`; health checks use SigV4 signing for protected production endpoints. |
-| Container scanning | Snyk can scan the configured image when `SNYK_TOKEN` is present. |
-| Rollback | The workflow restores the previous image automatically after failed validation; `devsecops deploy rollback` provides an explicit, confirmed rollback through the same protected environment and Terraform state. |
-| Optional validation | `/health` smoke test can validate IAM-protected APIs; OWASP ZAP baseline DAST runs only when the API is explicitly public. |
-
-## Repository Layout
-
-```text
-pyproject.toml                      Root Python package metadata for `pipx install .`
-cli/devsecops_cli/                  Modular CLI application, domains, and provider adapters
-cli/tests/                          Focused CLI unit tests
-dist/devsecops/                     Ignored CLI-generated helper artifacts
-.github/workflows/deploy.yml        PR validation, manual sandbox plan, production deploy, rollback, optional DAST
-.github/workflows/release.yml       Tag release workflow with wheel/sdist artifacts
-terraform/bootstrap/                One-time S3 backend and DynamoDB lock table
-terraform/modules/kms/              Customer-managed KMS key and alias
-terraform/modules/storage/          Private workload data bucket and access log bucket
-terraform/modules/ecr/              Immutable ECR repository and lifecycle policy
-terraform/modules/lambda/           Lambda, IAM role, logs, and SQS DLQ
-terraform/modules/api-gateway/      HTTP API, integration, stage, access logs
-docs/                               CLI-first security, scanner, cost, and troubleshooting docs
-```
-
-## Detailed CLI Usage
-
-The installer verifies the release wheel against `SHA256SUMS`, prepares a fresh
-private environment, checks `--version`, and atomically switches the `devsecops`
-launcher. Failed upgrades preserve the working CLI; previous environments are
-retained. See
-[Distribution and compatibility](docs/distribution.md) for pinned installs,
-manual wheel installation, upgrades, shell completion, checksum verification,
-and supported tool versions.
-
-Security scanner pins, container isolation, and the optional final AWS sandbox
-test are documented in [Security gate acceptance](docs/security-gate-acceptance.md).
-
-`devsecops status` is the single public status surface behind the default
-screen, interactive menu, and command postludes. Every blocker is
-shown with what is missing, why it matters, what the recommended command will
-change, the exact next command, and a documentation link.
-
-The main menu uses section-style navigation: selecting an item clears the
-terminal, opens that section, and returns to the main menu when you press
-Enter. Input sections can be cancelled by typing `b`, `back`, `0`, or
-`cancel`; the configuration wizard returns without saving when cancelled. The
-main menu offers `[i] Readiness details` for the current demo or production
-scope. Status, dry-run and TUI output are reports; they do not accept menu keys.
-
-```text
-[1] Continue setup
-[2] Status
-[3] Deploy
-[4] Diagnose problems
-[5] Configuration
-[6] Advanced
-[i] Readiness details
-[0] Exit
-```
-
-Human guidance and tables adapt to terminal width, including ANSI colors and
-wide characters. Each next action has one copyable command. Long commands stay
-intact on their own line so wrapping cannot change quoted values or digests.
-JSON, TOML, scripts and configuration diffs retain their literal format.
-
-Closing input exits the menu normally. During setup it pauses at the current
-step; rerun `devsecops setup` to resume. EOF never accepts a confirmation or a
-prompt's default value. Other interrupted prompts return exit code `130`.
-
-The main path stays focused on setup, validation, and deployment. Generated
-deployment files, Terraform, GitHub setup, reports and release evidence,
-security reference, and local snapshots remain available under `Advanced`.
-`Continue setup` uses the shared status decision and opens the relevant
-Configuration, Deployment files, GitHub, Diagnostics, Deploy, or Reports
-section instead of forcing the user to find it manually.
-The `Deploy` section keeps deployment status, the protected CLI command, logs,
-AWS outputs, health validation, and cloud rollback together. Merely opening it
-never starts a deployment.
-
-For development, install the local package in editable mode:
-
-```bash
-PYTHON="${PYTHON:-python3.11}"
-"${PYTHON}" -m pip install -e .
-devsecops status
-```
-
-Without installing, run the package module with `PYTHONPATH`:
-
-```bash
-PYTHON="${PYTHON:-python3.11}"
-PYTHONPATH=cli "${PYTHON}" -m devsecops_cli status
-```
-
-The CLI is intentionally dependency-free for core flows, so it can run before a
-Python environment, Terraform backend, GitHub repository, or AWS credentials are
-fully configured.
-
-The same first-run path is also shown in `devsecops --help`.
-
-Useful commands:
-
-```bash
-devsecops status     # compact project status and one next action
-devsecops status --deep
-devsecops status --watch --interval 10
-devsecops tui           # optional Rich/Textual UI bridge
-
-devsecops setup --mode demo --yes --strict
-devsecops setup --mode standard
-devsecops setup --mode production --strict
-devsecops config show --format toml
-devsecops config show --format json
-devsecops config validate
-devsecops config diff
-devsecops config diff --preset strict
-devsecops config set backend.bucket my-state-bucket --generate
-devsecops config reset --preset minimal
-devsecops config schema
-
-devsecops preset list   # show available policy profiles
-devsecops preset show strict
-devsecops preset apply strict --generate
-
-devsecops doctor local --format compact
-devsecops doctor local --deep --format json
-devsecops doctor github
-devsecops doctor aws --environment prod --strict
-devsecops doctor branch --branch main
-devsecops doctor actions --format json
-devsecops doctor all --format compact
-devsecops status     # shows what blocks 100% readiness
-devsecops status --format json
-devsecops status --strict --format compact
-devsecops dry-run --image-uri <immutable-ecr-image-uri>
-devsecops image validate --image-uri <immutable-ecr-image-uri>
-devsecops health --url https://abc123.execute-api.us-east-1.amazonaws.com/health --aws-sigv4
-devsecops aws outputs --environment prod --format json
-
-devsecops deploy prod --dry-run
-devsecops deploy prod
-devsecops deploy status --watch
-devsecops deploy logs --failed
-devsecops deploy rollback --dry-run
-devsecops deploy rollback
-
-devsecops github setup  # prints gh commands for repo variables/secrets
-devsecops github setup --apply --deploy-role-arn arn:aws:iam::123456789012:role/deploy
-devsecops github status --format compact
-devsecops github branch --branch main
-
-devsecops terraform bootstrap
-devsecops terraform bootstrap --apply
-devsecops terraform plan dev --create-workspace
-
-devsecops snapshot list
-devsecops snapshot show 1
-devsecops snapshot restore --last --dry-run
-
-devsecops envs          # environment settings table
-devsecops controls      # security controls matrix
-devsecops inventory --format json # stable command/JSON/artifact contract
-devsecops evidence collect --rc # collect local release-candidate evidence
-devsecops criteria --strict # check Version 1.0 criteria and stable blockers
-devsecops completion bash # print shell completion for bash, zsh, or fish
-devsecops generate        # writes ignored Terraform/GitHub helper artifacts
-devsecops generate --dry-run
-devsecops report        # exports Markdown readiness report
-devsecops report --format json # exports attachable audit evidence
-devsecops explain oidc  # explains a security control
-```
-
-Top-level compatibility aliases such as `start`, `next`, `readiness`,
-`dashboard`, `preflight`, `render`, `init`, `set`, `validate-config`,
-`github-setup`, `gh-doctor`, `aws-doctor`, `actions-status`, `branch-doctor`,
-`plan`, `bootstrap`, `snapshots`, and `rollback` still work. New scripts should
-prefer the grouped commands shown above.
-
-`status` splits the project into Local, Terraform, GitHub, AWS, Security, and
-Deployment areas while showing one overall score. `--deep` adds external
-checks; `--watch` auto-refreshes every `--interval` seconds.
-
-The core CLI remains dependency-free. To try the optional Rich/Textual UI:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/main/install.sh | sh -s -- --with-tui
-devsecops tui
-```
-
-From a local checkout, `pipx install ".[tui]"` still works.
-
-The clean configuration workflow writes `.devsecops-pipeline.toml`, which is
-intentionally ignored by Git and includes `schema_version = 1`.
-`devsecops generate` writes:
-
-```text
-terraform/generated.auto.tfvars
-dist/devsecops/backend.tf
-dist/devsecops/github-variables.env
-dist/devsecops/github-setup.sh
-dist/devsecops/setup-checklist.md
-```
-
-`devsecops report` writes `dist/devsecops/readiness-report.md`.
-`devsecops report --format json` writes `dist/devsecops/audit-report.json`
-for pull request, workflow artifact, or release evidence.
-
-The local `.devsecops/deployments.json` journal records each dispatch request
-and its run ID when GitHub confirms it. If GitHub has accepted the dispatch
-but the run is still unconfirmed, use `devsecops deploy status --watch` to
-follow that request before retrying. The journal contains non-secret metadata.
-Inferred rollback uses the previous digest captured by a successful deployment
-attempt and checks that the same Lambda and deployed image are still active.
-
-Generated artifacts include CLI-owned headers and are ignored by Git. See
-[Generated artifacts](docs/generated-artifacts.md) for the source-versus-output
-contract.
-
-The CLI creates local snapshots before commands that overwrite CLI-owned
-configuration or generated artifacts: `setup`, Configuration changes,
-`generate`, `report`, and `github setup --write`. Snapshots are stored under
-`.devsecops/snapshots/`, are ignored by Git, and can be inspected or restored:
-
-```bash
-devsecops snapshots
-devsecops snapshots --show 1
-devsecops rollback --last --dry-run
-devsecops rollback --to <number-or-id>
-```
-
-Rollback restores only the local files managed by the CLI, such as
-`.devsecops-pipeline.toml`, `terraform/generated.auto.tfvars`, and generated
-files under `dist/devsecops/`. Before a rollback is applied, the CLI creates a
-new safety snapshot of the current state. It does not change AWS Lambda,
-Terraform state, GitHub Actions, or deployed traffic. Cloud deployment rollback
-uses the separate `devsecops deploy rollback` command and the protected
-production workflow. It does not reuse the local snapshot mechanism.
-
-## Operational Diagnostics
-
-To finish a demonstration, run `devsecops terraform teardown` or choose
-**Deploy → Finish demo / cleanup guide**. The guide is local and changes
-nothing. The [decommission runbook](docs/runbooks/finish-demo.md) separates
-data/image retention, per-workspace workload removal and optional backend
-retirement. S3 helpers inventory exact versions/uploads first; permanent purge
-requires a reviewed SHA-256, repeated bucket/account/region and backup decision.
-Real teardown acceptance is deferred until the final AWS stage.
-
-After a deploy, inspect the live AWS surface without mutating resources:
-
-```bash
-devsecops deploy status
-devsecops deploy logs --failed
-devsecops aws outputs --environment prod
-devsecops health --aws-sigv4
-devsecops health --url https://abc123.execute-api.us-east-1.amazonaws.com/health --aws-sigv4
-devsecops github status --format compact --strict
-```
-
-All health checks require HTTP 2xx and reject redirects. Signed checks also
-require HTTPS. The default HTTP timeout is 20 seconds. For a custom API
-Gateway domain you control, pass its exact hostname with `--trusted-host`:
-
-```bash
-devsecops health --url https://api.example.com/health --aws-sigv4 --trusted-host api.example.com
-```
-
-`github status` and `doctor actions` show failed jobs, failed steps, concrete
-next actions, and runbook links. Use `devsecops status --deep --strict` for
-post-deployment verification.
-
-For release review or production proof, collect an attachable evidence bundle
-with the commands in
-[Production deployment evidence](docs/production-deployment-evidence.md). The
-bundle captures release verification, strict config/readiness output, GitHub
-setup, workflow status, Terraform outputs, AWS outputs, health checks,
-CloudWatch logs, and rollback readiness.
-
-Before a stable tag, run:
-
-```bash
-devsecops criteria --strict --evidence-dir dist/devsecops/production-evidence/v1.0.0
-```
-
-The `config set` command supports non-interactive configuration for scripts and quick
-edits:
-
-```bash
-devsecops config set lambda_image_uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/app:sha-a1b2c3
-devsecops config set enable_dast true
-devsecops config set environments.prod.lambda_timeout 300 --generate
-devsecops config validate
-devsecops config validate --strict
-```
-
-Presets provide a quick starting point:
-
-```bash
-devsecops preset list
-devsecops preset show enterprise
-devsecops preset apply minimal --generate       # low-cost local/dev experimentation
-devsecops preset apply balanced --generate      # default reference settings
-devsecops preset apply strict --generate        # enables health validation and DAST
-devsecops preset apply enterprise --generate    # locked-down CORS and longer retention
-devsecops preset apply student-demo --generate  # simple demonstration profile
-```
-
-For compatibility, `devsecops preset strict --render` still applies the named
-preset, but new scripts should use `devsecops preset apply <name>`.
-
-Each preset has a documented security posture and can be compared with
-`devsecops preset list`. Use
-[Security controls and policy presets](docs/security-controls.md) for the full
-control catalog, preset comparison, strict validation rules, and audit evidence
-format.
-
-Log retention uses the discrete periods listed by `devsecops config schema`.
-The enterprise production setting is 1096 days. CLI and Terraform reject
-unsupported periods such as 2 or 1095 days. See the
-[CloudWatch retention API](https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_PutRetentionPolicy.html).
-
-Project names can contain 3–32 characters. Terraform keeps valid generated
-bucket names and shortens names that exceed the S3 limit or use a reserved
-prefix. The deterministic suffix includes the original name's hash. See the
-[upgrade guide](docs/upgrade-guide.md#aws-constraints-and-bucket-names).
-
-Under `Advanced`, use the compatibility composer when you want the CLI to ask
-for individual controls and then update all generated outputs in one pass:
-
-```bash
-devsecops compose
-```
-
-Composer asks whether to enable Snyk container scanning, DAST, health checks,
-strict CORS, the protected `prod` approval environment, and a separate AWS plan
-role. It updates `.devsecops-pipeline.toml`, generates Terraform/GitHub helper
-artifacts, and writes `dist/devsecops/readiness-report.md`.
-
-## CLI-Managed Backend Bootstrap
-
-Terraform cannot create the S3 backend it is already using. Configure the
-backend values through the CLI, generate helper artifacts, and let the CLI run
-the bootstrap stack:
-
-```bash
-devsecops config set backend.bucket <globally-unique-state-bucket> --generate
-devsecops config set backend.lock_table devsecops-pipeline-terraform-locks --generate
-devsecops bootstrap
-devsecops bootstrap --apply
-```
-
-`devsecops bootstrap` plans by default. Use `--apply` only after reviewing the
-target AWS account, bucket name, and lock table name.
-
-The CLI writes `dist/devsecops/backend.hcl` and passes it explicitly to
-Terraform init. After `devsecops github setup --apply`, GitHub Actions creates
-the same inputs on its runner. Your bucket names and regions stay out of the
-tracked `terraform/backend.tf` template. The generated `backend.tf` remains an
-optional reference for manual Terraform use.
-
-## Environment Workflow
-
-Use the CLI for the normal environment workflow:
-
-```bash
-devsecops envs
-devsecops preset apply balanced --generate
-devsecops plan dev --create-workspace
-devsecops plan staging --create-workspace
-devsecops plan prod --create-workspace
-```
-
-The CLI delegates to Terraform workspaces under the hood. The active workspace
-selects `environment_config` from `terraform/variables.tf`. Running in the
-default workspace falls back to `var.environment`, which defaults to `dev`.
-
-## GitHub Actions Setup
-
-Generate repository setup commands from the same local config used by
-Terraform:
-
-```bash
-devsecops github-setup --write
-devsecops gh-setup --apply --repo <OWNER>/<REPO> \
-  --deploy-role-arn arn:aws:iam::<account-id>:role/<deploy-role> \
-  --plan-role-arn arn:aws:iam::<account-id>:role/<plan-role>
-devsecops gh-doctor
-devsecops branch-doctor
-devsecops aws-doctor --environment prod
-```
-
-Workflow secret scopes:
-
-| Secret | Purpose |
-| --- | --- |
-| `AWS_ROLE_TO_ASSUME_ARN` | Deployment role at repository or `prod` environment scope. |
-| `AWS_PLAN_ROLE_TO_ASSUME_ARN` | Required least-privilege role for Terraform plan workflows. Plans do not fall back to the deploy role. |
-| `AWS_REGION` | Optional legacy value. Updated workflows use the region from `PIPELINE_CONFIG_JSON`. |
-| `SNYK_TOKEN` | Required at repository or `prod` scope when `ENABLE_SNYK_SCAN=true`. |
-
-Create and protect the `prod` GitHub Environment before setup. The CLI shows
-the destination and pins every write to that repository. Existing production
-secret overrides are updated in `prod`; the plan role stays at repository scope.
-Supplying role arguments requires two distinct, valid IAM role ARNs.
-
-If synchronization fails, its result table shows which settings were applied.
-The complete pipeline configuration is published last, so an incomplete setup
-blocks subsequent workflows. Retry with the same `--repo` and arguments.
-An update may retain existing role secrets by omitting both role arguments.
-Run the separate [OIDC verification jobs](AWS_policy.md#verify-role-setup)
-during final acceptance. Doctor keeps OIDC readiness unverified until both
-roles pass on current `main` with current secret revisions.
-
-Repository variables:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PIPELINE_CONFIG_JSON` | required | Complete schema-owned, non-secret user configuration. Updated cloud workflows use this as their settings source. |
-| `PROJECT_NAME` | `devsecops-pipeline` | Compatibility mirror of the resource prefix in pipeline configuration. |
-| `LAMBDA_IMAGE_URI` | none | Compatibility mirror of the configured image. Production dispatch supplies a reviewed ECR digest. |
-| `API_AUTHORIZATION_TYPE` | `AWS_IAM` | API Gateway route authorization. Use `NONE` only for demo or intentionally public non-sensitive APIs. |
-| `ENABLE_SNYK_SCAN` | `false` | Production scans the reviewed image archive with digest/version-pinned Snyk in a restricted container; `SNYK_TOKEN` is required. AWS/OIDC credentials remain outside the scanner. |
-| `ENABLE_HTTP_VALIDATION` | `false` | Compatibility mirror of `enable_http_validation` in `PIPELINE_CONFIG_JSON`. Production requires `true` and checks `/health` after apply. |
-| `ENABLE_DAST` | `false` | When `true`, CI runs OWASP ZAP baseline scan only when `API_AUTHORIZATION_TYPE=NONE`. |
-| `PROD_APPROVAL_ENVIRONMENT` | `prod` | Compatibility posture value. Production jobs and CLI preflight verify `prod` reviewer and branch protections. |
-| `ENABLE_AWS_PLAN` | `false` | Explicit deployment-repository opt-in for manual sandbox plans from `main`. Preserved by `github setup`. |
-| `PLAN_BACKEND_JSON` | none | Independent sandbox backend: bucket, key, region, lock_table, workspace_key_prefix. Must use a different bucket and lock table from deployment. |
-
-Recommended branch protection for `main`:
-
-* Require pull requests before merging.
-* Require `Security and Terraform Validate` and `Terraform Format and Validate`
-  to pass. Remove the former `Terraform Plan` requirement when upgrading.
-* All PRs use credential-free validation. Enable sandbox planning only in a
-  configured deployment repository; see [Manual sandbox plans](docs/sandbox-plans.md).
-* Direct pushes to `main` do not run this workflow.
-
-Use separate AWS roles for plan and deploy. The plan role should read isolated
-sandbox state, acquire its locks, and describe sandbox resources; it should
-not mutate workload resources. The deploy role is reserved for approved manual
-production deploys from `main`. See [AWS IAM policy guidance](AWS_policy.md)
-and [Security controls and policy presets](docs/security-controls.md).
-
-## Pipeline Behavior
-
-| Event | Environment | Terraform action | Deployment |
-| --- | --- | --- | --- |
-| Pull request to `main`, internal branch or fork | n/a | backend-free validation and IaC scan | No AWS credentials or state access. |
-| Push to `main` | n/a | none | No workflow run. Maintainer pushes do not consume Actions minutes. |
-| Manual `workflow_dispatch`, `mode=plan`, branch `main`, explicit opt-in | `dev` in independent sandbox backend | sandbox `plan` only | No apply or production state access. |
-| Manual `workflow_dispatch`, `mode=deploy`, `environment=prod`, branch `main` | `prod` | Plan and apply the saved plan | Verify the reviewed commit, configuration, and image digest. Deploy Lambda and verify `/health`, with optional scanning and automatic recovery. |
-| Manual `workflow_dispatch`, `mode=rollback`, `environment=prod`, branch `main` | `prod` | Targeted refresh-only | Restore the selected ECR digest on the existing Lambda, record it in Terraform state, and verify `/health`. |
-| Push tag `v*.*.*` | n/a | n/a | Publish GitHub Release from `docs/release-<tag>.md` or `CHANGELOG.md` with installer, wheel, source distribution, and `SHA256SUMS`. |
-
-Manual `deploy` and `rollback` require `environment=prod` and branch `main`.
-Manual sandbox `plan` requires `environment=dev`, branch `main`,
-`ENABLE_AWS_PLAN=true`, and valid `PLAN_BACKEND_JSON`.
-Unsupported combinations fail in the credential-free validation job with a
-message explaining the supported selection.
-
-`devsecops deploy status` reports success after checking the production job
-and its apply/health or restore steps. Skipped and neutral runs return an
-error. JSON output includes `deployment_result` and `deployment_detail`
-alongside the raw workflow conclusion.
-
-## Deployment Flow
-
-For a command-by-command walkthrough with expected output, see
-[First successful pipeline](docs/first-successful-pipeline.md). For a
-production-proof release record, use
-[Production deployment evidence](docs/production-deployment-evidence.md).
-
-1. Configure local pipeline state with `devsecops setup`; use the Configuration
-   section for later edits.
-2. Generate deployment files with `devsecops generate`.
-3. Check readiness with `devsecops status`, `doctor`, and GitHub diagnostics.
-4. Validate Terraform formatting and configuration in GitHub Actions on pull
-   requests or manual runs.
-5. Run Trivy IaC scanning.
-6. Run `devsecops deploy prod --dry-run` to review the ECR digest, configuration
-   SHA-256, and remote `main` commit. The CLI uses local AWS credentials to
-   verify the selected ECR image and its Linux `amd64` platform.
-7. Run `devsecops deploy prod` and confirm the pinned inputs. GitHub verifies
-    the inputs before approval and again before requesting AWS credentials.
-8. Verify the selected image again under the runner's deploy role, then
-   capture the previously deployed Lambda digest and verify it remains in ECR.
-9. Optionally scan the configured Lambda image with Snyk.
-10. Verify the Lambda matches the selected Terraform state. To publish to the
-    built-in ECR repository, [provision it separately before the first deployment](docs/bring-your-own-image.md#provision-the-built-in-repository-before-the-first-deploy).
-11. Create a Terraform plan with the reviewed digest and apply that saved plan
-    in the same approved run.
-12. Wait for the Lambda update to complete.
-13. Check `/health`. Run OWASP ZAP baseline DAST only when enabled and
-    `API_AUTHORIZATION_TYPE=NONE`.
-14. If apply or validation fails and a previous digest was captured, restore
-    that Lambda image, reconcile Terraform state in refresh-only mode, and
-    verify the restored endpoint responds to `/health`.
-15. Use `devsecops deploy status`, `devsecops deploy logs`, and, when an
-    explicit operator rollback is required, `devsecops deploy rollback` for the
-    rest of the deployment lifecycle without constructing `gh` commands.
-
-## Workload Image Contract
-
-The supplied image must be compatible with Lambda container package type and
-must be published before the production deploy workflow runs. Use immutable tags
-or image digests; do not use `latest` or `bootstrap`.
-
-Validate the image URI locally before writing it into config:
-
-```bash
-devsecops image validate --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
-```
-
-The bring-your-own-image path is documented in
-[Bring your own Lambda image](docs/bring-your-own-image.md). The optional
-[text statistics Lambda](examples/text-stats/README.md) provides a small diploma
-workload in this checkout. Production applications can use a separate repository; see
-[Separate example workload template](docs/example-workload-template.md) as the
-repository contract.
-
-For production, set `enable_http_validation=true`. The image must handle API
-Gateway HTTP API events and return a successful response for `GET /health`. If
-`ENABLE_DAST=true`, set `API_AUTHORIZATION_TYPE=NONE` only when the API is
-safe for a passive unauthenticated OWASP ZAP baseline scan.
-
-## Useful Terraform Outputs
-
-Example shape after a successful `prod` deploy:
-
-```text
-environment = "prod"
-terraform_workspace = "prod"
-api_gateway_health_url = "https://abc123.execute-api.us-east-1.amazonaws.com/health"
-api_gateway_invoke_url = "https://abc123.execute-api.us-east-1.amazonaws.com/"
-ecr_repository_name = "devsecops-pipeline-prod-lambda-repo"
-ecr_repository_url = "123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo"
-lambda_function_name = "devsecops-pipeline-prod-lambda"
-output_s3_bucket_name = "devsecops-pipeline-prod-workload-data-123456789012"
-```
-
-Health check, when the workload implements `/health`:
-
-```bash
-devsecops health --aws-sigv4
-```
-
-## Reference Documents
-
-* [Security model](docs/security-model.md)
-* [Security controls and policy presets](docs/security-controls.md)
-* [Scanning tool rationale](docs/scanning-tools.md)
-* [AWS cost estimation](docs/cost-estimation.md)
-* [Troubleshooting guide](docs/troubleshooting.md)
-* [Product roadmap](ROADMAP.md)
-* [Command inventory](docs/command-inventory.md)
-* [CLI architecture](docs/cli-architecture.md)
-* [Stability contract](docs/stability-contract.md)
-* [Generated artifacts](docs/generated-artifacts.md)
-* [First successful pipeline](docs/first-successful-pipeline.md)
-* [Production deployment evidence](docs/production-deployment-evidence.md)
-* [v1.0.0 release candidate checklist](docs/v1.0.0-release-candidate-checklist.md)
-* [Bring your own Lambda image](docs/bring-your-own-image.md)
-* [Separate example workload template](docs/example-workload-template.md)
-* [Operational runbooks](docs/runbooks/README.md)
-* [AWS OIDC and IAM policy guidance](AWS_policy.md)
-* [Distribution and compatibility](docs/distribution.md)
-* [Release checklist](docs/release-checklist.md)
-* [Upgrade guide](docs/upgrade-guide.md)
-* [Known limitations](docs/known-limitations.md)
-* [Changelog](CHANGELOG.md)
-* [v0.16.0-beta.1 prerelease notes](docs/release-v0.16.0b1.md)
-* [v0.15.0 release notes](docs/release-v0.15.0.md)
-* [v0.14.0 release notes](docs/release-v0.14.0.md)
-* [v0.13.1 release notes](docs/release-v0.13.1.md)
-* [v0.13.0 release notes](docs/release-v0.13.0.md)
-* [v0.12.0 release notes](docs/release-v0.12.0.md)
-* [v0.11.0 release notes](docs/release-v0.11.0.md)
-* [v0.8.0 release notes](docs/release-v0.8.0.md)
-* [v0.7.0 release notes](docs/release-v0.7.0.md)
-* [v0.6.1 release notes](docs/release-v0.6.1.md)
-* [v0.6.0 release notes](docs/release-v0.6.0.md)
-* [v0.5.0 release notes](docs/release-v0.5.0.md)
-* [v0.4.1 release notes](docs/release-v0.4.1.md)
-* [v0.4.0 release notes](docs/release-v0.4.0.md)
-* [v0.3.0 release notes](docs/release-v0.3.0.md)
-* [v0.2.0 release notes](docs/release-v0.2.0.md)
-* [v0.1.0 release notes](docs/release-v0.1.0.md)
+Apply accepts the reviewed saved plan, bound to account, region, source,
+settings, state and immutable image. Use `lab status`, `lab request` and
+`lab logs` to inspect actual results. Failed updates attempt recovery to the
+previous verified image; a recovered deployment still returns a failure exit.
+
+Lab state, settings and evidence live under `.devsecops/labs/`. Back them up
+before teardown. Follow [Finish demo / decommission](docs/runbooks/finish-demo.md)
+to review retained data, empty owned versioned buckets and ECR, apply a destroy
+plan, then verify resource absence, KMS schedules and delayed billing.
 
 ## Current Limitations
 
-The full accepted-limitations and stable-release blocker register is tracked in
-[Known limitations](docs/known-limitations.md).
+- The CLI consumes published images. Application builds, dependency scans and
+  image publication belong to the workload's build process.
+- The lab uses local state and one operator. It does not run the production
+  workflow or its security scanners. Low-quota shared-pool mode has no dedicated
+  per-function capacity guarantee.
+- API Gateway defaults to IAM authorization. Application users, tenant checks
+  and business permissions remain workload responsibilities.
+- Production/OIDC workflows are experimental. Optional ZAP testing is a passive
+  baseline scan; Snyk requires a separate account/token.
+- Windows/WSL2 compatibility is unverified. PyPI publishing is deferred.
 
-* Application source, dependency scanning, and image build logic are expected to
-  live in the workload repository or an upstream release workflow.
-* The CLI is the product surface, but Terraform and GitHub Actions remain the
-  execution layer. Advanced operators may still need to inspect Terraform plans
-  and workflow logs directly.
-* API Gateway defaults to IAM authorization, but workload-level user identity,
-  tenant checks, and business authorization are still outside this repository.
-* Optional DAST is a passive baseline scan only. Authenticated flows and
-  business-logic checks need workload-specific tests.
-* Experimental production proof requires a real AWS/GitHub production
-  walkthrough evidence bundle plus final GitHub CLI, AWS CLI, and supported-platform
-  compatibility transcripts. Windows and WSL2 are outside this release target.
+See [Known limitations](docs/known-limitations.md) for the full scope and
+[release evidence](docs/single-operator-release-evidence.md) for acceptance
+requirements tied to a specific commit and wheel.
+
+## Documentation
+
+Use the [documentation index](docs/README.md) to find installation, upgrades,
+troubleshooting, security, command contracts and maintainer guides.
+
+- [First successful pipeline](docs/first-successful-pipeline.md)
+- [Experimental production walkthrough](docs/experimental-production-walkthrough.md)
+- [Stability contract](docs/stability-contract.md) and [generated artifacts](docs/generated-artifacts.md)
+- [Contributing and tests](CONTRIBUTING.md)
+- [Release checklist](docs/release-checklist.md) and [roadmap](ROADMAP.md)

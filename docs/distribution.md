@@ -1,40 +1,34 @@
 # Distribution And Compatibility
 
-Stable 1.0 acceptance targets the local CLI and **single-operator dev lab in one
-AWS account**. GitHub/OIDC production deployment, independent reviewers and
-separate-account sandbox acceptance are **experimental integrations**, outside
-this stable scope. Their runtime security guards remain unchanged. See
-[Single-operator release evidence](single-operator-release-evidence.md).
+Current source: `0.16.0b2.dev0` (unpublished). The published prerelease is
+`v0.16.0-beta.1` (`0.16.0b1`); the previous baseline is `v0.15.0`.
+**Beta.1 assets do not contain the single-operator lab.** Install the matching
+source checkout for that workflow.
 
-This document is the install, verification, shell completion, and compatibility
-contract for released DevSecOps Pipeline Kit CLI versions.
+Packages are distributed through GitHub Releases, not PyPI:
+`install.sh`, the `devsecops-pipeline-cli` wheel, source archive and `SHA256SUMS`.
+Keep Terraform/workflow sources at the same commit or release tag as the CLI.
 
-## Published Package Path
+## Install Current Source
 
-The canonical package path is GitHub Releases:
+Follow the complete [Quick Start](../README.md#quick-start). For an existing
+reviewed checkout:
 
-* Repository: `tidyOpposite/devsecops-pipeline-kit-aws-lambda`
-* Release tag format: `vX.Y.Z`; prereleases use tags such as `v0.16.0-beta.1`
-* Python package name: `devsecops-pipeline-cli`
-* Release assets produced by the current workflow:
-  * `install.sh`
-  * `devsecops_pipeline_cli-<version>-py3-none-any.whl`
-  * `devsecops_pipeline_cli-<version>.tar.gz`
-  * `SHA256SUMS`
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install --no-deps .
+export PATH="$PWD/.venv/bin:$PATH"
+devsecops --version
+```
 
-PyPI publication is deferred. Published installs use GitHub Release assets.
-Current source is `0.16.0b2.dev0` (unpublished). The published prerelease is
-`0.16.0b1`, tag `v0.16.0-beta.1`; it does not contain the new `lab` commands.
-For the lab, install a matching source checkout with `python3 -m pip install --no-deps .`
-inside a virtual environment. Keep its Terraform sources and installed CLI together.
-Final production acceptance is pending. The previous published baseline is
-[v0.15.0](https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/tag/v0.15.0),
-published 4 November 2026.
+Debian needs `python3-venv`. For editable development, use
+`.venv/bin/python -m pip install --no-deps -e .`. Record `git rev-parse HEAD`
+and the installed version when evaluating a source build.
 
 ## Install The Prerelease
 
 Choose the prerelease explicitly; an unpinned installer selects the latest
-non-prerelease. Keep the Terraform/workflow checkout at the same tag:
+non-prerelease. These commands install beta.1, not the current lab source:
 
 ```bash
 git clone --branch v0.16.0-beta.1 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-beta &&
@@ -44,36 +38,9 @@ export PATH="$HOME/.local/bin:$PATH" &&
 devsecops --version
 ```
 
-Expected CLI version: `devsecops 0.16.0b1`. Prerelease package filenames use
-the canonical Python version, for example
-`devsecops_pipeline_cli-0.16.0b1-py3-none-any.whl`.
-
-## Install Current Source
-
-Install CLI, Terraform and workflows from the same checkout. Use Python 3.11,
-3.12, 3.13 or 3.14 with venv/pip support (Debian needs `python3-venv`).
-
-```bash
-git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
-cd devsecops-pipeline-kit &&
-python3 -m venv .venv &&
-.venv/bin/python -m pip install --no-deps . &&
-export PATH="$PWD/.venv/bin:$PATH" &&
-devsecops --version &&
-devsecops setup --yes --strict
-```
-
-Record `git rev-parse HEAD`, `devsecops --version` and the built wheel checksum
-for evaluation. Source installation uses that checkout; running an
-installer pinned to `v0.15.0` installs the historical wheel instead.
-
-When using a manual wheel or pipx installation, keep a checkout too; installing
-the package does not download the Terraform/workflow source. Follow the
-[Quick Start](../README.md#quick-start) for the complete local demonstration.
-Commands run from project subdirectories find the root automatically. The
-nearest config or complete kit checkout wins, and a nested Git repository is
-a boundary; unrelated working directories never use the installed package as
-their project root.
+Expected version: `devsecops 0.16.0b1`. The installer verifies its wheel against
+the release manifest. Use a reviewed checkout or verify a downloaded installer
+before executing it; the pinned example below demonstrates that boundary.
 
 ## Pinned Published Baseline
 
@@ -126,20 +93,9 @@ After all fixes and acceptance, publish a stable version and pin its tag,
 source commit and checksum manifest. Never repoint the
 old tag or imply that the old wheel includes new source changes.
 
-Use `PYTHON=/path/to/python3.12` when auto-detection should use a specific
-interpreter. Use `--with-tui` to install optional Rich/Textual dependencies.
-
-For editable development in the source checkout's private environment:
-
-```bash
-.venv/bin/python -m pip install --no-deps -e .
-devsecops --version
-```
-
 ## Upgrade
 
-Run the installer again, then validate local config before generating or applying
-anything:
+Use a reviewed current installer and select the intended release explicitly:
 
 ```bash
 sh install.sh --version v0.16.0-beta.1
@@ -149,75 +105,25 @@ devsecops config diff
 devsecops generate --dry-run
 ```
 
-Read [Upgrade guide](upgrade-guide.md) before upgrading across a release that
-changes `.devsecops-pipeline.toml` schema behavior.
+The current installer prepares and verifies a new environment before atomically
+replacing its launcher. Failed environment creation, dependency installation,
+startup checks or activation preserve the working CLI. Concurrent installs are
+blocked; unrelated launchers and unmanaged environments are refused.
 
-Choose the intended tag explicitly. `v0.16.0-beta.1` opts into the prerelease;
-the pinned baseline section above still installs historical `v0.15.0`.
-Use a release's verified installer when outside a reviewed checkout.
-An unpinned `sh install.sh` resolves latest and does not select this beta.
-
-Each installer run prepares a fresh environment under
-`~/.local/share/devsecops-pipeline-cli/environments/venv-*` (or the configured
-`--install-dir`). It checks the selected release's exact CLI version and tests
-the replacement launcher before atomically replacing `devsecops`. The launcher
-uses that environment's Python in isolated mode, so `PYTHONPATH` and the current
-directory cannot substitute a different installed module.
-
-Failures while creating the environment, installing the wheel/TUI dependencies,
-checking startup, or publishing the launcher leave the existing launcher and
-environment intact. Incomplete candidates are removed. The legacy managed
-`<install-dir>/venv` layout upgrades automatically and remains available.
-Unrelated launchers and unmarked legacy environments are refused; use a
-different `--bin-dir`/`--install-dir` rather than overwriting another tool.
-Concurrent installers targeting the same install or bin directory are refused
-with a retry message; OS locks are released when the process exits.
-
-Old environments are retained so already-running commands can finish. They
-consume disk space until explicitly removed. Inspect the active launcher to
-identify its environment, and only remove other environments after their CLI
-processes have exited. To return to an earlier release, rerun this installer
-with `--version vX.Y.Z`; it verifies and activates that release through the same
-process. Older release-specific installer assets retain their historical
-behavior, so use the updated installer for this upgrade protection.
-
-## Manual Wheel Install With pipx
-
-The installer is the recommended user path. For controlled environments that
-already standardize on `pipx`, install a pinned wheel URL directly:
-
-```bash
-python3.11 -m pip install --user pipx
-python3.11 -m pipx ensurepath
-python3.11 -m pipx install --python python3.11 \
-  "devsecops-pipeline-cli @ https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/v0.15.0/devsecops_pipeline_cli-0.15.0-py3-none-any.whl#sha256=58d3dfb2986f1a398a8cb359fdcbd6d017425c8995d08017c6fd954092c82428"
-devsecops --version
-```
+Previous managed environments remain available for running processes. Remove
+unused environments only after checking the active launcher and closing older
+CLI processes. Re-run the current installer with an older `--version` to revert
+package versions safely. Historical installer assets retain their old behavior.
+See [Upgrade guide](upgrade-guide.md) for config and snapshot recovery.
 
 ## Verify Release Artifacts
 
-Every GitHub Release produced by the current workflow includes `SHA256SUMS` for
-the installer, wheel, and source distribution.
-
-```bash
-VERSION="0.15.0"
-TAG="v${VERSION}"
-BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
-WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
-
-curl -fsSLO "${BASE_URL}/SHA256SUMS"
-curl -fsSLO "${BASE_URL}/install.sh"
-curl -fsSLO "${BASE_URL}/${WHEEL}"
-grep " install.sh$" SHA256SUMS > install.sh.SHA256SUMS
-grep " ${WHEEL}$" SHA256SUMS > "${WHEEL}.SHA256SUMS"
-shasum -a 256 -c install.sh.SHA256SUMS
-shasum -a 256 -c "${WHEEL}.SHA256SUMS"
-
-sh install.sh --version "${TAG}"
-devsecops --version
-```
-
-On Linux, `sha256sum -c "${WHEEL}.SHA256SUMS"` is equivalent.
+Download the installer, wheel, source archive and `SHA256SUMS` from the same
+release. Compare
+the manifest with a separately reviewed checksum, then check each file before
+execution. On macOS use `shasum -a 256 -c SHA256SUMS`; on Debian use
+`sha256sum -c SHA256SUMS`. A matching manifest downloaded alongside files proves
+consistency, not independent authenticity.
 
 ## Shell Completion
 
@@ -263,7 +169,7 @@ devsecops completion bash --program devsecops-dev
 | GitHub CLI | 2.45.0 or newer | Required for `gh variable`, `gh secret`, `gh api`, and `gh run` workflows. Missing-tool behavior is tested; run `devsecops doctor github` in real repositories. |
 | AWS CLI | 2.15.0 or newer | Required for AWS diagnostics, backend checks, ECR inspection, Lambda outputs, and health-adjacent workflows. AWS CLI v1 is not supported. |
 
-Newer Terraform, GitHub CLI, and AWS CLI versions may work, but they are not
-considered supported until this matrix or the CI release gate is updated.
-Python 3.15 and newer are intentionally outside the support matrix until CI and
-release smoke tests cover them.
+Tool minimums describe accepted inputs, not proof of every newer version.
+Record actual versions in candidate acceptance; CI pins Terraform 1.10.5.
+Python 3.15+ and Windows/WSL2 need their own compatibility validation before
+being added to the declared target.

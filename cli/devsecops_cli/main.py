@@ -4677,7 +4677,7 @@ def show_production_deploy_command() -> None:
     print(f"  {PRODUCTION_DEPLOY_COMMAND} --dry-run")
     print("Deploy command:")
     print(f"  {PRODUCTION_DEPLOY_COMMAND}")
-    print("Docs: docs/first-successful-pipeline.md#7-run-the-production-workflow-dispatch")
+    print("Docs: docs/experimental-production-walkthrough.md#7-run-the-production-workflow-dispatch")
 
 
 def show_production_rollback_command() -> None:

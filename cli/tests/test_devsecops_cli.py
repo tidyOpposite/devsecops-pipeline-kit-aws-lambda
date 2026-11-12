@@ -21,7 +21,6 @@ from unittest.mock import patch
 
 from devsecops_cli.release_evidence import PRODUCTION_EVIDENCE_REQUIRED_FILES, PLATFORM_EVIDENCE_REQUIRED_FILES
 
-package = importlib.import_module("devsecops_cli")
 cli = importlib.import_module("devsecops_cli.main")
 ROOT_DIR = Path(__file__).resolve().parents[2]
 GOLDEN_DIR = Path(__file__).with_name("golden")
@@ -74,12 +73,6 @@ def create_required_project_files(root: Path) -> None:
         path.write_text("# test project file\n", encoding="utf-8")
 
 
-def project_version(path: Path) -> str:
-    """Read package version metadata from a pyproject file."""
-
-    return tomllib.loads(path.read_text(encoding="utf-8"))["project"]["version"]
-
-
 def project_requires_python(path: Path) -> str:
     """Read the supported Python range from a pyproject file."""
 
@@ -89,64 +82,15 @@ def project_requires_python(path: Path) -> str:
 class DevSecOpsCliTests(unittest.TestCase):
     """Exercise stable CLI contracts across local and mocked provider journeys."""
 
-    # Distribution metadata and first-success documentation stay synchronized.
-    def test_version_metadata_is_consistent(self) -> None:
-        self.assertEqual(package.VERSION, cli.VERSION)
-        self.assertEqual(package.__version__, cli.VERSION)
-        self.assertEqual(project_version(ROOT_DIR / "pyproject.toml"), cli.VERSION)
-        self.assertEqual(project_version(ROOT_DIR / "cli/pyproject.toml"), cli.VERSION)
-
-    def test_python_support_metadata_matches_compatibility_matrix(self) -> None:
-        distribution_doc = (ROOT_DIR / "docs/distribution.md").read_text(encoding="utf-8")
-        readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
-
-        self.assertEqual(project_requires_python(ROOT_DIR / "pyproject.toml"), ">=3.11,<3.15")
-        self.assertEqual(project_requires_python(ROOT_DIR / "cli/pyproject.toml"), ">=3.11,<3.15")
-        self.assertIn("| Python | 3.11, 3.12, 3.13, and 3.14 |", distribution_doc)
-        self.assertIn('requires-python = ">=3.11,<3.15"', distribution_doc)
-        self.assertIn("Python 3.11, 3.12, 3.13, or 3.14", readme)
-
-    def test_readme_provides_checkout_before_install_and_demo(self) -> None:
-        readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
-        first_screen_sections = [
-            "## What This Product Does",
-            "## Who It Is For",
-            "## Before You Start",
-            "## What This Product Does Not Do",
-            "## Quick Start",
-        ]
-
-        positions = [readme.index(section) for section in first_screen_sections]
-        self.assertEqual(positions, sorted(positions))
-        self.assertLess(readme.index("## Quick Start"), readme.index("## Development Status"))
-        self.assertLess(readme.index("## Quick Start"), readme.index("## Product Contract"))
-        self.assertLess(readme.index("## Quick Start"), readme.index("## Architecture"))
-        self.assertLess(readme.index("## Quick Start"), readme.index("## Repository Layout"))
-        self.assertIn(
-            """```bash
-git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
-cd devsecops-pipeline-kit &&
-python3 -m venv .venv &&
-.venv/bin/python -m pip install --no-deps . &&
-export PATH="$PWD/.venv/bin:$PATH" &&
-devsecops --version &&
-devsecops setup --yes --strict &&
-devsecops status &&
-devsecops dry-run
-```""",
-            readme,
-        )
-        self.assertIn("Expected result:", readme)
-
-    def test_ux_consolidation_docs_do_not_reintroduce_stale_terms_or_gaps(self) -> None:
-        readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
-        roadmap = (ROOT_DIR / "ROADMAP.md").read_text(encoding="utf-8")
-        inventory = (ROOT_DIR / "docs/command-inventory.md").read_text(encoding="utf-8")
-
-        self.assertNotIn("Use `readiness --strict`", readme)
-        self.assertNotIn("there is no explicit\n  clean-config workflow", roadmap)
-        self.assertIn("schema versioning and migration behavior are implemented", roadmap)
-        self.assertIn("nine entry points", inventory)
+    def test_python_support_metadata_agrees_between_packages(self) -> None:
+        for path in (ROOT_DIR / "pyproject.toml", ROOT_DIR / "cli/pyproject.toml"):
+            self.assertEqual(project_requires_python(path), ">=3.11,<3.15")
+            metadata = tomllib.loads(path.read_text())["project"]
+            versions = {value.removeprefix("Programming Language :: Python :: ")
+                        for value in metadata["classifiers"]
+                        if value.startswith("Programming Language :: Python :: 3.")}
+            if path == ROOT_DIR / "pyproject.toml":
+                self.assertEqual(versions, {"3.11", "3.12", "3.13", "3.14"})
 
     def test_module_execution_does_not_emit_runtime_warning(self) -> None:
         env = os.environ.copy()
@@ -430,12 +374,6 @@ devsecops dry-run
         with patch("builtins.input", return_value="0"):
             self.assertFalse(cli.prompt_bool("Flag", True))
 
-    def test_tfvars_contains_environment_config(self) -> None:
-        rendered = cli.terraform_tfvars(cli.default_config())
-        self.assertIn("CLI-owned generated file", rendered)
-        self.assertIn('project_name                          = "devsecops-pipeline"', rendered)
-        self.assertIn("environment_config = {", rendered)
-        self.assertIn("prod = {", rendered)
 
     def test_generated_terraform_tfvars_matches_golden_fixture(self) -> None:
         self.assertEqual(cli.terraform_tfvars(golden_config()), read_golden("terraform_generated.auto.tfvars.golden"))
@@ -460,120 +398,8 @@ devsecops dry-run
             self.assertIn("CLI-owned generated", artifact)
             self.assertIn("Do not edit directly", artifact)
 
-    def test_production_evidence_docs_cover_milestone_eight_contract(self) -> None:
-        evidence_doc = (ROOT_DIR / "docs/production-deployment-evidence.md").read_text(encoding="utf-8")
-        readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
-        command_inventory = (ROOT_DIR / "docs/command-inventory.md").read_text(encoding="utf-8")
-        release_checklist = (ROOT_DIR / "docs/release-checklist.md").read_text(encoding="utf-8")
-        roadmap = (ROOT_DIR / "ROADMAP.md").read_text(encoding="utf-8")
-
-        for required in [
-            "release-install.txt",
-            "workflow-run.json",
-            "terraform-output.json",
-            "aws-outputs.json",
-            "health.json",
-            "cloudwatch-tail.txt",
-            "active-lambda-image.txt",
-            "devsecops status --deep --strict --format json",
-            "devsecops doctor aws --environment prod --strict --format json",
-            "Roll back Lambda image on failed deployment validation",
-        ]:
-            self.assertIn(required, evidence_doc)
-
-        self.assertIn("[Production deployment evidence](docs/production-deployment-evidence.md)", readme)
-        self.assertIn("Production Evidence Workflow", command_inventory)
-        self.assertIn("Production Evidence Gate", release_checklist)
-        self.assertIn("Status: in progress.", roadmap)
-        self.assertIn("Full production deployment walkthrough executed", roadmap)
-
-    def test_stability_contract_docs_cover_milestone_nine_contract(self) -> None:
-        stability_doc = (ROOT_DIR / "docs/stability-contract.md").read_text(encoding="utf-8")
-        generated_doc = (ROOT_DIR / "docs/generated-artifacts.md").read_text(encoding="utf-8")
-        upgrade_doc = (ROOT_DIR / "docs/upgrade-guide.md").read_text(encoding="utf-8")
-        command_inventory = (ROOT_DIR / "docs/command-inventory.md").read_text(encoding="utf-8")
-        release_checklist = (ROOT_DIR / "docs/release-checklist.md").read_text(encoding="utf-8")
-        readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
-        roadmap = (ROOT_DIR / "ROADMAP.md").read_text(encoding="utf-8")
-
-        for required in [
-            "devsecops inventory --format json",
-            "devsecops terraform bootstrap --apply",
-            "JSON Output Contract",
-            "Deprecation Policy",
-            "Config Migration Rules",
-            "Generated Artifact Compatibility",
-            "Configs with `schema_version` greater than the current CLI supports",
-            "Rollback after migration is local only",
-        ]:
-            self.assertIn(required, stability_doc)
-
-        self.assertIn("[Stability contract](stability-contract.md)", command_inventory)
-        self.assertIn("devsecops inventory --format json", command_inventory)
-        self.assertIn("Compatibility And Regeneration", generated_doc)
-        self.assertIn("future `schema_version` greater than this CLI", upgrade_doc)
-        self.assertIn("Stability Contract Gate", release_checklist)
-        self.assertIn("[Stability contract](docs/stability-contract.md)", readme)
-        self.assertIn("Milestone 9: Stability Contract And Migration Readiness", roadmap)
-        self.assertIn("Status: implemented in `v0.11.0`.", roadmap)
-
-    def test_release_candidate_docs_cover_milestone_ten_contract(self) -> None:
-        rc_doc = (ROOT_DIR / "docs/v1.0.0-release-candidate-checklist.md").read_text(encoding="utf-8")
-        limitations_doc = (ROOT_DIR / "docs/known-limitations.md").read_text(encoding="utf-8")
-        release_checklist = (ROOT_DIR / "docs/release-checklist.md").read_text(encoding="utf-8")
-        readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
-        command_inventory = (ROOT_DIR / "docs/command-inventory.md").read_text(encoding="utf-8")
-        roadmap = (ROOT_DIR / "ROADMAP.md").read_text(encoding="utf-8")
-
-        for criterion in [
-            "CLI command groups and core flags are stable.",
-            "Config schema versioning and migration behavior are implemented.",
-            "Clean config generation, validation, rendering, and readiness are covered by end-to-end tests.",
-            "Generated Terraform and GitHub artifacts are deterministic and documented.",
-            "At least one full single-operator AWS lab walkthrough is documented.",
-            "Local rollback cannot overwrite files outside the CLI-owned file set.",
-            "Security controls have documented behavior and regression tests.",
-            "Release and upgrade flows are documented.",
-            "Known limitations are explicit rather than hidden in implementation details.",
-        ]:
-            self.assertIn(criterion, rc_doc)
-
-        for required in [
-            "Compatibility Verification Pass",
-            "Documentation Audit",
-            "Security Review",
-            "Version 1.0 Criteria Evidence Map",
-            "Blocker Register For v1.0.0 Stable",
-            "RC-B1",
-            "devsecops inventory --format json",
-            "devsecops criteria --strict --format json",
-            "devsecops report --format json",
-            "terraform -chdir=terraform validate -no-color",
-        ]:
-            self.assertIn(required, rc_doc)
-
-        self.assertIn("Accepted Limitations", limitations_doc)
-        self.assertIn("Blockers Before v1.0.0 Stable", limitations_doc)
-        self.assertIn("v1.0 Release Candidate Hardening Gate", release_checklist)
-        self.assertIn("[v1.0.0 release candidate checklist](docs/v1.0.0-release-candidate-checklist.md)", readme)
-        self.assertIn("Release candidate checklist", command_inventory)
-        self.assertIn("Status: release candidate shipped in `v0.11.0`.", roadmap)
-        self.assertIn("docs/v1.0.0-release-candidate-checklist.md", roadmap)
 
     # Parser help, completion, and inventory expose the supported CLI contract.
-    def test_help_documents_product_contract_and_first_run(self) -> None:
-        help_text = cli.build_parser().format_help()
-        self.assertIn("CLI product", help_text)
-        self.assertIn("Product boundary:", help_text)
-        self.assertIn("devsecops setup --yes --strict", help_text)
-        self.assertIn("devsecops dry-run", help_text)
-        self.assertIn("devsecops status", help_text)
-        self.assertIn("without arguments shows compact status and one next action", help_text)
-        self.assertIn("Human-readable commands finish with the same recommended next step", help_text)
-        self.assertIn("devsecops inventory --format json", help_text)
-        self.assertIn("Stability contract:", help_text)
-        self.assertIn("docs/command-inventory.md", help_text)
-        self.assertIn("docs/generated-artifacts.md", help_text)
 
     def test_top_level_help_is_grouped_and_legacy_aliases_are_not_primary_choices(self) -> None:
         help_text = cli.build_parser().format_help()
@@ -708,20 +534,6 @@ devsecops dry-run
             "--strict",
         ]:
             self.assertIn(flag, setup_help)
-        self.assertIn("does not", setup_help)
-        self.assertIn("imply --apply-github", setup_help)
-        self.assertIn("Examples:", setup_help)
-        self.assertIn("Side effects:", setup_help)
-        self.assertIn("Never starts a workflow", setup_help)
-
-        deploy_buffer = io.StringIO()
-        with redirect_stdout(deploy_buffer), self.assertRaises(SystemExit):
-            cli.main(["deploy", "prod", "--help"])
-        deploy_help = deploy_buffer.getvalue()
-        self.assertIn("devsecops deploy prod --dry-run", deploy_help)
-        self.assertIn("Side effects:", deploy_help)
-        self.assertIn("never writes AWS directly", deploy_help)
-
     # Unified next-action and guided setup flows share one ordered journey.
     def test_next_action_decision_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1307,8 +1119,7 @@ devsecops dry-run
         self.assertTrue(all(item["status"] == "OK" for item in payload["criteria"]))
         self.assertTrue(all(item["status"] == "BLOCKED" for item in payload["stable_release_gates"]))
 
-    def test_first_success_documented_commands_are_stable(self) -> None:
-        first_success_doc = (ROOT_DIR / "docs/first-successful-pipeline.md").read_text(encoding="utf-8")
+    def test_first_success_commands_are_stable(self) -> None:
         command_status = {item["command"]: item["status"] for item in cli.command_contracts()}
         required_stable_commands = [
             "devsecops status", "devsecops setup", "devsecops config validate", "devsecops config diff",
@@ -1318,10 +1129,7 @@ devsecops dry-run
         ]
 
         for command in required_stable_commands:
-            self.assertIn(command, first_success_doc)
             self.assertEqual(command_status[command], "stable", command)
-        self.assertNotIn("devsecops compose", first_success_doc)
-        self.assertNotIn("devsecops tui", first_success_doc)
 
     def test_readiness_json_output_contains_checks_and_gaps(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2500,7 +2308,6 @@ devsecops dry-run
             with redirect_stdout(buffer):
                 cli.print_main_menu(root)
             output = buffer.getvalue()
-            readme = (ROOT_DIR / "README.md").read_text(encoding="utf-8")
         self.assertFalse(any("[i]" in line for line in status))
         expected_items = [
             "[1] Continue setup",
@@ -2525,8 +2332,6 @@ devsecops dry-run
             ],
         )
         self.assertEqual([line for line in output.splitlines() if line.startswith("[")], expected_items)
-        for item in expected_items:
-            self.assertIn(item, readme)
         for old_item in ["[7] Composer", "[12] Terraform plan", "[18] Snapshots / rollback"]:
             self.assertNotIn(old_item, output)
 

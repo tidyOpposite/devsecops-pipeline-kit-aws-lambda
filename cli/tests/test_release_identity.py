@@ -81,16 +81,11 @@ class ReleaseIdentityTests(unittest.TestCase):
             self.assertEqual(current["status"], "OK")
             self.assertIn(f"docs/release-v{VERSION}.md", current["evidence"])
 
-    def test_current_source_status_and_package_metadata_are_consistent(self):
+    def test_package_versions_and_current_notes_match_cli(self):
         for name in ("pyproject.toml", "cli/pyproject.toml"):
             metadata = tomllib.loads((ROOT / name).read_text())["project"]
             self.assertEqual(metadata["version"], VERSION)
             self.assertIn("Development Status :: 4 - Beta", metadata["classifiers"])
-        for name in ("README.md", "ROADMAP.md", "docs/distribution.md", "docs/stability-contract.md",
-                     "docs/v1.0.0-release-candidate-checklist.md", "docs/production-deployment-evidence.md"):
-            text = (ROOT / name).read_text()
-            self.assertIn(VERSION, text, name)
-            self.assertIn("v0.15.0", text, name)
         self.assertTrue((ROOT / f"docs/release-v{VERSION}.md").is_file())
 
     def test_publication_checks_identity_before_build_evidence_download_or_publish(self):

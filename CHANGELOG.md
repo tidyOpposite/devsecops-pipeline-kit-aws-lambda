@@ -7,6 +7,11 @@ semantic versioning.
 
 ### Changed
 
+* Consolidate the README, roadmap, upgrade and release guides; add a focused
+  documentation index and repair production-help links. Remove duplicated
+  tests and assertions tied to documentation prose while preserving behavior,
+  security, installer recovery and deployment/cleanup regression coverage.
+
 * Target Debian 13 ARM64 instead of Ubuntu for Linux acceptance. Require both
   macOS and Debian candidate transcripts; keep Ubuntu as CI infrastructure.
 

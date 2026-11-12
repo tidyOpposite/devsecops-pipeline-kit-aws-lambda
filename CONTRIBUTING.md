@@ -1,91 +1,66 @@
 # Contributing
 
-Keep per-run test logs, personal demonstration reports and working audit notes
-outside tracked documentation. Use `docs/local/`, `.devsecops/` or
-`dist/devsecops/` for local records; these directories are ignored by Git.
-Public `docs/` should contain reusable user/maintainer guides, release notes
-and product limitations rather than workstation-specific verification logs.
-
-This repository is now developed as a CLI-first DevSecOps product for AWS
-Lambda pipelines. Contributions are welcome when they improve the terminal
-experience, correctness, security, reproducibility, documentation, or the
-Terraform/GitHub execution layer behind the CLI.
-
-## Product Priorities
-
-The CLI is the primary user interface. Changes should keep these priorities in
-mind:
-
-* Clear terminal workflows for setup, validation, rendering, diagnostics, and
-  rollback.
-* Actionable readiness feedback instead of raw tool output wherever possible.
-* Safe defaults, explicit confirmation for risky actions, and local snapshots
-  before overwriting CLI-owned files.
-* Terraform and GitHub Actions behavior that can be configured, explained, and
-  verified from the CLI.
-* Documentation that starts with `devsecops ...` commands before manual
-  Terraform, AWS, or GitHub fallback steps.
-
-## Useful Contribution Areas
-
-* CLI navigation, prompts, command ergonomics, packaging, and tests.
-* Readiness checks for local tooling, Terraform, GitHub, AWS, security gates,
-  and deployment state.
-* GitHub CLI integration for repository variables, secrets, Actions status, and
-  branch protection.
-* AWS diagnostics for backend, ECR, Lambda, API Gateway, CloudWatch, and IAM.
-* Terraform security improvements and least-privilege IAM refinements.
-* Scanner integration, policy presets, reports, and release workflow
-  automation.
-* Documentation for using the CLI in real AWS accounts.
-
-## Development Notes
-
-1. Treat CLI behavior as product behavior. If a change affects commands,
-   prompts, menu navigation, generated artifacts, or readiness scoring, update
-   tests and documentation in the same change.
-2. Do not commit cloud credentials, API tokens, Terraform state, local CLI
-   config, snapshots, or `.tfvars` files.
-3. Keep security scanner failures visible. Avoid suppressions unless the risk
-   is documented and intentionally accepted.
-4. Prefer small pull requests with clear rationale and validation notes.
-5. Preserve dependency-free core CLI flows unless a dependency is clearly worth
-   the packaging and installation cost.
-6. Preserve the module boundaries in [CLI architecture](docs/cli-architecture.md):
-   domain and provider modules must not import `devsecops_cli.main`, and new
-   side effects should remain replaceable in tests.
+The supported product scope is local CLI and single-operator AWS dev lab.
+Production GitHub/OIDC integrations remain experimental, with their security
+guards intact. Prefer small changes that improve operator behavior, correctness
+or reproducibility. Follow the [module boundaries](docs/cli-architecture.md).
 
 ## Local Checks
 
-Run the focused CLI checks before opening a pull request:
+From a reviewed checkout with Python 3.11–3.14:
 
 ```bash
-python3 -m py_compile cli/devsecops_cli/*.py cli/tests/test_devsecops_cli.py
-PYTHONPATH=cli python3 -m unittest discover -s cli/tests -v
-PYTHONPATH=cli python3 -m devsecops_cli readiness
+PYTHONPATH=cli python3 -m unittest discover -s cli/tests
+python3 -m unittest discover -s examples/text-stats/tests
+sh -n install.sh
+git diff --check
 ```
 
-For infrastructure changes, also run the relevant Terraform and workflow
-validation:
+Install optional Rich to exercise its renderer locally; CI runs that check
+separately. The real-provider credential regression needs
+`DEVSECOPS_TEST_TERRAFORM` and `DEVSECOPS_TEST_AWS_PROVIDER_DIR`; CI configures
+those after installing the locked provider. It uses fake credentials and a
+local STS endpoint, not an AWS account.
+
+For packaging changes, build/install the wheel in a fresh environment and check
+`devsecops --version`, `completion` and the local demo. For infrastructure
+changes, also run:
 
 ```bash
 terraform -chdir=terraform fmt -check -recursive
+terraform -chdir=terraform init -backend=false -input=false -lockfile=readonly
 terraform -chdir=terraform validate
-ruby -e 'require "yaml"; YAML.load_file(".github/workflows/deploy.yml")'
+terraform -chdir=terraform test
 ```
 
-## Documentation
+Lab and isolated-acceptance mock tests live in `terraform/lab/tests` and
+`terraform/acceptance/tests`. Their CI steps show initialization and provider
+lock handling. Real AWS acceptance is a separate explicitly scoped operation;
+ordinary tests must not create cloud resources or use real credentials.
 
-Documentation should be CLI-first:
+## Keep Tests Focused
 
-* Start with the CLI command that performs or diagnoses the workflow.
-* Explain generated files and Terraform/GitHub behavior as implementation
-  details behind that command.
-* Include manual commands only as fallback or advanced operator guidance.
-* Update `README.md`, `CHANGELOG.md`, and the relevant document under `docs/`
-  for user-visible behavior changes.
+- Test observable results, failure exits and side effects at process/provider
+  boundaries. Use temporary projects and fake credentials.
+- Retain regressions for data loss, authentication, plan drift, recovery,
+  pagination, installation and teardown. Security failures must remain visible.
+- Prefer one behavioral scenario or golden fixture over several tests checking
+  the same output. Avoid assertions about document wording, heading order or
+  internal helper calls when an existing journey already covers the behavior.
+- Keep regression cases that reproduce a real bug even when the fix is small.
+  Do not add tests for reversible prose changes.
 
-## Security
+## Documentation And Local Files
 
-Please do not disclose vulnerabilities publicly before they are reviewed. Use
-the process described in `SECURITY.md`.
+Start user guidance with the CLI action and its expected result. Put advanced
+production details in their own guides; link to the authoritative procedure
+instead of copying it. Update the relevant guide and changelog for user-visible
+changes. The [documentation index](docs/README.md) is the entry point.
+
+Keep audit notes, test logs and demonstration evidence in ignored `docs/local/`,
+`.devsecops/` or an external directory. Never commit credentials, local config,
+Terraform state, saved plans, snapshots or generated `.tfvars` files. Public
+documentation contains reusable guidance, not workstation-specific run logs.
+
+See [SECURITY.md](SECURITY.md) for private vulnerability reporting and the
+[release checklist](docs/release-checklist.md) for publishing requirements.

@@ -16,7 +16,8 @@ Private state/evidence are documented in [the lab guide](single-operator-lab.md)
 `lab concurrency` changes only local dev policy and invalidates saved reviews.
 Shared-pool `-1` is accepted only in the lab; primary Terraform and the protected
 workflow continue to require a positive integer reservation (CLI default 10).
-Previous published baseline: `v0.15.0`. Final acceptance is pending.
+Previous published baseline: `v0.15.0`. Release acceptance is tied to the exact
+candidate commit and wheel; see the release evidence contract.
 
 This contract explains which `devsecops` surfaces are stable enough to script
 against before `v1.0.0`, which surfaces are compatibility aliases or

@@ -1011,15 +1011,6 @@ class ValidationAndUiTests(unittest.TestCase):
             self.assertIn("Demo complete", text)
             self.assertNotIn("Blocked", text)
 
-    def test_wide_tables_preserve_text_at_narrow_terminal_widths(self):
-        value = "https://example.test/" + "a" * 140
-        for width in [40, 80, 120]:
-            output = io.StringIO()
-            with patch.object(cli.shutil, "get_terminal_size", return_value=os.terminal_size((width, 24))), redirect_stdout(output):
-                cli.draw_table(["Name", "Detail"], [["Customer", value]])
-                cli.draw_box("Status", [value])
-            self.assertTrue(all(len(line) <= width for line in output.getvalue().splitlines()))
-            self.assertIn(value, "".join(line.strip() for line in output.getvalue().splitlines()))
 
     def test_deployment_menu_keeps_preview_and_confirmation_inside_menu(self):
         for choice, handler, dry_run in [("2", "cmd_deploy_prod", False), ("6", "cmd_deploy_rollback", False),

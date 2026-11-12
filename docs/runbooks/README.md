@@ -1,8 +1,9 @@
 # Operational Runbooks
 
-Use these runbooks after `devsecops github status`, `devsecops doctor actions`,
-`devsecops aws outputs`, or `devsecops health` points to a failing operational
-path.
+For the single-operator lab, start with `devsecops lab status NAME`,
+`devsecops lab logs NAME` and the failed command's evidence directory.
+For experimental production, inspect `devsecops deploy status` and
+`devsecops deploy logs`. Choose the matching recovery guide below.
 
 | Failure | Runbook |
 | --- | --- |

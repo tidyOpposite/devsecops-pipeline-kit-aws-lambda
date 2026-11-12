@@ -1,271 +1,88 @@
 # Release Checklist
 
-Stable 1.0 acceptance targets the local CLI and **single-operator dev lab in one
-AWS account**. GitHub/OIDC production deployment, independent reviewers and
-separate-account sandbox acceptance are **experimental integrations**, outside
-this stable scope. Their runtime security guards remain unchanged. See
-[Single-operator release evidence](single-operator-release-evidence.md).
+Release scope is local CLI plus the single-operator AWS dev lab in one account.
+Production/OIDC integrations retain a separate experimental acceptance process.
+This guide defines release requirements; per-run results and screenshots stay
+outside Git. Never replace an existing tag or its assets.
 
+## Prepare The Version
 
-Current prerelease: `0.16.0b1` (`v0.16.0-beta.1`).
-Previous published baseline: `v0.15.0`.
-
-Use this guide for releases. Prereleases may be published for testing while
-cloud acceptance is pending; a stable release additionally requires the
-scoped single-operator evidence gates. Never replace an existing tag or its assets.
-Store per-run logs and acceptance records outside Git.
-
-## 1. Prepare The Version
-
-```bash
-git status --short --branch
-```
-
-Update all version references together:
-
-* `cli/devsecops_cli/__init__.py`
-* `pyproject.toml`
-* `cli/pyproject.toml`
-
-Update release documentation before validating:
-
-* `CHANGELOG.md`
-* version-specific notes at `docs/release-v<VERSION>.md`
-* `README.md` release links when a new release note is added
-* `ROADMAP.md` milestone status when a milestone ships
-
-Confirm the CLI and both package versions agree. Before building/tagging,
-derive the release identity from source instead of copying an old example:
+Update `cli/devsecops_cli/__init__.py`, both `pyproject.toml` files,
+`CHANGELOG.md`, `docs/release-v<VERSION>.md` and the current documentation links.
+Use canonical Python versions (`0.16.0rc1`) for semantic prerelease tags
+(`v0.16.0-rc.1`). Development versions cannot be published.
 
 ```bash
 export VERSION="$(PYTHONPATH=cli python3 -c 'from devsecops_cli import VERSION; print(VERSION)')"
 export TAG="${TAG:-v${VERSION}}"
-export NOTES="docs/release-v${VERSION}.md"
-PYTHONPATH=cli python3 -m devsecops_cli.release_version "${TAG}" . || exit 1
-if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-  echo "Choose a new version; this tag already exists." >&2
-  exit 1
-fi
+PYTHONPATH=cli python3 -m devsecops_cli.release_version "$TAG" .
 ```
 
-For a prerelease, set `TAG` explicitly (for example `v0.16.0-rc.1`) and use its
-canonical Python version (`0.16.0rc1`) in CLI/package metadata and notes. The
-publisher validates this mapping and the installer checks the canonical version.
+Choose the intended prerelease `TAG` explicitly. Check that the tag does not
+already exist locally or on the remote before continuing.
 
-## 2. Validate Locally
+## Validate The Candidate
+
+Follow [Contributing](../CONTRIBUTING.md#local-checks): CLI/example tests,
+installer syntax, package build/install, completion and applicable Terraform
+checks. Inspect `git diff --check` and the full staged changes before committing.
+Use a fresh package-output directory so existing evidence is not deleted.
+
+Push the candidate commit and require a successful CI run. Record its exact
+commit, CI run, wheel and SHA-256 manifest. Use the CI wheel for acceptance;
+the stable publisher publishes the checked candidate assets rather than a
+separately rebuilt wheel.
+
+## Stable Evidence Gate
+
+Complete the [single-operator release evidence contract](single-operator-release-evidence.md)
+against the same clean commit, installed wheel and matching Terraform checkout:
+
+- macOS and Debian platform records, including installer/upgrade recovery.
+- Fresh A, update B, failed C/automatic B, manual rollback A and signed HTTP.
+- Independent backups/restore, reviewed destroy and exact resource readback.
+- Retained local state, KMS deletion schedules and explicit billing follow-up.
+- Complete checksummed raw evidence and package/source identity.
 
 ```bash
-PYTHON="${PYTHON:-python3.11}"
-
-PYTHONPATH=cli "${PYTHON}" -m unittest discover -s cli/tests
-sh -n install.sh
-./install.sh --help >/tmp/devsecops-install-help.txt
-"${PYTHON}" -m pip install --upgrade pip==26.1.2 build==1.5.0 setuptools==82.0.1 wheel==0.47.0
-rm -rf build
-"${PYTHON}" -m build
-"${PYTHON}" -m pip install --no-deps --no-build-isolation .
-devsecops --version
-devsecops completion bash >/tmp/devsecops.bash
-devsecops completion zsh >/tmp/_devsecops
-devsecops completion fish >/tmp/devsecops.fish
-git diff --check
-terraform -chdir=terraform fmt -check -recursive
-terraform -chdir=terraform init -backend=false -input=false -no-color
-terraform -chdir=terraform validate -no-color
+devsecops criteria --strict --format json \
+  --evidence-dir /absolute/private/candidate \
+  --verify-github OWNER/REPO \
+  --artifacts-dir /absolute/private/candidate/artifacts
 ```
 
-If `gh` and AWS credentials are available, also run:
+Changing the candidate commit or version requires matching evidence. Preparatory
+`evidence collect --rc` output alone is not cloud acceptance. Prereleases may be
+published for testing before stable acceptance, with their limitations explicit.
+
+For a stable tag, stage the checked `release-evidence.zip` on a separate draft
+`evidence-v<VERSION>` at that exact commit, as specified by the release workflow.
+Do not push a stable tag until the owner authorizes publication.
+
+## Tag And Publish
+
+After authorization, from the accepted release commit:
 
 ```bash
-devsecops doctor github --format compact
-devsecops doctor aws --environment prod --format compact
-```
-
-## 3. Build And Check Artifacts
-
-```bash
-PYTHON="${PYTHON:-python3.11}"
-
-export PACKAGE_OUT="$(mktemp -d)"
-"${PYTHON}" -m build --outdir "${PACKAGE_OUT}"
-cp install.sh "${PACKAGE_OUT}/install.sh"
-chmod 0755 "${PACKAGE_OUT}/install.sh"
-(
-  cd "${PACKAGE_OUT}"
-  shasum -a 256 install.sh *.whl *.tar.gz > SHA256SUMS
-  shasum -a 256 -c SHA256SUMS
-)
-```
-
-Keep `dist/devsecops/production-evidence` intact. Package staging uses a fresh
-directory and must not delete the walkthrough evidence needed for publication.
-
-The tag workflow repeats this build on GitHub Actions and publishes:
-
-* installer
-* wheel
-* source distribution
-* `SHA256SUMS`
-
-## 4. Commit
-
-```bash
-git status --short
-git add -- \
-  install.sh \
-  cli/devsecops_cli/main.py \
-  cli/devsecops_cli/__init__.py \
-  cli/devsecops_cli/aws.py \
-  cli/devsecops_cli/completion.py \
-  cli/devsecops_cli/config.py \
-  cli/devsecops_cli/context.py \
-  cli/devsecops_cli/contracts.py \
-  cli/devsecops_cli/doctor.py \
-  cli/devsecops_cli/formatting.py \
-  cli/devsecops_cli/github.py \
-  cli/devsecops_cli/images.py \
-  cli/devsecops_cli/models.py \
-  cli/devsecops_cli/parser.py \
-  cli/devsecops_cli/paths.py \
-  cli/devsecops_cli/readiness.py \
-  cli/devsecops_cli/render.py \
-  cli/devsecops_cli/reports.py \
-  cli/devsecops_cli/snapshots.py \
-  cli/devsecops_cli/views.py \
-  cli/tests/test_architecture.py \
-  pyproject.toml \
-  cli/pyproject.toml \
-  cli/tests/test_devsecops_cli.py \
-  .github/workflows/ci.yml \
-  .github/workflows/release.yml \
-  CHANGELOG.md \
-  README.md \
-  ROADMAP.md \
-  docs/distribution.md \
-  docs/cli-architecture.md \
-  docs/first-successful-pipeline.md \
-  docs/generated-artifacts.md \
-  docs/known-limitations.md \
-  docs/production-deployment-evidence.md \
-  docs/release-checklist.md \
-  docs/stability-contract.md \
-  docs/v1.0.0-release-candidate-checklist.md \
-  docs/upgrade-guide.md \
-  "${NOTES}" \
-  docs/command-inventory.md
-git commit -m "Release ${TAG}"
-```
-
-## 5. Tag And Push
-
-Create an annotated tag from the release commit:
-
-```bash
-git tag -a "${TAG}" -m "Release ${TAG}"
+git tag -a "$TAG" -m "Release $TAG"
 git push origin main
-git push origin "${TAG}"
+git push origin "$TAG"
 ```
 
-The `Publish GitHub Release` workflow runs on `v*.*.*` tags.
-For a final tag at `v1.0.0` or later, complete the [single-operator evidence workflow](single-operator-release-evidence.md)
-and stage its separate draft before pushing the stable tag. The publisher
-cross-checks GitHub runs and logs for the release commit and publishes the
-reviewed CI candidate artifacts. A missing or invalid bundle fails publication.
+The tag workflow validates version/notes identity before publishing. For stable
+1.0+, it also verifies scoped evidence, GitHub CI and the accepted artifact
+bytes. Check that the workflow succeeded and that the resulting release has
+the correct prerelease flag, notes, installer, wheel, source archive and
+`SHA256SUMS`. Re-download and verify the assets, then install/test the release
+on the declared platforms. A failed workflow is not a completed release.
 
-## 6. Verify The Published Release
+## Production Evidence Gate
 
-After the workflow finishes:
+A release claiming production acceptance additionally needs the original
+[production evidence](production-deployment-evidence.md) and
+[separate-account runtime acceptance](security-gate-acceptance.md), including
+reviewer/OIDC protections. This gate does not apply to a lab-only claim. Keep
+production safeguards intact and label the evidence scope accurately.
 
-```bash
-BASE_URL="https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/releases/download/${TAG}"
-WHEEL="devsecops_pipeline_cli-${VERSION}-py3-none-any.whl"
-
-curl -fsSLO "${BASE_URL}/SHA256SUMS"
-curl -fsSLO "${BASE_URL}/install.sh"
-curl -fsSLO "${BASE_URL}/${WHEEL}"
-grep " install.sh$" SHA256SUMS > install.sh.SHA256SUMS
-grep " ${WHEEL}$" SHA256SUMS > "${WHEEL}.SHA256SUMS"
-shasum -a 256 -c install.sh.SHA256SUMS
-shasum -a 256 -c "${WHEEL}.SHA256SUMS"
-sh install.sh --version "${TAG}"
-devsecops --version
-```
-
-Confirm the release page includes the expected notes from
-the version-specific notes at `${NOTES}`.
-
-## 7. Production Evidence Gate
-
-For `v0.9.0` and later releases that claim production proof, run
-[Production deployment evidence](production-deployment-evidence.md) against the
-target AWS account and GitHub repository before closing the release.
-
-Attach or link the evidence bundle in the release record. At minimum, the
-bundle must include:
-
-* release install and checksum proof;
-* strict config validation and readiness JSON;
-* Markdown readiness report and JSON audit report;
-* GitHub doctor, branch doctor, and workflow run evidence;
-* verified Terraform backend/workspace and AWS identity in `terraform-context.json`,
-  Terraform outputs and `devsecops aws outputs` JSON;
-* `devsecops doctor aws --strict` JSON;
-* `/health` validation output, response body and explicit 2xx in `health-status.txt`;
-* CloudWatch log group/tail evidence;
-* active Lambda image and rollback-readiness notes.
-
-Include the isolated AWS runtime acceptance run/attempt ID and cleanup result
-from [Security gate acceptance](security-gate-acceptance.md). This real-service
-test belongs to final acceptance in a dedicated sandbox account; CI runs only
-its mock rehearsal and scanner-isolation probe.
-
-If the walkthrough exposes a failure mode not covered by
-[Operational runbooks](runbooks/README.md), update the runbook set before
-publishing the release.
-
-## 8. Stability Contract Gate
-
-For `v0.12.0` and later releases, verify the public contract before publishing:
-
-```bash
-devsecops inventory --format json
-devsecops inventory --status stable --format markdown
-devsecops config schema --format json
-devsecops config schema --format markdown
-devsecops status --format json
-devsecops generate --dry-run
-```
-
-Confirm:
-
-* first-success docs use only stable commands;
-* aliases have documented stable replacements and deprecation expectations;
-* experimental commands are not required by README, first-success, production
-  evidence, or release workflows;
-* every JSON `kind` used by scripts appears in the inventory contract;
-* schema-changing releases include migration tests and upgrade notes before
-  generated files are re-rendered;
-* generated artifact diffs match the expected compatibility notes in
-  [Generated artifacts](generated-artifacts.md).
-
-## 9. v1.0 Release Candidate Hardening Gate
-
-For the current hardening candidate and the final pre-`v1.0.0` release
-record, complete [v1.0.0 release candidate checklist](v1.0.0-release-candidate-checklist.md).
-
-At minimum, attach evidence for:
-
-* every Version 1.0 criterion in the evidence map;
-* `devsecops criteria --strict --format json` output;
-* `devsecops evidence collect --rc` output;
-* supported operating systems and tool versions in
-  [Distribution and compatibility](distribution.md);
-* quick start, first-success, upgrade, troubleshooting, runbook, command
-  inventory, and generated-artifact documentation audit;
-* GitHub Actions permissions, OIDC role guidance, Terraform validation,
-  scanner gates, rollback behavior, and audit evidence security review;
-* accepted limitations and stable-release blockers from
-  [Known limitations](known-limitations.md).
-
-Do not tag `v1.0.0` until `devsecops criteria --strict` exits `0` against the
-final evidence directory and the blocker register in the RC checklist is empty.
+See [Known limitations](known-limitations.md), [Stability contract](stability-contract.md)
+and [Upgrade guide](upgrade-guide.md) when reviewing compatibility and release claims.

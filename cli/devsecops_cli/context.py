@@ -177,7 +177,7 @@ def next_action(
                 why="Local config and the current preview are verified." if complete else "The local preview must match the current configuration.",
                 changes="Previews generated files locally; cloud services are not queried." if complete else "Rechecks and resumes the saved local demo.",
                 command="devsecops generate --dry-run" if complete else "devsecops setup --yes",
-                docs="docs/first-successful-pipeline.md#1-install-and-run-the-no-credentials-guided-demo",
+                docs="docs/first-successful-pipeline.md#install-and-run-locally",
                 context=context, blocked=not complete,
             )
     image_uri = str(cfg.get("lambda_image_uri", ""))
@@ -199,7 +199,7 @@ def next_action(
             why="A real S3 bucket is required for shared, locked Terraform state before production setup.",
             changes="Updates the local backend bucket setting; GitHub and AWS are not changed.",
             command="devsecops config set backend.bucket <state-bucket>",
-            docs="docs/first-successful-pipeline.md#4-configure-terraform-backend",
+            docs="docs/experimental-production-walkthrough.md#4-configure-terraform-backend",
             context=context,
         )
     if validation_policy_gaps:
@@ -219,7 +219,7 @@ def next_action(
             why="Deployment files must match the current local configuration.",
             changes="Creates or updates only CLI-owned files under terraform/ and dist/devsecops/.",
             command="devsecops generate",
-            docs="docs/first-successful-pipeline.md#5-configure-github-repository-settings",
+            docs="docs/experimental-production-walkthrough.md#5-configure-github-repository-settings",
             context=context,
         )
     if observations is not None:
@@ -282,7 +282,7 @@ def next_action(
             return _next_action(
                 action_id="missing_github_approvals", title="Production environment protection is not verified",
                 why=approval_gap.detail, changes="Read-only inspection of GitHub Environment prod protection rules.",
-                command="devsecops doctor github --strict", docs="docs/first-successful-pipeline.md#5-configure-github-repository-settings", context=context,
+                command="devsecops doctor github --strict", docs="docs/experimental-production-walkthrough.md#5-configure-github-repository-settings", context=context,
             )
         branch_gaps = [check for check in github_gaps if check.name.startswith(("Branch `", "Required check"))]
         if branch_gaps:
@@ -298,7 +298,7 @@ def next_action(
             why=f"{len(github_gaps)} required GitHub authentication, variable, secret, or repository check(s) are not ready.",
             changes="Applies the safe repository variables and role secrets supplied on the command line.",
             command="devsecops github setup --apply --deploy-role-arn <arn> --plan-role-arn <arn>",
-            docs="docs/first-successful-pipeline.md#5-configure-github-repository-settings",
+            docs="docs/experimental-production-walkthrough.md#5-configure-github-repository-settings",
             context=context,
         )
     if not command_exists_fn("aws"):
@@ -332,7 +332,7 @@ def next_action(
             action_id="missing_backend_resources", title="Terraform backend is not ready",
             why="; ".join(check.detail for check in backend_gaps),
             changes="Previews the backend infrastructure plan; no resources are applied.",
-            command="devsecops terraform bootstrap", docs="docs/first-successful-pipeline.md#4-configure-terraform-backend", context=context,
+            command="devsecops terraform bootstrap", docs="docs/experimental-production-walkthrough.md#4-configure-terraform-backend", context=context,
         )
     if observations is None:
         return _next_action(
@@ -359,7 +359,7 @@ def next_action(
             why="Local, GitHub and AWS prerequisites are verified. Review the exact inputs and workflow before dispatch.",
             changes="Read-only preview of the pinned production deployment.",
             command=PRODUCTION_DEPLOY_COMMAND + " --dry-run",
-            docs="docs/first-successful-pipeline.md#7-run-the-production-workflow-dispatch",
+            docs="docs/experimental-production-walkthrough.md#7-run-the-production-workflow-dispatch",
             context=context,
             blocked=False,
         )

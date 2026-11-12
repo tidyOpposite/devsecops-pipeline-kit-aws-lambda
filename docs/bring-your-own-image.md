@@ -51,7 +51,7 @@ the deployment.
 ## Provision The Built-in Repository Before The First Deploy
 
 Skip this step when publishing to an existing external ECR repository.
-For the built-in repository, first [bootstrap the remote state backend](first-successful-pipeline.md#4-configure-terraform-backend).
+For the built-in repository, first [bootstrap the remote state backend](experimental-production-walkthrough.md#4-configure-terraform-backend).
 Use AWS credentials for the target deployment account with permission to
 create the project KMS key and ECR repository. Generate the backend and
 Terraform inputs from the same project configuration the workflow will use.
@@ -125,3 +125,11 @@ Build, test, scan, and publish the workload separately from the kit deploy
 workflow. Use `examples/text-stats/` for the diploma or a separate workload
 repository for an independent application. The kit still consumes a published
 image and does not build or push it during deployment.
+
+## Optional Separate Workload Repository
+
+A separate repository is optional; the included [Text Stats example](../examples/text-stats/README.md)
+works for a small demonstration. For an independent application, keep its
+`Dockerfile`, source, tests and image-publication workflow together. That build
+pipeline owns application tests, dependency scanning and ECR publication. Pass
+the resulting immutable image URI to the lab or production deployment path.
