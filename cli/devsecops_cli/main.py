@@ -7,7 +7,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from . import VERSION, deployment, teardown
+from . import VERSION, deployment, menu, teardown
 from .migration import migrate
 from .paths import REQUIRED_PROJECT_FILES, find_project_root
 
@@ -19,6 +19,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=VERSION)
     commands = parser.add_subparsers(dest="command", required=True)
+    interactive = commands.add_parser(
+        "menu", help="Open the interactive readiness and deployment menu."
+    )
+    interactive.add_argument("name", nargs="?", help="Deployment to select on startup.")
     descriptions = {
         "init": "Save account, region and named AWS profile; create no AWS resources.",
         "plan": "Save a registry, workload, rollback or destroy plan for review.",
@@ -120,9 +124,25 @@ def cleanup(root: Path, args: argparse.Namespace) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    try:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "menu":
         root = find_project_root()
+
+        def run_selection(tokens: list[str]) -> int:
+            try:
+                selection = parser.parse_args(tokens)
+            except SystemExit as error:
+                return error.code
+            return run_command(selection, root)
+
+        return menu.run(root, args.name, run_selection)
+    return run_command(args)
+
+
+def run_command(args: argparse.Namespace, root: Path | None = None) -> int:
+    try:
+        root = root if root is not None else find_project_root()
         if any(not (root / name).is_file() for name in REQUIRED_PROJECT_FILES):
             raise deployment.DeploymentError(
                 "Run from a complete matching checkout; the wheel does not contain Terraform."

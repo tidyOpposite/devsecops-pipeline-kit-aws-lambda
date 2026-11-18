@@ -37,8 +37,9 @@ state або невідомою схемою. Після помилки пере
 ## Що більше не підтримується
 
 Demo/setup modes, lab namespace, GitHub/OIDC dispatch, production workflow,
-Snyk/ZAP wrappers, навчальний Text Stats, presets, generated GitHub helpers,
-старі меню й локальні snapshots прибрано з поточного продукту.
+Snyk/ZAP wrappers, навчальний Text Stats, presets, generated GitHub helpers
+та локальні snapshots прибрано з поточного продукту.
+`devsecops menu` відкриває інтерактивне меню для поточних команд.
 Окремий `cli/pyproject.toml` прибрано; встановлюйте та збирайте пакет із кореня.
 Історія попередньої реалізації зберігається в Git.
 

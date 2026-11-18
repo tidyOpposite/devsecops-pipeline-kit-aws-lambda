@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from devsecops_cli import deployment, main, migration, teardown
 from devsecops_cli.paths import find_project_root
-from test_deployment import ACCOUNT, PROJECT, REGION, FakeDeployment
+from test_deployment import ACCOUNT, IMAGE_A, PROJECT, REGION, REPOSITORY, FakeDeployment
 from test_teardown import BUCKET, FakeS3
 
 
@@ -69,7 +69,17 @@ class CoreCliTests(unittest.TestCase):
     def test_help_and_parser_expose_only_core_commands(self):
         parser = main.build_parser()
         help_text = parser.format_help()
-        for command in ("init", "plan", "apply", "status", "request", "logs", "cleanup", "migrate"):
+        for command in (
+            "menu",
+            "init",
+            "plan",
+            "apply",
+            "status",
+            "request",
+            "logs",
+            "cleanup",
+            "migrate",
+        ):
             self.assertIn(command, help_text)
         for command in (
             "lab",
@@ -78,13 +88,86 @@ class CoreCliTests(unittest.TestCase):
             "deploy",
             "github",
             "setup",
-            "menu",
             "tui",
             "generate",
         ):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
                 parser.parse_args([command])
             self.assertEqual(error.exception.code, 2)
+
+    def test_menu_displays_readiness_and_legacy_guidance_without_writes(self):
+        _, original = self.legacy()
+        with (
+            patch.object(main, "find_project_root", return_value=self.root),
+            patch("builtins.input", side_effect=["i", "", EOFError]),
+            patch.object(deployment, "execute") as execute,
+            contextlib.redirect_stdout(io.StringIO()) as out,
+        ):
+            self.assertEqual(main.main(["menu", original["name"]]), 0)
+        self.assertIn("% (local)", out.getvalue())
+        self.assertIn("Readiness details", out.getvalue())
+        self.assertIn("Legacy lab service found", out.getvalue())
+        self.assertIn("Input closed", out.getvalue())
+        self.assertFalse((self.root / ".devsecops/deployments").exists())
+        execute.assert_not_called()
+
+    def test_menu_automatically_selects_current_deployment_and_reads_local_state(self):
+        instance = self.menu_deployment()
+        context = {**instance.context(IMAGE_A), "repository_url": REPOSITORY}
+        deployment.write_json(
+            instance.state, {"resources": [], "outputs": {"deployment_context": {"value": context}}}
+        )
+        with (
+            patch.object(main, "find_project_root", return_value=self.root),
+            patch("devsecops_cli.menu.shutil.which", return_value="/usr/bin/fixture"),
+            patch("builtins.input", return_value="0"),
+            patch.object(deployment, "execute") as execute,
+            contextlib.redirect_stdout(io.StringIO()) as out,
+        ):
+            self.assertEqual(main.main(["menu"]), 0)
+        self.assertIn(f"{PROJECT} | {REGION} | readiness 100% (local)", out.getvalue())
+        self.assertIn("Run Status to verify the live Lambda", out.getvalue())
+        execute.assert_not_called()
+
+    def menu_deployment(self):
+        instance = FakeDeployment(self.root)
+        instance.settings = {
+            "schema_version": deployment.SCHEMA,
+            "name": instance.name,
+            "account_id": ACCOUNT,
+            "region": REGION,
+            "project_name": PROJECT,
+            "profile": "named-source",
+            "aws_binary": "/usr/bin/aws",
+            "reserved_concurrency": 10,
+            "purpose": "Deployment",
+        }
+        deployment.write_json(instance.settings_path, instance.settings)
+        return instance
+
+    def test_menu_reviews_full_plan_and_applies_only_on_confirmation(self):
+        instance = self.menu_deployment()
+        plan = instance.plan("registry", None)
+        for answer in ("", "yes"):
+            with (
+                patch.object(main, "find_project_root", return_value=self.root),
+                patch.object(deployment, "Deployment", return_value=instance),
+                patch(
+                    "builtins.input",
+                    side_effect=["3", "5", plan["plan_id"], plan["sha256"], answer, "", "0"],
+                ),
+                contextlib.redirect_stdout(io.StringIO()) as out,
+            ):
+                self.assertEqual(main.main(["menu", instance.name]), 0)
+            self.assertIn("Terraform reviewed fixture plan", out.getvalue())
+            self.assertIn(f"AWS account {ACCOUNT} | region {REGION}", out.getvalue())
+            applies = [args for tool, args in instance.calls if tool == "tf" and args[0] == "apply"]
+            self.assertEqual(len(applies), int(answer == "yes"))
+            if answer == "yes":
+                self.assertTrue(applies[0][-1].endswith(f"/{plan['plan_id']}/plan.tfplan"))
+                self.assertIn('"status": "registry-ready"', out.getvalue())
+            else:
+                self.assertIn("Apply cancelled", out.getvalue())
 
     def test_missing_checkout_fails_before_runtime_or_filesystem_writes(self):
         (self.root / "terraform/main.tf").unlink()
