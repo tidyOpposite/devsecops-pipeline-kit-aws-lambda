@@ -2,12 +2,12 @@
 
 Only lightweight version metadata is imported eagerly.  The command module is
 loaded on demand so library consumers can import domain helpers without also
-initializing the CLI orchestration layer.
+initializing the comparatively large CLI orchestration layer.
 """
 
 from importlib import import_module
 
-VERSION = "1.0.1"
+VERSION = "1.0.0"
 __version__ = VERSION
 
 __all__ = ["VERSION", "__version__", "main"]
