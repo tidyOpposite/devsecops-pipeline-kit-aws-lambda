@@ -5,9 +5,9 @@ semantic versioning.
 
 ## Unreleased
 
-## v1.0.2-rc.1 - 2026-11-22
+## v1.0.1 - 2026-11-22
 
-- Base the candidate on `v1.0.0` and its interactive CLI, including the original
+- Base this release on `v1.0.0` and its interactive CLI, including the original
   `devsecops menu` and readiness view.
 - Consolidate duplicated guidance, replace the static command catalog with the
   CLI inventory and point production evidence to its separate verifier.

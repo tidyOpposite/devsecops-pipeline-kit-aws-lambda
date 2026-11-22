@@ -1,6 +1,6 @@
 # Distribution And Compatibility
 
-Version `v1.0.0` includes the single-operator AWS lab. GitHub Releases provides:
+Version `v1.0.1` includes the single-operator AWS lab. GitHub Releases provides:
 `install.sh`, the `devsecops-pipeline-cli` wheel, source archive and `SHA256SUMS`.
 Keep Terraform/workflow sources at the same commit or release tag as the CLI.
 
@@ -26,14 +26,14 @@ Pin the intended release and keep the checkout and installed package at the
 same tag. An unpinned installer selects the latest non-prerelease:
 
 ```bash
-git clone --branch v1.0.0 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
+git clone --branch v1.0.1 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
 cd devsecops-pipeline-kit &&
-sh install.sh --version v1.0.0 &&
+sh install.sh --version v1.0.1 &&
 export PATH="$HOME/.local/bin:$PATH" &&
 devsecops --version
 ```
 
-Expected version: `devsecops 1.0.0`. The installer verifies its wheel against
+Expected version: `devsecops 1.0.1`. The installer verifies its wheel against
 the release manifest. Use a reviewed checkout or verify a downloaded installer
 before executing it; the pinned example below demonstrates that boundary.
 
@@ -81,7 +81,7 @@ devsecops generate --dry-run
 ```
 
 Expected version: `devsecops 0.15.0`. Use [Install a release](#install-a-release)
-for normal installation of `v1.0.0`.
+for normal installation of `v1.0.1`.
 
 ## Upgrade
 

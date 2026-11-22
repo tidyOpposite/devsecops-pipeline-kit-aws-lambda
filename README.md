@@ -5,12 +5,11 @@ an explicitly selected AWS account. Review saved Terraform plans before apply,
 check signed HTTP responses, and recover a previous image after failed health
 validation.
 
-Stable release: **`v1.0.0`** (Python package **`1.0.0`**).
+Stable release: **`v1.0.1`** (Python package **`1.0.1`**).
 Stable scope is the local CLI and single-operator AWS dev lab in one account.
 GitHub/OIDC production integrations remain experimental.
-See the [1.0 release notes](docs/release-v1.0.0.md),
+See the [release notes](docs/release-v1.0.1.md),
 [installation guide](docs/distribution.md) and [changelog](CHANGELOG.md).
-See the [documentation update candidate](docs/release-v1.0.2rc1.md) for this checkout.
 
 ## Choose Your Workflow
 
@@ -25,10 +24,10 @@ Production integration retains its separate safeguards and acceptance process.
 
 ## Quick Start
 
-Install `v1.0.0` from source and run the local demo:
+Install `v1.0.1` from source and run the local demo:
 
 ```bash
-git clone --branch v1.0.0 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
+git clone --branch v1.0.1 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
 cd devsecops-pipeline-kit &&
 python3 -m venv .venv &&
 .venv/bin/python -m pip install --no-deps . &&

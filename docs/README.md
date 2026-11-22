@@ -17,6 +17,6 @@ Start with the [Quick Start](../README.md#quick-start) for setup and the termina
 - [IAM roles and policies](../AWS_policy.md), [isolated sandbox plans](sandbox-plans.md)
 - [Production evidence](production-deployment-evidence.md), [separate-account acceptance](security-gate-acceptance.md)
 
-See the [1.0.0 release notes](release-v1.0.0.md) and [changelog](../CHANGELOG.md)
+See the [release notes](release-v1.0.1.md) and [changelog](../CHANGELOG.md)
 for version history. Earlier release notes remain in the
 [`v1.0.0` documentation snapshot](https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda/tree/v1.0.0/docs).
