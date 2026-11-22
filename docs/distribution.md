@@ -1,10 +1,6 @@
 # Distribution And Compatibility
 
-Current release: `v1.0.0` (Python package `1.0.0`), including the
-single-operator AWS lab. The previous non-prerelease baseline is `v0.15.0`.
-The earlier beta.1 assets predate the lab workflow.
-
-Packages are distributed through GitHub Releases, not PyPI:
+Version `v1.0.0` includes the single-operator AWS lab. GitHub Releases provides:
 `install.sh`, the `devsecops-pipeline-cli` wheel, source archive and `SHA256SUMS`.
 Keep Terraform/workflow sources at the same commit or release tag as the CLI.
 
@@ -30,8 +26,8 @@ Pin the intended release and keep the checkout and installed package at the
 same tag. An unpinned installer selects the latest non-prerelease:
 
 ```bash
-git clone --branch v1.0.0 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-beta &&
-cd devsecops-beta &&
+git clone --branch v1.0.0 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
+cd devsecops-pipeline-kit &&
 sh install.sh --version v1.0.0 &&
 export PATH="$HOME/.local/bin:$PATH" &&
 devsecops --version
@@ -84,36 +80,13 @@ devsecops generate --dry-run
 )
 ```
 
-Expected version is `devsecops 0.15.0`. That release reports
-`Guided setup complete`; its ordinary status can still show production gaps.
-The current source reports `Demo complete` with separate demo status.
-
-After all fixes and acceptance, publish a stable version and pin its tag,
-source commit and checksum manifest. Never repoint the
-old tag or imply that the old wheel includes new source changes.
+Expected version: `devsecops 0.15.0`. Use [Install a release](#install-a-release)
+for normal installation of `v1.0.0`.
 
 ## Upgrade
 
-Use a reviewed current installer and select the intended release explicitly:
-
-```bash
-sh install.sh --version v1.0.0
-devsecops --version
-devsecops config validate
-devsecops config diff
-devsecops generate --dry-run
-```
-
-The current installer prepares and verifies a new environment before atomically
-replacing its launcher. Failed environment creation, dependency installation,
-startup checks or activation preserve the working CLI. Concurrent installs are
-blocked; unrelated launchers and unmanaged environments are refused.
-
-Previous managed environments remain available for running processes. Remove
-unused environments only after checking the active launcher and closing older
-CLI processes. Re-run the current installer with an older `--version` to revert
-package versions safely. Historical installer assets retain their old behavior.
-See [Upgrade guide](upgrade-guide.md) for config and snapshot recovery.
+Follow the [upgrade and recovery guide](upgrade-guide.md#install-and-verify).
+Install the CLI version that matches the target checkout.
 
 ## Verify Release Artifacts
 

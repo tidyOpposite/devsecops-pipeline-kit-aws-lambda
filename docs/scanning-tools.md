@@ -1,87 +1,19 @@
-# Scanning Tool Rationale
+# Scanning Tools
 
-The CLI is the product surface for enabling, explaining, and checking scanner
-gates. GitHub Actions runs the scanners, while `devsecops compose`,
-`devsecops controls`, `devsecops status`, `devsecops preset`, and
-`devsecops generate` help the operator choose and validate the active policy.
+The experimental GitHub production workflow uses Trivy for IaC, Snyk Container
+for configured images and OWASP ZAP for passive checks on explicitly public APIs.
+The single-operator lab uses its own health and deployment checks.
 
-The kit intentionally separates infrastructure scanning from workload source
-scanning. This repository owns the CLI-managed AWS deployment template;
-application source, dependencies, and image build hardening belong to the
-workload release process that publishes `LAMBDA_IMAGE_URI`.
+Use `devsecops controls`, `devsecops explain dast` and `devsecops doctor github`
+to inspect gates. See [security controls](security-controls.md) for presets and
+[scanner isolation](security-gate-acceptance.md#reproducible-scanner-boundary)
+for how CI runs the tools.
 
-## Selected Stack
-
-| Layer | Selected tool | Why |
-| --- | --- | --- |
-| IaC | Trivy config scan | Fast Terraform misconfiguration checks with straightforward GitHub Actions integration and CLI readiness reporting. |
-| Container | Snyk Container | Optional deploy gate for known CVEs in the configured Lambda image. The CLI reports whether the gate can run based on config and secrets. |
-| DAST | OWASP ZAP baseline | Optional passive HTTP scanning against explicitly public deployed APIs. The CLI keeps it disabled until the operator opts in and the API auth mode is `NONE`. |
-
-## CLI Controls
-
-Use the CLI to inspect and configure scanning posture:
-
-```bash
-devsecops controls
-devsecops explain dast
-devsecops compose
-devsecops preset show strict
-devsecops preset apply strict --generate
-devsecops config set enable_snyk_scan true --generate
-devsecops config set enable_dast true --generate
-devsecops gh-doctor
-```
-
-`minimal` and `balanced` keep HTTP validation and DAST conservative by default.
-`strict` enables validation controls and is intended for workloads that already
-implement `/health` and can tolerate passive dynamic scanning.
-`enterprise` also enables those gates while using locked-down CORS and longer
-log retention. `student-demo` keeps scanning gates off for short demonstrations.
-
-Snyk container scanning is controlled by `enable_snyk_scan`, generated as the
-`ENABLE_SNYK_SCAN` GitHub variable, and also requires `SNYK_TOKEN`.
-
-## Source SAST And SCA
-
-The optional `examples/text-stats/` Lambda uses only Python's standard library;
-its behavioral tests run in CI. It has no application package dependencies.
-The kit deployment workflow does not add language-specific SAST or package SCA;
-add those checks to the workload build process, including when extending this
-example. Test results alone do not prove an image is vulnerability-free.
-
-Recommended workload gates:
-
-| Workload layer | Recommended gate |
-| --- | --- |
-| Source code | Semgrep, CodeQL, Bandit, or an equivalent scanner for the workload language. |
-| Dependencies | Snyk, Dependabot, pip-audit, npm audit, or ecosystem-specific SCA. |
-| Unit and integration tests | Workload-specific test suite before image publication. |
-| Image build | Reproducible build with pinned base image and no mutable production tags. |
-
-## Trivy vs Checkov
-
-| Criterion | Trivy config | Checkov |
-| --- | --- | --- |
-| Coverage | Terraform, Kubernetes, secrets, and images in one ecosystem. | Deep IaC policy coverage across Terraform, CloudFormation, Kubernetes, and more. |
-| CI ergonomics | Simple GitHub Action, fast config scan, consistent severity filters. | Strong policy framework, but usually more configuration and suppression governance. |
-| Fit for this repo | Good default because the repository currently needs a lightweight Terraform gate. | Good alternative if the project needs policy-as-code libraries and compliance mapping. |
-
-Decision: Trivy remains the IaC gate because the CLI benefits from a compact
-default scanner with simple operator messaging. Checkov is a good addition if
-compliance reporting becomes a product goal.
-
-## OWASP ZAP vs Nuclei
-
-| Criterion | OWASP ZAP baseline | Nuclei |
-| --- | --- | --- |
-| Primary fit | Passive HTTP security baseline and spidering. | Template-driven detection for known exposures and CVEs. |
-| Strength | Mature web app scanner, useful for headers, cookies, and common HTTP issues. | Fast, broad, and easy to extend with community templates. |
-| Risk | Can create noisy warnings if used as a hard gate without tuning. | Template quality and target relevance need governance. |
-
-Decision: OWASP ZAP is optional because this kit does not define the workload
-routes. Enable it through the CLI only when the deployed workload has an
-explicitly public HTTP surface that is safe for a passive baseline scan.
+Snyk requires `enable_snyk_scan=true` and the GitHub secret `SNYK_TOKEN`.
+ZAP requires explicit opt-in and `API_AUTHORIZATION_TYPE=NONE`; keep IAM auth
+for private APIs and verify authenticated routes with workload-specific tests.
+Run source and dependency checks in the workload build process before
+publishing the image.
 
 ## Gate Policy
 

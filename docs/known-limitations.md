@@ -23,23 +23,7 @@ stay explicit in docs and release notes, but they do not block `v1.0.0`.
 
 ## Blockers Before v1.0.0 Stable
 
-Stable scope is local CLI plus the single-operator dev lab in one AWS account.
-Production/OIDC, independent review and a separate sandbox account are outside
-this scope and remain experimental. Do not claim production acceptance from lab proof.
-
-| Blocker | Closure evidence |
-| --- | --- |
-| Candidate lab acceptance | Same commit/wheel: fresh A, update B, failed C with automatic B, manual A, signed HTTP, state/digest/logs. |
-| Platform acceptance | Candidate install/demo/completion/tests and upgrade/failure recovery transcripts for declared platforms. |
-| Cleanup/retention | Verified independent archives/restore, reviewed destroy, exact resource absence, KMS schedule and explicit delayed-billing follow-up. |
-| Package/source identity | Successful candidate CI, wheel SHA-256, checked source fingerprint and checksum manifest; `devsecops criteria --strict`. |
-
-The [release evidence contract](single-operator-release-evidence.md) is normative.
-`criteria --scope production` retains the separate experimental production verifier.
-
-## Review Rule
-
-Every release note from `v0.11.0` onward should state whether these limitations
-changed. A limitation that causes install, upgrade, verification, deployment,
-or rollback failure in a supported environment must move from accepted
-limitation to blocker until fixed or explicitly removed from support.
+See the [release blocker register](v1.0.0-release-candidate-checklist.md#blocker-register-for-v100-stable)
+and [lab evidence requirements](single-operator-release-evidence.md). For
+experimental production acceptance, use `devsecops criteria --scope production`
+and the [production evidence guide](production-deployment-evidence.md).

@@ -1,16 +1,8 @@
 # Generated Artifacts
 
-DevSecOps Pipeline Kit separates source configuration from generated helper
-artifacts. This keeps the CLI product predictable: users edit or create local
-configuration, then the CLI generates deterministic files for Terraform, GitHub,
-and operator checklists.
-
-The generated artifact compatibility contract is also listed in
-[Stability contract](stability-contract.md) and in machine-readable form:
-
-```bash
-devsecops inventory --format json
-```
+Edit local configuration and run `devsecops generate` to update Terraform and
+GitHub helper files. Review changes first with `devsecops generate --dry-run`.
+See the [stability contract](stability-contract.md) for compatibility guarantees.
 
 ## Ownership Rules
 

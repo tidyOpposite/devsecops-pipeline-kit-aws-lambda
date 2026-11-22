@@ -1,26 +1,14 @@
 # Stability Contract
 
-Stable 1.0 acceptance targets the local CLI and **single-operator dev lab in one
-AWS account**. GitHub/OIDC production deployment, independent reviewers and
-separate-account sandbox acceptance are **experimental integrations**, outside
-this stable scope. Their runtime security guards remain unchanged. See
-[Single-operator release evidence](single-operator-release-evidence.md).
+Stable `v1.0.0` covers the local CLI and a dev lab operated in one AWS account.
+GitHub/OIDC production workflows have a separate experimental acceptance process.
+See the [lab release evidence contract](single-operator-release-evidence.md).
 
-Current release: `1.0.0` (`v1.0.0`).
-
-`lab` is a separate dev-only single-operator path. Its JSON kind is
-`single-operator-lab`, with `production_acceptance=false`. Saved plans expire
-after one hour and require an exact review hash and explicit `--yes` for apply.
-Private state/evidence are documented in [the lab guide](single-operator-lab.md).
-`lab concurrency` changes only local dev policy and invalidates saved reviews.
-Shared-pool `-1` is accepted only in the lab; primary Terraform and the protected
-workflow continue to require a positive integer reservation (CLI default 10).
-Previous published baseline: `v0.15.0`. Release acceptance is tied to the exact
-candidate commit and wheel; see the release evidence contract.
-
-This contract explains which `devsecops` surfaces are stable enough to script
-against before `v1.0.0`, which surfaces are compatibility aliases or
-experimental, and what migration behavior users can expect.
+`lab` returns JSON with kind `single-operator-lab` and `production_acceptance=false`.
+Saved plans expire after one hour. Apply requires the plan ID, review SHA-256 and
+explicit `--yes`. Local changes to concurrency invalidate saved plans. The lab
+supports shared-pool mode (`-1`); the protected workflow requires a positive
+reservation. See the [lab guide](single-operator-lab.md).
 
 ## Stability Levels
 
@@ -40,22 +28,9 @@ devsecops inventory --status stable --format markdown
 
 ## Stable Command Groups
 
-| Workflow | Stable commands and flags |
-| --- | --- |
-| First success | `devsecops`, `devsecops setup --mode --preset --apply-mode-preset --image-uri --backend-bucket --backend-region --backend-lock-table --apply-github --deploy-role-arn --plan-role-arn --snyk-token --generate --yes --strict`, `devsecops status --deep --pre-deploy --strict --format --watch --interval`, `devsecops dry-run --preset --image-uri --environment`, `devsecops image validate --image-uri --environment --format` |
-| Deployment | `devsecops deploy prod --dry-run --yes --watch --interval`, `devsecops deploy status --run-id --watch --interval --format`, `devsecops deploy logs --run-id --failed`, `devsecops deploy rollback --run-id --image-uri --dry-run --yes --watch --interval` |
-| Troubleshooting | `devsecops doctor local --deep --strict --format`, `devsecops doctor github --strict --format`, `devsecops doctor aws --environment --strict --format`, `devsecops doctor branch --branch --strict --format`, `devsecops doctor actions --limit --strict --format`, `devsecops doctor all --deep --branch --environment --strict --format` |
-| Configuration and generation | `devsecops config validate --strict --format`, `devsecops config diff --preset --exit-code`, `devsecops generate --dry-run`, `devsecops report --deep --format --output --print` |
-| Advanced release maintenance | `devsecops inventory --format --status`, `devsecops evidence collect --rc --output`, `devsecops criteria --format --evidence-dir --strict` |
-| GitHub setup | `devsecops github setup --write --apply --repo --deploy-role-arn --plan-role-arn --snyk-token`, `devsecops github status --limit --strict --format`, `devsecops github branch --branch --strict --format`, `devsecops github doctor --repo --strict --format` |
-| Experimental Terraform helpers | `devsecops terraform plan <environment> --no-init --create-workspace`, `devsecops terraform bootstrap --apply` |
-| Decommission | `devsecops terraform teardown --format`, `devsecops terraform teardown bucket-plan --bucket --expected-account-id --region --purpose --output --format`, `devsecops terraform teardown bucket-purge --bucket --expected-account-id --region --manifest --sha256 --acknowledge-backup --allow-backend-cleanup --format` |
-| Snapshots | `devsecops snapshot list --format`, `devsecops snapshot show <selection> --format`, `devsecops snapshot restore --to --last --dry-run --yes` |
-| Completion and inventory | `devsecops completion <shell> --program`, `devsecops inventory --format --status` |
-
-The documented first-success workflow does not depend on experimental
-commands. `devsecops compose` and `devsecops tui` are intentionally outside the
-first-success scripting path.
+See [Command inventory](command-inventory.md) and run
+`devsecops inventory --status stable --format markdown` for the stable command
+groups and flags for your installed version.
 
 `devsecops setup` stores resumable workflow state in
 `.devsecops/setup-state.json`. This local schema is fail-closed: unreadable,
@@ -221,19 +196,6 @@ images.
 
 ## Generated Artifact Compatibility
 
-Generated artifacts are deterministic outputs of local source config and CLI
-generator code. Re-render after a config migration, a config value change, or a
-release note that explicitly changes the artifact contract.
-
-| File | Compatibility | Re-render required when | Expected diffs |
-| --- | --- | --- | --- |
-| `.devsecops/deployments.json` | Schema-versioned local runtime state | A protected deploy or rollback dispatch succeeds | One non-secret run/image record is prepended; bounded history only |
-| `terraform/generated.auto.tfvars` | Stable Terraform variables | Config values, schema migration output, or Terraform variable contract changes | HCL assignment values and `environment_config` values |
-| `dist/devsecops/backend.tf` | Stable review template | `backend.*` values or backend template policy changes | S3 backend attribute values |
-| `dist/devsecops/backend.hcl` | Stable backend inputs | `backend.*` values change | Partial backend assignments for `terraform init -backend-config` |
-| `dist/devsecops/github-variables.env` | Stable helper | Repository variable source config changes | `PROJECT_NAME`, `LAMBDA_IMAGE_URI`, `ENABLE_*`, or `PROD_APPROVAL_ENVIRONMENT` values |
-| `dist/devsecops/github-setup.sh` | Stable helper script | GitHub setup contract changes | Validated CLI invocation, explicit destination, setup options, header changes |
-| `dist/devsecops/setup-checklist.md` | Stable checklist | GitHub, backend, or branch-protection checklist contract changes | Checklist item values or required item additions |
-| `dist/devsecops/readiness-report.md` | Stable report | Readiness checks, config values, or environment state changes | Generated timestamp, score/check/action rows |
-| `dist/devsecops/audit-report.json` | Stable JSON evidence | Audit evidence, readiness, config, or control state changes | `generated_at` timestamp and changed readiness/config/control payloads |
-| `dist/devsecops/evidence/rc/manifest.json` | Stable JSON evidence manifest | Release-candidate evidence is collected | `generated_at`, evidence file list, and Terraform validation status |
+Regenerate after a config change, schema migration or documented change to the
+generator contract. The [generated artifacts reference](generated-artifacts.md)
+lists file ownership, compatibility and expected diffs.

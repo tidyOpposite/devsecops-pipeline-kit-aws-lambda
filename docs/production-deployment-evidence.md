@@ -1,29 +1,13 @@
 # Production Deployment Evidence
 
-Use this guide when proving a production deployment against a real AWS account
-and GitHub repository. The goal is to produce a reviewable evidence bundle that
-can be attached to a release record without requiring reviewers to inspect the
-source tree.
+Use this guide to verify the experimental production path against its AWS
+account, GitHub repository, protected `main` branch and immutable Lambda image.
+Collect evidence from one reviewed commit and CI wheel. The stable dev lab
+uses the [single-operator release evidence contract](single-operator-release-evidence.md).
 
-**Experimental integration.** This production contract is outside stable 1.0
-CLI/lab acceptance. See [the stable lab contract](single-operator-release-evidence.md).
-Use `devsecops criteria --scope production --strict` to verify this separate path.
-
-Current release is `1.0.0` (`v1.0.0`). The single-operator `lab`
-records separate dev evidence and does not satisfy this production contract.
-The previous non-prerelease baseline is `v0.15.0`. Production acceptance
-requires its own bundle from the reviewed commit and CI wheel; lab proof and
-older published assets do not establish it.
-
-Complete the [finish-demo/decommission acceptance](runbooks/finish-demo.md#final-acceptance-record)
-after deployment/recovery proof. Preserve its retention decisions, restore test,
-per-workspace destroy results, retained/retired backend inventory and later
-KMS/billing checks outside retiring resources. These are pending final AWS
-acceptance; local mocked teardown is preparation, not live-service proof.
-
-Do not mark a release or roadmap item as production-proven until this workflow
-has been run against the intended AWS account, GitHub repository, immutable
-Lambda image, and protected `main` branch.
+After verifying deployment and recovery, follow the
+[decommission acceptance record](runbooks/finish-demo.md#final-acceptance-record)
+to document retention, restore, per-workspace cleanup, KMS and billing.
 
 ## Evidence Bundle
 
@@ -376,7 +360,7 @@ jq -n --arg tag "${RELEASE_TAG}" --arg commit "${RELEASE_SHA}" --arg repo "${REL
 
 ## 8. Prove Supported Platform Compatibility
 
-On a clean supported macOS or Ubuntu host at the same commit, download and verify the
+On a clean supported macOS or Debian host at the same commit, download and verify the
 CI candidate as in step 1. Activate a fresh virtual environment and capture
 the install and the rest of the walkthrough:
 
@@ -397,28 +381,6 @@ the install and the rest of the walkthrough:
 Copy `platform-transcript.txt` into the evidence directory. Windows/WSL2 are
 unverified and outside this release target. This transcript proves the recorded
 host; attach the exact CI run for the rest of the supported matrix.
-
-## Post-Deploy Checklist
-
-Before accepting the production proof, confirm:
-
-* Release artifact checksum verification passed.
-* `devsecops config validate --strict` passed.
-* `devsecops status --deep --strict` passed after the successful deployment.
-* `doctor github` and `doctor branch` showed no blocking GitHub setup gaps.
-* Production workflow ran from `main` with `mode=deploy` and
-  `environment=prod`.
-* Workflow conclusion was `success`.
-* Terraform output includes API Gateway URLs, Lambda function name, ECR
-  repository, and workload data bucket.
-* `devsecops aws outputs` shows Lambda state `Active` and update status
-  `Successful`.
-* `devsecops doctor aws --strict` passed.
-* `devsecops health` and `curl` returned success for `/health`.
-* CloudWatch log group evidence is present.
-* Active Lambda image matches the immutable image used for dispatch.
-* Rollback readiness is documented with the workflow capture step and active
-  image evidence.
 
 ## Lessons To Record
 
@@ -441,35 +403,15 @@ release is considered production-proven.
 
 ## Final Verification Gate
 
-After all files are present, run the machine-checkable Version 1.0 gate against
-the evidence directory:
+Run the production verifier against the candidate package and the evidence
+collected above:
 
 ```bash
-devsecops criteria --strict --format json --evidence-dir "${EVIDENCE_DIR}" \
-  --verify-github "${RELEASE_REPOSITORY}" --artifacts-dir "${CANDIDATE_DIR}" > "${EVIDENCE_DIR}/criteria.json"
+devsecops criteria --scope production --strict --format json \
+  --evidence-dir "${EVIDENCE_DIR}" --verify-github "${RELEASE_REPOSITORY}" \
+  --artifacts-dir "${CANDIDATE_DIR}" > "${EVIDENCE_DIR}/criteria.json"
 ```
 
-The strict command must exit `0` before a stable tag is cut. If it fails, the
-output names the missing file or criterion and the next action to take.
-
-For a stable tag at `v1.0.0` or later, stage the evidence as a separate draft
-release named `evidence-${RELEASE_TAG}` before pushing the stable tag. The
-publisher verifies the draft target, live GitHub runs and logs, and the exact
-candidate wheel. The evidence archive stays on the draft.
-
-```bash
-export EVIDENCE_ARCHIVE="${CANDIDATE_DIR}/release-evidence.zip"
-PYTHONPATH=cli python3 - <<'PY'
-import os
-from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZipFile
-from devsecops_cli.release_evidence import PRODUCTION_EVIDENCE_REQUIRED_FILES, PLATFORM_EVIDENCE_REQUIRED_FILES
-
-source = Path(os.environ["EVIDENCE_DIR"])
-with ZipFile(os.environ["EVIDENCE_ARCHIVE"], "w", ZIP_DEFLATED) as archive:
-    for name in PRODUCTION_EVIDENCE_REQUIRED_FILES + PLATFORM_EVIDENCE_REQUIRED_FILES:
-        archive.write(source / name, name)
-PY
-gh release create "evidence-${RELEASE_TAG}" "${EVIDENCE_ARCHIVE}" --repo "${RELEASE_REPOSITORY}" \
-  --draft --target "${RELEASE_SHA}" --title "Evidence for ${RELEASE_TAG}" --notes "Private release evidence staging"
-```
+Keep the verified production record with the private acceptance materials.
+Use the [release checklist](release-checklist.md) to stage the separate lab
+bundle for stable publication.

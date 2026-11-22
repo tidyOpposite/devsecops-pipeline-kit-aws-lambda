@@ -9,152 +9,40 @@ apply. Consult the command contract in [Stability contract](stability-contract.m
 
 ## 1. Install And Run The No-Credentials Guided Demo
 
-Start with the [copyable Quick Start](../README.md#quick-start), which clones
-the repository, enters it, and installs the CLI. Installing a wheel alone does
-not provide Terraform modules or workflows. From that checkout, run demo setup. Demo
-mode creates local config and runs a no-write dry-run with a clearly marked
-sample image URI. It neither queries nor changes AWS or GitHub.
+Use [Quick Start](../README.md#quick-start) with the matching CLI and checkout.
+After `Demo complete`, open the menu or run `devsecops status` to review local
+progress. Use `devsecops dry-run --preset student-demo` to preview without a
+saved setup.
 
-This walkthrough describes `1.0.0` (`v1.0.0` release).
-Use the Quick Start's local source install for these fixes. The separately
-documented pinned `v0.15.0` baseline reproduces the older published behavior.
-
-```bash
-devsecops --version
-devsecops setup --mode demo --yes --strict
-```
-
-Expected output includes:
-
-```text
-First Successful Pipeline Dry Run
-No files changed.
-AWS credentials are not required for this dry run.
-Files that would be generated
-Lambda image shape          OK
-Lambda image immutability   OK
-Guided Setup Summary
-Demo complete. Local config and preview are verified.
-```
-
-The equivalent standalone preview remains available when you do not want to
-create setup progress:
-
-```bash
-devsecops dry-run --preset student-demo
-```
-
-If you only want to preview generated files from an existing config:
-
-```bash
-devsecops generate --dry-run
-```
-
-Commands also work from subdirectories of the checkout, with config and
-generated artifacts kept at its root. A nested Git repository or closer
-configuration defines an independent boundary.
-
-For a new setup, `devsecops setup --yes --strict` selects demo automatically;
-interactive setup selects demo when you press Enter at the mode prompt.
-Saved standard/production modes resume unchanged. `devsecops status`, the
-default screen, and the menu report local demo progress after a demo. A stale
-preview prompts you to resume demo setup; it does not require AWS credentials.
-
-Configure production as a separate action when ready:
-
-```bash
-devsecops setup --mode production
-```
-
-The completed-demo menu offers the same interactive action as option `7`.
-Setup shows a diff before a mode preset replaces existing settings. Enter keeps
-the current config with unmet production requirements still pending; accept
-explicitly to apply the displayed changes with a recovery snapshot. Canceling
-at this review preserves both config and progress. For scripts, first run
-`setup --mode production --yes` to review; it stops without writes if a
-replacement is needed. Rerun with `--apply-mode-preset` only after accepting
-that replacement. `--yes` alone does not authorize it.
-`status --strict`, `--pre-deploy` and `--deep` retain production verification
-semantics; a completed local demo cannot satisfy those requirements.
-
-Expected output includes:
-
-```text
-Dry run only. No files changed.
-Deployment File Plan
-terraform/generated.auto.tfvars
-dist/devsecops/github-setup.sh
-```
+For a separate production setup, run `devsecops setup --mode production` or
+select option `7` in the completed-demo menu. Review any preset replacement
+diff. Enter keeps the current config and cancel exits the review. For scripts,
+`setup --mode production --yes` stops for review when replacement is needed;
+use `--apply-mode-preset` only after reviewing the diff. Production checks
+require an explicit `status --pre-deploy --strict` or `status --deep --strict`.
 
 ## 2. Start Or Resume Standard Setup
 
-Switch the saved workflow to standard mode when you have an AWS account,
-GitHub repository, and an existing immutable Lambda image. The interactive
-flow walks through dependency checks, local config, image, backend, AWS
-identity, GitHub/OIDC, dry-run, and summary:
-
-```bash
-devsecops setup --mode standard
-```
-
-The selected mode and current step are saved in
-`.devsecops/setup-state.json`. Press `Ctrl-C`, `b`, `back`, or `0` at a prompt;
-the next `devsecops setup` run rechecks observable state and resumes. The state
-file is ignored by Git and never stores credentials or token/secret values.
-
-For a non-interactive local-input path:
-
-```bash
-devsecops setup --mode standard --yes \
-  --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123 \
-  --backend-bucket my-devsecops-pipeline-tfstate
-devsecops config validate
-devsecops config diff
-devsecops status
-```
-
-Expected output:
-
-```text
-Created clean config .devsecops-pipeline.toml
-Guided Setup Summary
-Next command: devsecops setup
-```
-
-`--yes` uses safe local defaults and never authorizes GitHub changes. Add
-`--strict` when a partial setup should return a non-zero exit code. A configured
-backend name is not treated as ready by itself: setup verifies that the S3
-bucket and DynamoDB lock table exist in the active AWS account.
+For a guided preflight with an AWS account, GitHub repo and an immutable image,
+run `devsecops setup --mode standard`. If interrupted, rerun `devsecops setup`
+to resume. For noninteractive input, use `--yes --image-uri URI --backend-bucket BUCKET`.
+Repository writes require `--apply-github` or interactive authorization. Setup
+checks the actual backend bucket and lock table in the active account.
 
 ## 3. Bring Your Own Lambda Image
 
-Build a single-platform Linux `amd64` Lambda image, using the optional
-[Text Stats example](../examples/text-stats/README.md) or your own workload.
-Publish it with an immutable tag or digest to an existing ECR repository,
-or publish it after provisioning the built-in repository in step 4.
+Read the [image contract and publishing procedure](bring-your-own-image.md).
+Use the optional [Text Stats example](../examples/text-stats/README.md) or your
+own single-platform Linux `amd64` image. If using the built-in ECR repository,
+provision it through the separate registry step in the image guide.
 
 ```bash
-devsecops image validate \
-  --image-uri 123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
-```
-
-Expected output:
-
-```text
-Validate Image
-Lambda image URI            OK
-Lambda image shape          OK
-Lambda image immutability   OK
-Lambda image region         OK
-```
-
-Then write the image URI into local config and generate the deployment files:
-
-```bash
-devsecops config set lambda_image_uri \
-  123456789012.dkr.ecr.us-east-1.amazonaws.com/devsecops-pipeline-prod-lambda-repo:sha-abc123
+devsecops image validate --image-uri IMAGE_URI
+devsecops config set lambda_image_uri IMAGE_URI
 devsecops generate
 ```
+
+Replace `IMAGE_URI` with your published immutable ECR URI.
 
 ## 4. Configure Terraform Backend
 

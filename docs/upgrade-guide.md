@@ -6,7 +6,7 @@ snapshot restore and AWS image rollback are separate operations.
 
 ## Current Schema
 
-Current source and the published `v0.15.0` baseline use config schema `1`.
+Version `1.0.0` uses config schema `1`.
 Legacy configs without `schema_version` normalize to `1`; missing
 `api_authorization_type` defaults to `AWS_IAM`. A future `schema_version`
 greater than this CLI supports is rejected before rendering or writing files.
@@ -28,9 +28,12 @@ Local configuration, Terraform state and credentials must stay outside Git.
 ## Install And Verify
 
 Use the reviewed installer or source procedure in
-[Distribution and compatibility](distribution.md#upgrade). The current installer
-verifies a candidate before replacing the launcher; a failed upgrade preserves
-the previous working CLI. Older published installers retain their old behavior.
+[Distribution and compatibility](distribution.md#install-a-release). The
+installer bundled with `v1.0.0` verifies the candidate before replacing the
+launcher and preserves the previous CLI on failure. It rejects concurrent
+installs and avoids overwriting unrelated launchers or unmanaged environments.
+Before removing a previous environment, check which one the launcher uses
+and close any processes using that environment.
 
 ```bash
 devsecops --version

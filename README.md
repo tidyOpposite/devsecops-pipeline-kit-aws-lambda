@@ -7,8 +7,7 @@ validation.
 
 Current release: **`v1.0.0`** (Python package **`1.0.0`**).
 Stable scope is the local CLI and single-operator AWS dev lab in one account.
-GitHub/OIDC production integrations remain experimental. The previous
-prerelease is `v0.16.0-beta.1`; the previous non-prerelease baseline is `v0.15.0`.
+GitHub/OIDC production integrations remain experimental.
 See the [1.0 release notes](docs/release-v1.0.0.md),
 [installation guide](docs/distribution.md) and [changelog](CHANGELOG.md).
 
@@ -25,10 +24,10 @@ Production integration retains its separate safeguards and acceptance process.
 
 ## Quick Start
 
-Install the current checkout and run its local demo:
+Install `v1.0.0` from source and run the local demo:
 
 ```bash
-git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
+git clone --branch v1.0.0 --depth 1 https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
 cd devsecops-pipeline-kit &&
 python3 -m venv .venv &&
 .venv/bin/python -m pip install --no-deps . &&
@@ -36,12 +35,12 @@ export PATH="$PWD/.venv/bin:$PATH" &&
 devsecops --version &&
 devsecops setup --yes --strict &&
 devsecops status &&
-devsecops dry-run
+devsecops menu
 ```
 
 Expected result: `Demo complete`, a local `.devsecops-pipeline.toml`, and a
-sample-image preview. A new setup defaults to demo; an existing setup resumes
-its saved mode. No AWS or GitHub credentials are needed for this path.
+sample-image preview. Press `i` in the menu for readiness details. The demo
+runs without AWS or GitHub credentials.
 
 Keep the checkout: the wheel contains the CLI, while Terraform and workflow
 sources live in the repository. Record `git rev-parse HEAD` and
@@ -113,11 +112,6 @@ requirements tied to a specific commit and wheel.
 
 ## Documentation
 
-Use the [documentation index](docs/README.md) to find installation, upgrades,
-troubleshooting, security, command contracts and maintainer guides.
-
-- [First successful pipeline](docs/first-successful-pipeline.md)
-- [Experimental production walkthrough](docs/experimental-production-walkthrough.md)
-- [Stability contract](docs/stability-contract.md) and [generated artifacts](docs/generated-artifacts.md)
+- [Guides and reference](docs/README.md)
 - [Contributing and tests](CONTRIBUTING.md)
-- [Release checklist](docs/release-checklist.md) and [roadmap](ROADMAP.md)
+- [Changelog](CHANGELOG.md)

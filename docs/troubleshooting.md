@@ -31,29 +31,12 @@ The optional TUI falls back to compact status if Rich/Textual are unavailable.
 
 ### `devsecops` command is not found
 
-Install the latest published CLI release with the commands in
-[Distribution and compatibility](distribution.md), then confirm the console
-command is available:
+Install the matching CLI and checkout using [Distribution](distribution.md).
+Activate the venv or add the installer's bin directory to your PATH, then run
+`devsecops --version` and `devsecops menu`.
 
-```bash
-devsecops --version
-devsecops menu
-```
-
-For development from a local checkout, install it in editable mode:
-
-```bash
-PYTHON="${PYTHON:-python3.11}"
-"${PYTHON}" -m pip install -e .
-devsecops menu
-```
-
-Without installing, run the package module from the repository:
-
-```bash
-PYTHON="${PYTHON:-python3.11}"
-PYTHONPATH=cli "${PYTHON}" -m devsecops_cli menu
-```
+From an existing checkout with a supported Python, you can also run
+`PYTHONPATH=cli python3 -m devsecops_cli menu`.
 
 ### I entered a menu section by mistake
 
@@ -88,25 +71,12 @@ config, generated files, GitHub settings, Terraform state, or AWS resources.
 
 ### I changed local config and want to undo it
 
-Inspect snapshots:
+Use `devsecops snapshot list`, then inspect a saved version with
+`devsecops snapshot show 1`. Run `devsecops snapshot restore --last --dry-run`
+to review changes before applying `devsecops snapshot restore --last`.
 
-```bash
-devsecops snapshots
-devsecops snapshots --show 1
-```
-
-Preview and apply rollback:
-
-```bash
-devsecops rollback --last --dry-run
-devsecops rollback --to <number-or-id>
-```
-
-Rollback restores only CLI-owned local files such as `.devsecops-pipeline.toml`,
-`terraform/generated.auto.tfvars`, and generated files under `dist/devsecops/`.
-It does not change AWS Lambda, Terraform state, GitHub Actions, or deployed
-traffic. For cloud rollback diagnostics, use
-[`failed-rollback`](runbooks/failed-rollback.md).
+Use the [rollback runbook](runbooks/failed-rollback.md) for a failed cloud
+rollback. Local snapshots cover CLI-owned files such as config and generated inputs.
 
 ## CLI Configuration
 
@@ -127,32 +97,14 @@ devsecops dry-run --preset balanced
 
 ### Project files are missing
 
-Readiness expects the tracked Terraform module and GitHub workflow files to be
-present:
+Use the matching checkout from [Quick Start](../README.md#quick-start). Check
+for `terraform/main.tf`, `terraform/modules/lambda/main.tf` and
+`.github/workflows/deploy.yml`. Restore missing source files before generating
+inputs or planning.
 
-```text
-terraform/main.tf
-terraform/modules/lambda/main.tf
-.github/workflows/deploy.yml
-```
-
-Restore those files from the repository before running `devsecops generate`,
-Terraform plans, or production workflow dispatch.
-
-The installed wheel provides the executable, not a checkout. From a directory
-where you want to keep a new project:
-
-```bash
-git clone https://github.com/tidyOpposite/devsecops-pipeline-kit-aws-lambda.git devsecops-pipeline-kit &&
-cd devsecops-pipeline-kit &&
-devsecops setup --mode demo --yes --strict
-```
-
-For an existing checkout, enter its directory instead of cloning a second copy.
-The CLI finds the project from `terraform/`, `docs/`, and other subdirectories.
-It stops at a closer config or nested Git repository, so it will not silently
-write into an outer project. If a nested project is incomplete, restore its
-files or leave that nested repository and enter the intended checkout.
+The CLI finds the checkout from its subdirectories. A nearer config or a
+nested Git repository defines its own project boundary. Enter the intended
+checkout if you are in an incomplete nested project.
 
 ### Config validation fails
 
@@ -173,23 +125,9 @@ devsecops generate --dry-run
 
 ### Status says backend bucket is missing
 
-Set a real backend bucket through the CLI and generate deployment files:
-
-```bash
-devsecops config set backend.bucket my-state-bucket --generate
-devsecops status
-```
-
-Then plan or apply the bootstrap stack:
-
-```bash
-devsecops bootstrap
-devsecops bootstrap --apply
-```
-
-`devsecops bootstrap` runs a Terraform plan by default. Use
-`devsecops bootstrap --apply` only when the target AWS account and backend
-names are correct.
+For experimental production, follow the [backend procedure](experimental-production-walkthrough.md#4-configure-terraform-backend).
+Confirm the AWS account, region and names before planning or applying the
+bootstrap stack. The [dev lab](single-operator-lab.md) uses local state.
 
 ### Lambda image URI is missing or invalid
 
@@ -253,14 +191,9 @@ between the CLI and Terraform/GitHub setup.
 
 ### Generate GitHub setup commands
 
-Run:
-
-```bash
-devsecops github-setup --write
-```
-
-Review `dist/devsecops/github-setup.sh` before running it. It contains
-placeholder values for role ARNs and optional secrets.
+Run `devsecops github setup --write` and review `dist/devsecops/github-setup.sh`.
+See [repository settings](experimental-production-walkthrough.md#5-configure-github-repository-settings)
+for role inputs, explicit apply and post-apply checks.
 
 ### GitHub doctor cannot inspect the repository
 
@@ -268,40 +201,24 @@ Install [GitHub CLI](https://cli.github.com/), then authenticate it:
 
 ```bash
 gh auth login
-devsecops gh-doctor
+devsecops doctor github
 ```
 
-`devsecops gh-doctor` checks repository variables and secret names, but it
+`devsecops doctor github` checks repository variables and secret names, but it
 never prints secret values.
 
 ### GitHub repository variables or secrets are missing
 
-Generate and review setup commands:
-
-```bash
-devsecops github setup --write
-```
-
-Apply repository variables and provided secrets:
-
-```bash
-devsecops github setup --apply \
-  --deploy-role-arn arn:aws:iam::<account-id>:role/<deploy-role> \
-  --plan-role-arn arn:aws:iam::<account-id>:role/<plan-role>
-```
-
-Then verify:
-
-```bash
-devsecops doctor github --strict
-```
+Run `devsecops doctor github --strict` to identify missing settings. Follow
+the [repository setup procedure](experimental-production-walkthrough.md#5-configure-github-repository-settings)
+to review and apply the required inputs.
 
 ### Branch protection doctor reports missing checks
 
 Run:
 
 ```bash
-devsecops branch-doctor
+devsecops doctor branch
 ```
 
 The expected required checks are:
@@ -321,10 +238,10 @@ Run:
 ```bash
 gh auth login
 gh run list
-devsecops actions-status
+devsecops doctor actions
 ```
 
-`actions-status` uses `gh run list` and, for failed runs, `gh run view` to show
+`doctor actions` uses `gh run list` and, for failed runs, `gh run view` to show
 failed job names, failed step names, next actions, and runbook links. For a
 failed deployment, start with:
 
@@ -383,7 +300,7 @@ not automatically cancel or replace protected production runs.
 Run:
 
 ```bash
-devsecops aws-doctor --environment prod
+devsecops doctor aws --environment prod
 devsecops aws outputs --environment prod
 ```
 
@@ -407,7 +324,7 @@ Use `--strict` when AWS Doctor runs in automation and any scored warning should
 fail the command:
 
 ```bash
-devsecops aws-doctor --environment prod --strict
+devsecops doctor aws --environment prod --strict
 ```
 
 ### AWS Doctor cannot inspect resources
@@ -416,7 +333,7 @@ Install and configure AWS CLI:
 
 ```bash
 aws sts get-caller-identity
-devsecops aws-doctor --environment prod
+devsecops doctor aws --environment prod
 ```
 
 If identity works but resource checks fail, confirm `aws_region`,
@@ -517,8 +434,8 @@ Check the IAM role trust policy:
 Then re-run:
 
 ```bash
-devsecops gh-doctor
-devsecops branch-doctor
+devsecops doctor github
+devsecops doctor branch
 ```
 
 ### Manual sandbox plan cannot access Terraform backend
@@ -534,29 +451,17 @@ PRs require neither AWS secrets nor a configured backend.
 
 ### `S3 bucket does not exist`
 
-Prefer the CLI bootstrap flow:
-
-```bash
-devsecops config set backend.bucket <globally-unique-state-bucket> --generate
-devsecops bootstrap --apply
-```
-
-Manual fallback:
-
-```bash
-cd terraform/bootstrap
-terraform init
-terraform apply -var="state_bucket_name=<globally-unique-state-bucket>"
-```
-
-Then copy or adapt `dist/devsecops/backend.tf` into `terraform/backend.tf`.
+Confirm the account, backend region and bucket name. Use the
+[backend setup procedure](experimental-production-walkthrough.md#4-configure-terraform-backend)
+to review the bootstrap plan before creating backend resources. Use the
+generated `dist/devsecops/backend.hcl` through the CLI's Terraform wrapper.
 
 ### `Error acquiring the state lock`
 
 Another Terraform run may be active. Check:
 
 ```bash
-devsecops actions-status
+devsecops doctor actions
 ```
 
 Then inspect GitHub Actions concurrency and the DynamoDB item in the lock table.
@@ -591,7 +496,7 @@ devsecops config set lambda_image_uri <immutable-image-uri> --generate
 devsecops gh-setup --apply \
   --deploy-role-arn <deploy-role-arn> \
   --plan-role-arn <plan-role-arn>
-devsecops gh-doctor
+devsecops doctor github
 ```
 
 ### Lambda image does not exist
@@ -628,24 +533,12 @@ attempted rollback but the deployed Lambda image still looks wrong.
 
 ### Health check returns 500
 
-Health validation is optional and runs only when
-`ENABLE_HTTP_VALIDATION=true`. If enabled, verify:
-
-* The workload image handles API Gateway HTTP API events.
-* `GET /health` returns a successful HTTP response.
-* CloudWatch Logs for the Lambda function do not show handler, permission, or
-  environment errors.
-* The Lambda execution role has the AWS permissions required by the workload.
-
-Run the same check outside GitHub Actions:
-
-```bash
-devsecops health --url <health-url> --aws-sigv4
-devsecops health --aws-sigv4
-```
-
-Then follow [failed validation](runbooks/failed-validation.md) if the endpoint
-still returns a non-success response.
+The production deployment workflow requires a successful `GET /health`.
+Check that the Lambda handles API Gateway HTTP API events and inspect
+CloudWatch for handler, permission or configuration errors. Verify the same
+endpoint with `devsecops health --url HEALTH_URL --aws-sigv4` for an IAM API.
+Follow the [failed-validation runbook](runbooks/failed-validation.md) if the
+endpoint still fails.
 
 ## Scanners
 
