@@ -29,7 +29,7 @@ jobs:
       - name: Validate plan role settings
         run: PYTHONPATH=cli python3 -m devsecops_cli.oidc prepare plan
       - name: Assume plan role using OIDC
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -59,7 +59,7 @@ jobs:
       - name: Validate deploy role settings
         run: PYTHONPATH=cli python3 -m devsecops_cli.oidc prepare deploy
       - name: Assume deploy role using OIDC
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME_ARN }}
           aws-region: ${{ env.AWS_REGION }}
