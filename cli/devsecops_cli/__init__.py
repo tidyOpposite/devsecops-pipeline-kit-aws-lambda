@@ -7,7 +7,7 @@ initializing the comparatively large CLI orchestration layer.
 
 from importlib import import_module
 
-VERSION = "1.0.0"
+VERSION = "1.0.2rc1"
 __version__ = VERSION
 
 __all__ = ["VERSION", "__version__", "main"]

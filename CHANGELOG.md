@@ -5,6 +5,14 @@ semantic versioning.
 
 ## Unreleased
 
+## v1.0.2-rc.1 - 2026-11-22
+
+- Base the candidate on `v1.0.0` and its interactive CLI, including the original
+  `devsecops menu` and readiness view.
+- Consolidate duplicated guidance, replace the static command catalog with the
+  CLI inventory and point production evidence to its separate verifier.
+- Pin Quick Start to the stable tag and add the menu to the demo walkthrough.
+
 ## v1.0.0 - 2026-11-12
 
 First stable release for the local CLI and single-operator AWS dev lab in one

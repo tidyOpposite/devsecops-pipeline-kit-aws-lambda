@@ -5,11 +5,12 @@ an explicitly selected AWS account. Review saved Terraform plans before apply,
 check signed HTTP responses, and recover a previous image after failed health
 validation.
 
-Current release: **`v1.0.0`** (Python package **`1.0.0`**).
+Stable release: **`v1.0.0`** (Python package **`1.0.0`**).
 Stable scope is the local CLI and single-operator AWS dev lab in one account.
 GitHub/OIDC production integrations remain experimental.
 See the [1.0 release notes](docs/release-v1.0.0.md),
 [installation guide](docs/distribution.md) and [changelog](CHANGELOG.md).
+See the [documentation update candidate](docs/release-v1.0.2rc1.md) for this checkout.
 
 ## Choose Your Workflow
 
